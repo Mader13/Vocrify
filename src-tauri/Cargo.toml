@@ -1,0 +1,59 @@
+[package]
+name = "transcribe-video"
+version = "0.1.0"
+description = "A cross-platform video transcription app with speaker diarization"
+authors = ["Transcribe Video Team"]
+edition = "2021"
+
+[lib]
+name = "transcribe_video_lib"
+crate-type = ["cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-store = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full", "process"] }
+thiserror = "1"
+uuid = { version = "1", features = ["v4"] }
+dunce = "1"
+scopeguard = "1.2"
+tempfile = "3"
+reqwest = { version = "0.12", features = ["stream"] }
+which = "6"
+zip = "2"
+flate2 = "1"
+tar = "0.4"
+base64 = "0.22"
+chrono = "0.4"
+
+# ============================================================================
+# Phase 2: Rust-based AI Engine
+# ============================================================================
+#
+# whisper-rs builds whisper.cpp from source with GPU support.
+# Build requirements:
+# - CMake (for building whisper.cpp)
+# - Vulkan SDK (for AMD/Intel GPU) OR CUDA Toolkit (for NVIDIA GPU)
+#
+# GPU acceleration at runtime:
+# - macOS: Metal (automatic, no SDK needed)
+# - Windows/Linux: Vulkan (AMD/Intel) or CUDA (NVIDIA) - detected at runtime
+
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.14", features = ["metal", "tracing_backend"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+whisper-rs = { version = "0.14", features = ["vulkan", "tracing_backend"] }
+
+# Sherpa-ONNX for speaker diarization (future)
+# sherpa-rs = { version = "0.1", features = ["download-binaries"] }
+
+[features]
+default = []

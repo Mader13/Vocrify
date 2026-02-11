@@ -1,0 +1,611 @@
+"""
+ModelRegistry - Central cache manager for all models.
+
+Uses huggingface_hub.snapshot_download() for offline detection.
+Manages separate cache directories for HF models, NeMo, and diarization.
+"""
+
+import os
+from pathlib import Path
+from typing import Optional, Dict, List, Tuple, Any
+from dataclasses import dataclass
+
+
+@dataclass
+class ModelInfo:
+    """Information about a cached model."""
+
+    name: str
+    provider: str
+    available: bool
+    path: Optional[Path] = None
+    repo_id: Optional[str] = None
+    size_mb: Optional[float] = None
+
+
+class ModelRegistry:
+    """
+    Central registry for model cache management.
+
+    Cache structure:
+    {cache_dir}/
+      ├── hf_cache/              # HuggingFace snapshots
+      ├── nemo/                  # NeMo .nemo files
+      └── diarization/           # Diarization models
+          ├── sherpa-onnx/
+          └── pyannote/
+    """
+
+    # Model repository IDs
+    WHISPER_REPOS = {
+        "tiny": "Systran/faster-whisper-tiny",
+        "base": "Systran/faster-whisper-base",
+        "small": "Systran/faster-whisper-small",
+        "medium": "Systran/faster-whisper-medium",
+        "large-v2": "Systran/faster-whisper-large-v2",
+        "large-v3": "Systran/faster-whisper-large-v3",
+    }
+
+    DISTIL_WHISPER_REPOS = {
+        "large-v2": "distil-whisper/distil-large-v2",
+        "large-v3": "distil-whisper/distil-large-v3",
+        "medium-en": "distil-whisper/distil-medium.en",
+    }
+
+    PARAKEET_MODELS = {
+        "0.6b": "nvidia/parakeet-tdt-0.6b",
+        "1.1b": "nvidia/parakeet-tdt-1.1b",
+    }
+
+    PYANNOTE_REPOS = {
+        "segmentation": "pyannote/segmentation-3.0",
+        "embedding": "pyannote/wespeaker-voxceleb-resnet34-LM",
+        "speaker-diarization": "pyannote/speaker-diarization-3.1",
+    }
+
+    SHERPA_DIARIZATION_URLS = {
+        "segmentation": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        "embedding": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx.tar.bz2",
+    }
+
+    def __init__(self, cache_dir: str = "./models_cache"):
+        """
+        Initialize the model registry.
+
+        Args:
+            cache_dir: Root directory for all model caches
+        """
+        self.cache_dir = Path(cache_dir)
+        # Use .hf_cache to match downloader.py convention
+        self.hf_cache = self.cache_dir / ".hf_cache"
+        self.nemo_cache = self.cache_dir / "nemo"
+        self.diarization_cache = self.cache_dir / "diarization"
+
+        # Create cache directories
+        self.hf_cache.mkdir(parents=True, exist_ok=True)
+        self.nemo_cache.mkdir(parents=True, exist_ok=True)
+        self.diarization_cache.mkdir(parents=True, exist_ok=True)
+        (self.diarization_cache / "sherpa-onnx").mkdir(exist_ok=True)
+        (self.diarization_cache / "pyannote").mkdir(exist_ok=True)
+
+    def get_whisper_path(self, model_size: str) -> Tuple[Optional[Path], str]:
+        """
+        Get path to cached Whisper model or repo ID for download.
+
+        Args:
+            model_size: Model size ('tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3')
+
+        Returns:
+            Tuple of (local_path or None, repo_id)
+        """
+        repo_id = self.WHISPER_REPOS.get(model_size)
+        if not repo_id:
+            raise ValueError(f"Unknown Whisper model size: {model_size}")
+
+        try:
+            from huggingface_hub import snapshot_download
+
+            # Try to find locally
+            local_path = snapshot_download(
+                repo_id=repo_id, cache_dir=str(self.hf_cache), local_files_only=True
+            )
+            return Path(local_path), repo_id
+        except Exception:
+            # Not cached locally
+            return None, repo_id
+
+    def get_distil_whisper_path(self, model_size: str) -> Tuple[Optional[Path], str]:
+        """
+        Get path to cached Distil-Whisper model or repo ID.
+
+        Args:
+            model_size: Model size ('large-v2', 'large-v3', 'medium-en')
+
+        Returns:
+            Tuple of (local_path or None, repo_id)
+        """
+        repo_id = self.DISTIL_WHISPER_REPOS.get(model_size)
+        if not repo_id:
+            raise ValueError(f"Unknown Distil-Whisper model: {model_size}")
+
+        try:
+            from huggingface_hub import snapshot_download
+
+            local_path = snapshot_download(
+                repo_id=repo_id, cache_dir=str(self.hf_cache), local_files_only=True
+            )
+            return Path(local_path), repo_id
+        except Exception:
+            return None, repo_id
+
+    def get_parakeet_path(self, model_size: str) -> Tuple[Optional[Path], str]:
+        """
+        Get path to cached Parakeet .nemo file.
+
+        NeMo requires the actual .nemo file for restore_from().
+
+        Args:
+            model_size: Model size ('0.6b', '1.1b')
+
+        Returns:
+            Tuple of (.nemo file path or None, model_name)
+        """
+        model_name = self.PARAKEET_MODELS.get(model_size)
+        if not model_name:
+            raise ValueError(f"Unknown Parakeet model: {model_size}")
+
+        # Check for .nemo file in cache
+        model_dir = self.nemo_cache / model_name.replace("/", "_")
+        nemo_file = model_dir / f"{model_name.split('/')[-1]}.nemo"
+
+        if nemo_file.exists():
+            return nemo_file, model_name
+
+        return None, model_name
+
+    def get_sherpa_diarization_paths(self) -> Dict[str, Optional[Path]]:
+        """
+        Get paths to Sherpa-ONNX diarization models.
+
+        Returns:
+            Dict with 'segmentation' and 'embedding' paths (or None if not cached)
+        """
+        sherpa_dir = self.diarization_cache / "sherpa-onnx"
+
+        # Segmentation model
+        seg_path = (
+            sherpa_dir / "sherpa-onnx-pyannote-segmentation-3-0" / "model.int8.onnx"
+        )
+
+        # Embedding model
+        emb_path = (
+            sherpa_dir
+            / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k"
+            / "model.onnx"
+        )
+
+        return {
+            "segmentation": seg_path if seg_path.exists() else None,
+            "embedding": emb_path if emb_path.exists() else None,
+        }
+
+    def get_pyannote_diarization_paths(self) -> Dict[str, Tuple[Optional[Path], str]]:
+        """
+        Get paths to PyAnnote diarization models.
+
+        Returns:
+            Dict with model type -> (local_path or None, repo_id)
+        """
+        result = {}
+
+        for model_type, repo_id in self.PYANNOTE_REPOS.items():
+            try:
+                from huggingface_hub import snapshot_download
+
+                local_path = snapshot_download(
+                    repo_id=repo_id, cache_dir=str(self.hf_cache), local_files_only=True
+                )
+                result[model_type] = (Path(local_path), repo_id)
+            except Exception:
+                result[model_type] = (None, repo_id)
+
+        return result
+
+    def validate_model(self, provider: str, model_id: str) -> bool:
+        """
+        Validate if a model is available locally.
+
+        Args:
+            provider: Provider name ('whisper', 'distil-whisper', 'parakeet')
+            model_id: Model identifier
+
+        Returns:
+            True if model is cached locally
+        """
+        try:
+            if provider == "whisper":
+                path, _ = self.get_whisper_path(model_id)
+                return path is not None
+            elif provider == "distil-whisper":
+                path, _ = self.get_distil_whisper_path(model_id)
+                return path is not None
+            elif provider == "parakeet":
+                path, _ = self.get_parakeet_path(model_id)
+                return path is not None
+            else:
+                return False
+        except Exception:
+            return False
+
+    def list_available_models(self) -> List[ModelInfo]:
+        """
+        List all available models (cached and uncached).
+
+        Returns:
+            List of ModelInfo objects
+        """
+        models = []
+
+        # Whisper models
+        for size in self.WHISPER_REPOS.keys():
+            path, repo_id = self.get_whisper_path(size)
+            models.append(
+                ModelInfo(
+                    name=f"whisper-{size}",
+                    provider="whisper",
+                    available=path is not None,
+                    path=path,
+                    repo_id=repo_id,
+                )
+            )
+
+        # Distil-Whisper models
+        for size in self.DISTIL_WHISPER_REPOS.keys():
+            path, repo_id = self.get_distil_whisper_path(size)
+            models.append(
+                ModelInfo(
+                    name=f"distil-whisper-{size}",
+                    provider="distil-whisper",
+                    available=path is not None,
+                    path=path,
+                    repo_id=repo_id,
+                )
+            )
+
+        # Parakeet models
+        for size in self.PARAKEET_MODELS.keys():
+            path, model_name = self.get_parakeet_path(size)
+            models.append(
+                ModelInfo(
+                    name=f"parakeet-{size}",
+                    provider="parakeet",
+                    available=path is not None,
+                    path=path,
+                    repo_id=model_name,
+                )
+            )
+
+        # Sherpa diarization
+        sherpa_paths = self.get_sherpa_diarization_paths()
+        models.append(
+            ModelInfo(
+                name="sherpa-diarization",
+                provider="sherpa-onnx",
+                available=all(p is not None for p in sherpa_paths.values()),
+                path=self.diarization_cache / "sherpa-onnx",
+            )
+        )
+
+        # PyAnnote diarization
+        pyannote_paths = self.get_pyannote_diarization_paths()
+        models.append(
+            ModelInfo(
+                name="pyannote-diarization",
+                provider="pyannote",
+                available=all(p[0] is not None for p in pyannote_paths.values()),
+                path=self.diarization_cache / "pyannote",
+            )
+        )
+
+        return models
+
+    def delete_model(self, model_name: str) -> Dict[str, Any]:
+        """
+        Delete a model from the cache directory.
+
+        Args:
+            model_name: Model name (e.g., "whisper-base", "distil-large-v3",
+                        "parakeet-0.6b", "sherpa-diarization", "pyannote-diarization")
+
+        Returns:
+            Dict with 'success' (bool), 'message' (str), and 'deleted_paths' (list of str)
+        """
+        import shutil
+        from typing import Any, Dict
+
+        deleted_paths = []
+
+        # Determine model type from name
+        if model_name.startswith("whisper-"):
+            # Whisper models are downloaded to {cache_dir}/{model_name} directly
+            # First check the direct model directory (primary download location)
+            target_dir = self.cache_dir / model_name
+            if target_dir.exists():
+                try:
+                    shutil.rmtree(target_dir)
+                    deleted_paths.append(str(target_dir))
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Failed to delete {model_name}: {str(e)}",
+                        "deleted_paths": deleted_paths,
+                    }
+            else:
+                # Fallback: Check HF cache structure (for legacy downloads)
+                size = model_name.replace("whisper-", "")
+                repo_id = self.WHISPER_REPOS.get(size)
+                if repo_id:
+                    org, name = repo_id.split("/")
+                    hf_cache_name = f"models--{org}--{name}"
+                    target_dir = self.hf_cache / "hub" / hf_cache_name
+                    if target_dir.exists():
+                        try:
+                            shutil.rmtree(target_dir)
+                            deleted_paths.append(str(target_dir))
+                        except Exception as e:
+                            return {
+                                "success": False,
+                                "message": f"Failed to delete {model_name}: {str(e)}",
+                                "deleted_paths": deleted_paths,
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"Model not found: {model_name}",
+                            "deleted_paths": deleted_paths,
+                        }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Model not found: {model_name}",
+                        "deleted_paths": deleted_paths,
+                    }
+
+        elif model_name.startswith("distil-"):
+            # Distil-Whisper models - check direct directory first
+            target_dir = self.cache_dir / model_name
+            if target_dir.exists():
+                try:
+                    shutil.rmtree(target_dir)
+                    deleted_paths.append(str(target_dir))
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Failed to delete {model_name}: {str(e)}",
+                        "deleted_paths": deleted_paths,
+                    }
+            else:
+                # Fallback: Check HF cache structure
+                parts = model_name.split("-")
+                if len(parts) >= 2:
+                    size = "-".join(parts[1:])  # large-v3, large-v2, medium-en
+                    repo_id = self.DISTIL_WHISPER_REPOS.get(size)
+                    if repo_id:
+                        org, name = repo_id.split("/")
+                        hf_cache_name = f"models--{org}--{name}"
+                        target_dir = self.hf_cache / "hub" / hf_cache_name
+                        if target_dir.exists():
+                            try:
+                                shutil.rmtree(target_dir)
+                                deleted_paths.append(str(target_dir))
+                            except Exception as e:
+                                return {
+                                    "success": False,
+                                    "message": f"Failed to delete {model_name}: {str(e)}",
+                                    "deleted_paths": deleted_paths,
+                                }
+                        else:
+                            return {
+                                "success": False,
+                                "message": f"Model not found: {model_name}",
+                                "deleted_paths": deleted_paths,
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"Model not found: {model_name}",
+                            "deleted_paths": deleted_paths,
+                        }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Model not found: {model_name}",
+                        "deleted_paths": deleted_paths,
+                    }
+
+        elif model_name.startswith("parakeet-"):
+            # Parakeet models - check direct directory first
+            target_dir = self.cache_dir / model_name
+            if target_dir.exists():
+                try:
+                    shutil.rmtree(target_dir)
+                    deleted_paths.append(str(target_dir))
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Failed to delete {model_name}: {str(e)}",
+                        "deleted_paths": deleted_paths,
+                    }
+            else:
+                # Fallback: Check nemo cache structure
+                size = model_name.replace("parakeet-", "")
+                model_name_full = self.PARAKEET_MODELS.get(size)
+                if model_name_full:
+                    cache_name = model_name_full.replace("/", "_")
+                    target_dir = self.nemo_cache / cache_name
+                    if target_dir.exists():
+                        try:
+                            shutil.rmtree(target_dir)
+                            deleted_paths.append(str(target_dir))
+                        except Exception as e:
+                            return {
+                                "success": False,
+                                "message": f"Failed to delete {model_name}: {str(e)}",
+                                "deleted_paths": deleted_paths,
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"Model not found: {model_name}",
+                            "deleted_paths": deleted_paths,
+                        }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Unknown Parakeet model: {model_name}",
+                        "deleted_paths": deleted_paths,
+                    }
+
+        elif model_name == "sherpa-diarization":
+            # Sherpa diarization - check direct directories first
+            # Downloader creates: {cache_dir}/sherpa-onnx-segmentation/ and {cache_dir}/sherpa-onnx-embedding/
+
+            # Segmentation model
+            seg_dir = self.cache_dir / "sherpa-onnx-segmentation"
+            if seg_dir.exists():
+                try:
+                    shutil.rmtree(seg_dir)
+                    deleted_paths.append(str(seg_dir))
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Failed to delete sherpa segmentation: {str(e)}",
+                        "deleted_paths": deleted_paths,
+                    }
+
+            # Embedding model
+            emb_dir = self.cache_dir / "sherpa-onnx-embedding"
+            if emb_dir.exists():
+                try:
+                    shutil.rmtree(emb_dir)
+                    deleted_paths.append(str(emb_dir))
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Failed to delete sherpa embedding: {str(e)}",
+                        "deleted_paths": deleted_paths,
+                    }
+
+            # Fallback: Check legacy diarization/sherpa-onnx structure
+            if not deleted_paths:
+                sherpa_dir = self.diarization_cache / "sherpa-onnx"
+                seg_dir_legacy = sherpa_dir / "sherpa-onnx-pyannote-segmentation-3-0"
+                if seg_dir_legacy.exists():
+                    try:
+                        shutil.rmtree(seg_dir_legacy)
+                        deleted_paths.append(str(seg_dir_legacy))
+                    except Exception as e:
+                        return {
+                            "success": False,
+                            "message": f"Failed to delete sherpa segmentation: {str(e)}",
+                            "deleted_paths": deleted_paths,
+                        }
+
+                emb_dir_legacy = sherpa_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k"
+                if emb_dir_legacy.exists():
+                    try:
+                        shutil.rmtree(emb_dir_legacy)
+                        deleted_paths.append(str(emb_dir_legacy))
+                    except Exception as e:
+                        return {
+                            "success": False,
+                            "message": f"Failed to delete sherpa embedding: {str(e)}",
+                            "deleted_paths": deleted_paths,
+                        }
+
+            if not deleted_paths:
+                return {
+                    "success": False,
+                    "message": f"Sherpa diarization models not found",
+                    "deleted_paths": deleted_paths,
+                }
+
+        elif model_name == "pyannote-diarization":
+            # PyAnnote diarization - check individual model directories first
+            # Downloader creates: {cache_dir}/pyannote-segmentation-3.0/ and {cache_dir}/pyannote-embedding-3.0/
+
+            # Segmentation model
+            seg_dir = self.cache_dir / "pyannote-segmentation-3.0"
+            if seg_dir.exists():
+                try:
+                    shutil.rmtree(seg_dir)
+                    deleted_paths.append(str(seg_dir))
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Failed to delete pyannote segmentation: {str(e)}",
+                        "deleted_paths": deleted_paths,
+                    }
+
+            # Embedding model
+            emb_dir = self.cache_dir / "pyannote-embedding-3.0"
+            if emb_dir.exists():
+                try:
+                    shutil.rmtree(emb_dir)
+                    deleted_paths.append(str(emb_dir))
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"Failed to delete pyannote embedding: {str(e)}",
+                        "deleted_paths": deleted_paths,
+                    }
+
+            # Fallback: Check direct model directory and HF cache
+            if not deleted_paths:
+                target_dir = self.cache_dir / model_name
+                if target_dir.exists():
+                    try:
+                        shutil.rmtree(target_dir)
+                        deleted_paths.append(str(target_dir))
+                    except Exception as e:
+                        return {
+                            "success": False,
+                            "message": f"Failed to delete {model_name}: {str(e)}",
+                            "deleted_paths": deleted_paths,
+                        }
+                else:
+                    # Delete all pyannote models from HF cache
+                    hub_dir = self.hf_cache / "hub"
+                    if hub_dir.exists():
+                        # Find all pyannote model directories
+                        for item in hub_dir.iterdir():
+                            if item.is_dir() and item.name.startswith("models--pyannote--"):
+                                try:
+                                    shutil.rmtree(item)
+                                    deleted_paths.append(str(item))
+                                except Exception as e:
+                                    return {
+                                        "success": False,
+                                        "message": f"Failed to delete pyannote model {item.name}: {str(e)}",
+                                        "deleted_paths": deleted_paths,
+                                    }
+
+            if not deleted_paths:
+                return {
+                    "success": False,
+                    "message": f"PyAnnote models not found",
+                    "deleted_paths": deleted_paths,
+                }
+
+        else:
+            return {
+                "success": False,
+                "message": f"Unknown model: {model_name}",
+                "deleted_paths": deleted_paths,
+            }
+
+        return {
+            "success": True,
+            "message": f"Successfully deleted {model_name}",
+            "deleted_paths": deleted_paths,
+        }

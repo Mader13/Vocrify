@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+src-tauri/target/
+dist/
+
+# Build outputs
+dist/
+build/
+
+# Generated files
+*.generated.ts
+*.generated.js
+
+# Lock files
+package-lock.json
+bun.lock
+yarn.lock
+
+# Logs
+*.log
+logs/
+
+# Tauri
+src-tauri/Cargo.lock
+src-tauri/target/
+
+# Python
+ai-engine/*.pyc
+ai-engine/__pycache__/
+
+# Config files that don't need formatting
+.vite-env.d.ts

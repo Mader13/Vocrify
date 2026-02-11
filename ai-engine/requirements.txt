@@ -1,0 +1,159 @@
+# Transcribe Video - AI Engine Dependencies
+# Install with: pip install -r requirements.txt
+#
+# CRITICAL: Requires Python 3.8 - 3.12 ONLY
+# Python 3.13+ is NOT supported by faster-whisper and pyannote.audio
+# Current system has Python 3.14.2 - you MUST use Python 3.12 or earlier
+#
+# Quick fix on Windows:
+# 1. Install Python 3.12 from https://www.python.org/downloads/
+# 2. Install with: py -3.12 -m pip install -r requirements.txt
+# 3. Or create venv with: py -3.12 -m venv venv
+
+# ============================================================================
+# CORE TRANSCRIPTION ENGINE
+# ============================================================================
+# Primary transcription engine using CTranslate2 (faster than OpenAI Whisper)
+# Supports: CPU/CUDA, word timestamps, VAD filtering
+faster-whisper==1.2.1
+
+# ============================================================================
+# SPEAKER DIARIZATION (Multi-speaker identification)
+# ============================================================================
+# PyAnnote.audio requires HuggingFace token and accepts license terms
+# Installation requires: huggingface-cli login (with token)
+pyannote.audio==3.3.1
+pyannote.core==5.1.0
+pyannote.database==5.0.0
+pyannote.metrics==5.1.1
+pyannote.utils==5.1.1
+
+# Alternative: Sherpa-ONNX (offline, no token required, CPU-only)
+# Used when PyAnnote is not available or for offline inference
+# Also requires: soundfile, scipy (for audio loading and resampling)
+sherpa-onnx==1.12.23
+onnxruntime==1.18.0
+
+# ============================================================================
+# DEEP LEARNING FRAMEWORK
+# ============================================================================
+# PyTorch (required by PyAnnote and faster-whisper)
+# For GPU (CUDA 12.1) - Recommended for RTX series:
+torch==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121
+torchaudio==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121
+torchvision==0.20.1 --extra-index-url https://download.pytorch.org/whl/cu121
+# For CPU-only (slower), comment the above 3 lines and uncomment below:
+# torch==2.5.1
+# torchaudio==2.5.1
+# torchvision==0.20.1
+
+# ============================================================================
+# AUDIO PROCESSING
+# ============================================================================
+# Audio loading and resampling
+librosa==0.10.1
+soundfile==0.12.1
+
+# FFmpeg Python bindings (requires ffmpeg system binary)
+ffmpeg-python==0.2.0
+
+# ============================================================================
+# SCIENTIFIC COMPUTING
+# ============================================================================
+# Numerical computing (compatible with PyTorch 2.5.1)
+numpy==1.26.4
+
+# Signal processing
+scipy==1.12.0
+
+# ============================================================================
+# MODEL MANAGEMENT & DOWNLOADS
+# ============================================================================
+# HuggingFace model hub integration
+huggingface_hub==0.23.4
+
+# HuggingFace Transformers for Distil-Whisper and other models
+transformers>=4.40.0
+
+# HTTP requests for GitHub model downloads
+requests==2.31.0
+
+# Progress bars for downloads
+tqdm==4.66.4
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+# JSON schema validation for command validation
+jsonschema==4.22.0
+
+# Platform-specific imports
+importlib-resources==6.4.0  # Python 3.8-3.11 compatibility
+typing-extensions==4.11.0  # Extended typing support
+packaging==24.0  # Version parsing
+psutil==6.1.0  # System and process monitoring (for memory tests)
+pynvml==12.535.161  # NVIDIA GPU metrics
+
+# ============================================================================
+# V3 PERFORMANCE OPTIMIZATIONS
+# ============================================================================
+# HNSW library for 150x-12,500x vector search speedup
+hnswlib==0.8.0
+
+# Flash Attention 2 for 2.49x-7.47x speedup (CUDA only)
+# Install with: pip install flash-attn --no-build-isolation
+# Requires: CUDA 11.6+ and PyTorch 2.0+
+# flash-attn==2.7.0
+
+# 4-bit quantization for 50-75% memory reduction
+# bitsandbytes==0.45.0  # Uncomment for 4-bit quantization
+
+# Alternative: xFormers for memory-efficient attention
+# xformers==0.0.28  # Uncomment if flash-attn not available
+
+# ============================================================================
+# OPTIONAL: PARAKEET ASR (NVIDIA NeMo Toolkit)
+# ============================================================================
+# Parakeet models require nemo_toolkit[asr] - NOT included by default
+# To enable Parakeet support, install from requirements-parakeet.txt instead:
+#
+#   pip install -r requirements-parakeet.txt
+#
+# WARNING: nemo_toolkit has complex dependencies and may conflict with
+# faster-whisper and pyannote.audio. Use separate virtual environment if needed.
+#
+# Key conflicts:
+# - nemo_toolkit[asr] requires numpy<2.0.0 (already satisfied)
+# - May require different PyTorch version
+# - Heavy dependencies (~500MB additional download)
+# - Linux/macOS support only (limited Windows support)
+#
+# For Parakeet installation instructions, see: requirements-parakeet.txt
+
+# ============================================================================
+# OPTIONAL DEVELOPMENT DEPENDENCIES
+# ============================================================================
+# Uncomment these for development/testing:
+#
+# Testing framework
+# pytest==8.2.0
+# pytest-cov==5.0.0
+#
+# Code quality
+# black==24.4.2
+# flake8==7.0.0
+# mypy==1.10.0
+
+# ============================================================================
+# VERSION COMPATIBILITY NOTES
+# ============================================================================
+# - Python 3.8-3.12: All packages compatible
+# - Python 3.13+: NOT supported (faster-whisper, pyannote.audio incompatible)
+# - NumPy 1.x vs 2.x: Use 1.x for compatibility (nemo_toolkit requires <2.0.0)
+# - PyTorch 2.2.x: Stable version with Python 3.8-3.12 support
+# - faster-whisper 1.0.3: Stable, well-tested version
+# - nemo_toolkit: Optional, heavy dependencies, see requirements-parakeet.txt
+#
+# Last updated: 2025-02-06
+# Tested on: Python 3.10, 3.11, 3.12
+#

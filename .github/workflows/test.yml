@@ -1,0 +1,243 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  python-tests:
+    name: Python Tests (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ai-engine/requirements.txt
+          pip install -r tests/requirements.txt
+
+      - name: Run Python unit tests
+        run: |
+          cd tests
+          pytest unit/python/ -v --tb=short --cov=../ai-engine --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./tests/coverage.xml
+          flags: python-unittests
+          name: python-coverage-${{ matrix.os }}-${{ matrix.python-version }}
+
+  rust-tests:
+    name: Rust Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run Rust unit tests
+        run: |
+          cargo test --manifest-path=src-tauri/Cargo.toml --verbose
+
+      - name: Run Rust tests with coverage
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo install cargo-tarpaulin
+          cargo tarpaulin --manifest-path=src-tauri/Cargo.toml --out Xml --output-dir ./tests/
+
+      - name: Upload Rust coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./tests/cobertura.xml
+          flags: rust-unittests
+          name: rust-coverage-${{ matrix.os }}
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [python-tests, rust-tests]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          bun install
+          python -m pip install -r ai-engine/requirements.txt
+
+      - name: Run integration tests
+        run: |
+          cd tests/integration
+          bun test
+        env:
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+
+  download-system-tests:
+    name: Download System Tests
+    runs-on: ubuntu-latest
+    needs: [python-tests, rust-tests]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r ai-engine/requirements.txt
+          pip install -r tests/requirements.txt
+
+      - name: Run download tests
+        run: |
+          cd tests
+          pytest unit/python/test_downloader.py -v -m download
+
+      - name: Run Rust download manager tests
+        run: |
+          cargo test --manifest-path=src-tauri/Cargo.toml test_download_manager
+
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r ai-engine/requirements.txt
+          pip install -r tests/requirements.txt
+          pip install bandit safety
+
+      - name: Run security tests
+        run: |
+          cd tests
+          pytest unit/python/ -m security -v
+
+      - name: Run Bandit security linter
+        run: |
+          bandit -r ai-engine/ -f json -o bandit-report.json || true
+
+      - name: Run Safety check
+        run: |
+          safety check --json --output safety-report.json || true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    needs: [python-tests, rust-tests]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r ai-engine/requirements.txt
+          pip install -r tests/requirements.txt
+          pip install pytest-benchmark
+
+      - name: Run performance tests
+        run: |
+          cd tests
+          pytest unit/python/ -m performance -v --benchmark-only --benchmark-json=benchmark.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        with:
+          name: benchmark-results
+          path: tests/benchmark.json
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [python-tests, rust-tests, integration-tests, download-system-tests]
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Python Tests | ${{ needs.python-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Rust Tests | ${{ needs.rust-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Download System Tests | ${{ needs.download-system-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any test failed
+        if: |
+          needs.python-tests.result == 'failure' ||
+          needs.rust-tests.result == 'failure' ||
+          needs.integration-tests.result == 'failure' ||
+          needs.download-system-tests.result == 'failure'
+        run: exit 1

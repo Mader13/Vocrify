@@ -1,0 +1,100 @@
+{
+  "generated_at": "2026-02-08T00:38:46.632204",
+  "summary": {
+    "timestamp": "2026-02-08T00:38:46.632206",
+    "metrics": {
+      "flash_attention_speedup": {
+        "current": 4.5,
+        "unit": "x",
+        "timestamp": "2026-02-08T00:38:46.632119"
+      },
+      "search_improvement": {
+        "current": 500,
+        "unit": "x",
+        "timestamp": "2026-02-08T00:38:46.632143"
+      },
+      "memory_reduction": {
+        "current": 0.6,
+        "unit": "ratio",
+        "timestamp": "2026-02-08T00:38:46.632147"
+      },
+      "startup_time_ms": {
+        "current": 450,
+        "unit": "ms",
+        "timestamp": "2026-02-08T00:38:46.632150"
+      }
+    },
+    "trends": {
+      "flash_attention_speedup": {
+        "error": "Not enough data"
+      },
+      "search_improvement": {
+        "error": "Not enough data"
+      },
+      "memory_reduction": {
+        "error": "Not enough data"
+      },
+      "startup_time_ms": {
+        "error": "Not enough data"
+      }
+    },
+    "alerts": 0,
+    "recent_alerts": []
+  },
+  "baselines": {
+    "flash_attention_speedup": 2.49,
+    "search_improvement": 150
+  },
+  "thresholds": {
+    "flash_attention_speedup": {
+      "min": 2.49,
+      "max": 7.47
+    },
+    "search_improvement": {
+      "min": 150,
+      "max": 12500
+    },
+    "memory_reduction": {
+      "min": 0.5,
+      "max": 0.75
+    },
+    "startup_time_ms": {
+      "max": 500
+    }
+  },
+  "metrics_history": {
+    "flash_attention_speedup": [
+      {
+        "timestamp": "2026-02-08T00:38:46.632119",
+        "value": 4.5,
+        "unit": "x",
+        "metadata": {}
+      }
+    ],
+    "search_improvement": [
+      {
+        "timestamp": "2026-02-08T00:38:46.632143",
+        "value": 500,
+        "unit": "x",
+        "metadata": {}
+      }
+    ],
+    "memory_reduction": [
+      {
+        "timestamp": "2026-02-08T00:38:46.632147",
+        "value": 0.6,
+        "unit": "ratio",
+        "metadata": {}
+      }
+    ],
+    "startup_time_ms": [
+      {
+        "timestamp": "2026-02-08T00:38:46.632150",
+        "value": 450,
+        "unit": "ms",
+        "metadata": {}
+      }
+    ]
+  },
+  "alerts": []
+}

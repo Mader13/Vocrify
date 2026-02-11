@@ -1,0 +1,157 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+tauri-*.log
+
+# Test scratch files (root only)
+/test_*.py
+/test*.txt
+/fix_*.rs
+/*_test.ts
+/*_test.tsx
+
+# Temporary databases
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Test media files
+SH2.mp4
+123.mp4
+*.test.mp4
+*.test.mkv
+*.test.avi
+
+# Dependency directories
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Cache / build artifacts
+coverage/
+.nyc_output/
+*.lcov
+.vite/
+.eslintcache
+.stylelintcache
+.parcel-cache/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Rust / Tauri
+target/
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/bundle/
+src-tauri/gen/
+src-tauri/capabilities/generated/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv.bak/
+virtualenv/
+*.egg
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+htmlcov/
+*.coverage*
+.ipynb_checkpoints/
+
+# AI models (large files, downloaded separately)
+ai-engine/**/*.pt
+ai-engine/**/*.bin
+ai-engine/**/*.onnx
+ai-engine/**/*.safetensors
+*.ct2
+checkpoints/
+models/
+downloads/
+datasets/
+data/
+wandb/
+mlruns/
+
+# Python environments inside ai-engine
+ai-engine/venv/
+ai-engine/.venv/
+ai-engine/venv_parakeet/
+ai-engine/.venv_parakeet/
+
+# Pip/installer logs or artifacts accidentally saved in ai-engine
+ai-engine/=*
+ai-engine/pip-*.log
+ai-engine/*-install.log
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Prettier
+.prettiercache
+
+# OS files
+.DS_Store
+Thumbs.db
+nul
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Lock files (using bun.lockb)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Worktrees
+.worktrees/
+worktrees/
+
+# Claude Code / OpenCode / Claude Flow
+.claude/
+.opencode/
+.claude-flow/
+.claude-code/
+claude-flow.config.js
+claude-flow.config.ts
+.opencode.config.js
+.opencode.config.ts
+agent-mail.db
+.hive/
+.hivemind/
+.swarm/
+.serena/
+.mcp.json
+claude_desktop_config.json
