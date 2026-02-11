@@ -13,6 +13,7 @@ import type {
   DeviceType,
   Language,
   DiarizationProvider,
+  EnginePreference,
 } from "@/types";
 import { logger } from "@/lib/logger";
 
@@ -31,6 +32,7 @@ export interface AppSettings {
   maxConcurrentTasks: number;
   outputDirectory: string;
   lastDiarizationProvider: DiarizationProvider;
+  enginePreference: EnginePreference;
 
   // UI-specific fields
   autoSave: boolean;
@@ -99,6 +101,7 @@ const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" |
     diarizationProvider: "none",
     numSpeakers: 2,
     lastDiarizationProvider: "none",
+    enginePreference: "auto",
   },
   selectedTaskId: null,
 };

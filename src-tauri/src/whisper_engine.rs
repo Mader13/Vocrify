@@ -128,7 +128,7 @@ impl WhisperEngine {
         eprintln!("[INFO] Model path: {:?}", model_path);
 
         // Configure whisper context based on device
-        let mut params = WhisperContextParameters::default();
+        let params = WhisperContextParameters::default();
 
         match device {
             DeviceType::Cpu => {
@@ -203,7 +203,7 @@ impl WhisperEngine {
         }
 
         // Run transcription
-        let state = self.context.create_state()
+        let mut state = self.context.create_state()
             .map_err(|e| WhisperError::Transcription(format!("Failed to create state: {:?}", e)))?;
 
         state.full(params, audio)

@@ -56,4 +56,5 @@ whisper-rs = { version = "0.14", features = ["vulkan", "tracing_backend"] }
 # sherpa-rs = { version = "0.1", features = ["download-binaries"] }
 
 [features]
-default = []
+default = ["rust-whisper"]
+rust-whisper = []

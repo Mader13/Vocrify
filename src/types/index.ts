@@ -230,6 +230,7 @@ export interface AppSettings {
   maxConcurrentTasks: number;
   outputDirectory: string | null;
   lastDiarizationProvider: DiarizationProvider;
+  enginePreference: EnginePreference;
 }
 
 /**
@@ -244,6 +245,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxConcurrentTasks: 2,
   outputDirectory: null,
   lastDiarizationProvider: "none",
+  enginePreference: "auto",
 };
 
 /**
@@ -358,6 +360,35 @@ export const LANGUAGE_NAMES: Record<Language, string> = {
  * Diarization provider type
  */
 export type DiarizationProvider = "none" | "pyannote" | "sherpa-onnx";
+
+/**
+ * Engine preference for transcription
+ * - "auto": Rust whisper-rs primary, Python fallback (default)
+ * - "rust": Only Rust whisper-rs, error if unavailable
+ * - "python": Only Python engine (Phase 1 behavior)
+ */
+export type EnginePreference = "auto" | "rust" | "python";
+
+/**
+ * Engine preference display names and descriptions
+ */
+export const ENGINE_PREFERENCES: Record<
+  EnginePreference,
+  { name: string; description: string }
+> = {
+  auto: {
+    name: "Auto (рекомендуется)",
+    description: "Rust whisper-rs с автоматическим fallback на Python",
+  },
+  rust: {
+    name: "Rust только",
+    description: "Только Rust whisper-rs, ошибка при недоступности",
+  },
+  python: {
+    name: "Python только",
+    description: "Только Python движок (старое поведение)",
+  },
+};
 
 /**
  * HuggingFace token configuration

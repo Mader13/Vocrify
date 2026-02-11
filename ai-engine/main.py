@@ -1963,7 +1963,6 @@ def download_model(
             stop_monitor = threading.Event()
             last_progress_time = time_module.time()
             last_size_mb = 0
-            no_progress_count = 0  # Count how many times size hasn't changed
 
             print(
                 json.dumps(
@@ -1977,7 +1976,7 @@ def download_model(
 
             def monitor_download_progress():
                 """Monitor download progress by checking directory size."""
-                nonlocal last_progress_time, last_size_mb, no_progress_count
+                nonlocal last_progress_time, last_size_mb
 
                 print(
                     json.dumps(
@@ -2007,46 +2006,9 @@ def download_model(
 
                         # Check if size changed
                         if (
-                            abs(current_mb - last_size_mb) < 0.1
-                        ):  # Less than 0.1MB change = no progress
-                            no_progress_count += 1
-                        else:
-                            no_progress_count = 0
+                            abs(current_mb - last_size_mb) >= 0.1
+                        ):  # More than 0.1MB change = progress
                             last_size_mb = current_mb  # Update on progress
-
-                        # If no progress for 5 consecutive checks (2.5 seconds), consider download complete
-                        if no_progress_count >= 5 and current_mb > 1:
-                            print(
-                                json.dumps(
-                                    {
-                                        "type": "debug",
-                                        "message": f"Download appears complete (no progress for 2.5s): {current_mb}MB",
-                                    }
-                                ),
-                                flush=True,
-                            )
-                            # Estimate total size for final progress emission
-                            if "tiny" in model_name:
-                                estimated_total_mb = 80
-                            elif "base" in model_name:
-                                estimated_total_mb = 160
-                            elif "small" in model_name:
-                                estimated_total_mb = 500
-                            elif "medium" in model_name:
-                                estimated_total_mb = 1600
-                            elif "large" in model_name:
-                                estimated_total_mb = 3200
-                            else:
-                                estimated_total_mb = max(current_mb * 1.2, 150)
-
-                            # Emit 100% progress with correct total size
-                            emit_download_progress(
-                                current_mb * 1024 * 1024,
-                                estimated_total_mb * 1024 * 1024,
-                                0,
-                            )
-                            # Stop monitoring since download is complete
-                            break
 
                         # Always emit progress if there's any data
                         if current_mb > 0:

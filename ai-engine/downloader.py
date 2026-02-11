@@ -23,10 +23,12 @@ Based on research from:
 
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import os
 import shutil
+import tarfile
 import time
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -41,7 +43,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
-    before_sleep_log
+    before_sleep_log,
 )
 
 try:
@@ -56,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 class DownloadSource(Enum):
     """Download source types"""
+
     HUGGINGFACE = "huggingface"
     GITHUB = "github"
     URL = "url"
@@ -63,6 +66,7 @@ class DownloadSource(Enum):
 
 class DownloadStatus(Enum):
     """Download status"""
+
     INITIALIZING = "initializing"
     CHECKING_DISK = "checking_disk"
     DOWNLOADING = "downloading"
@@ -75,6 +79,7 @@ class DownloadStatus(Enum):
 @dataclass
 class DownloadProgress:
     """Structured progress event for downloads"""
+
     stage: str
     progress_percent: float
     current_file: Optional[str]
@@ -97,21 +102,25 @@ class DownloadProgress:
 
 class DownloadError(Exception):
     """Base exception for download errors"""
+
     pass
 
 
 class DiskSpaceError(DownloadError):
     """Raised when insufficient disk space"""
+
     pass
 
 
 class ChecksumError(DownloadError):
     """Raised when checksum validation fails"""
+
     pass
 
 
 class NetworkError(DownloadError):
     """Raised for network-related errors"""
+
     pass
 
 
@@ -131,7 +140,7 @@ class ImprovedDownloader:
         cache_dir: Optional[Path] = None,
         huggingface_token: Optional[str] = None,
         max_retries: int = 5,
-        progress_callback: Optional[Callable[[DownloadProgress], None]] = None
+        progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
     ):
         """
         Initialize the downloader.
@@ -160,9 +169,13 @@ class ImprovedDownloader:
                 logger.error(f"Progress callback error: {e}")
 
         # Also log
-        logger.info(f"[{progress.stage}] {progress.progress_percent:.1f}% - {progress.message}")
+        logger.info(
+            f"[{progress.stage}] {progress.progress_percent:.1f}% - {progress.message}"
+        )
 
-    def check_disk_space(self, required_bytes: int, path: Optional[Path] = None) -> bool:
+    def check_disk_space(
+        self, required_bytes: int, path: Optional[Path] = None
+    ) -> bool:
         """
         Check if sufficient disk space is available.
 
@@ -216,17 +229,16 @@ class ImprovedDownloader:
     @retry(
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=1, min=2, max=60),
-        retry=retry_if_exception_type((
-            requests.ConnectionError,
-            requests.Timeout,
-        )),
-        before_sleep=before_sleep_log(logger, logging.WARNING)
+        retry=retry_if_exception_type(
+            (
+                requests.ConnectionError,
+                requests.Timeout,
+            )
+        ),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def download_url_with_retry(
-        self,
-        url: str,
-        output_path: Path,
-        headers: dict = None
+        self, url: str, output_path: Path, headers: dict = None
     ) -> Path:
         """
         Download file from URL with retry logic.
@@ -242,11 +254,11 @@ class ImprovedDownloader:
         response = requests.get(url, stream=True, headers=headers, timeout=60)
         response.raise_for_status()
 
-        total_size = int(response.headers.get('content-length', 0))
+        total_size = int(response.headers.get("content-length", 0))
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, 'wb') as f:
+        with open(output_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
@@ -258,7 +270,7 @@ class ImprovedDownloader:
         repo_id: str,
         model_name: str,
         allow_patterns: List[str] = None,
-        ignore_patterns: List[str] = None
+        ignore_patterns: List[str] = None,
     ) -> Path:
         """
         Download model from HuggingFace Hub with accurate progress tracking.
@@ -276,42 +288,43 @@ class ImprovedDownloader:
             raise ImportError("huggingface_hub is not installed")
 
         try:
-            self.emit_progress(DownloadProgress(
-                stage="initializing",
-                progress_percent=0,
-                current_file=None,
-                total_files=0,
-                downloaded_files=0,
-                downloaded_bytes=0,
-                total_bytes=0,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Preparing to download {model_name}..."
-            ))
+            self.emit_progress(
+                DownloadProgress(
+                    stage="initializing",
+                    progress_percent=0,
+                    current_file=None,
+                    total_files=0,
+                    downloaded_files=0,
+                    downloaded_bytes=0,
+                    total_bytes=0,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Preparing to download {model_name}...",
+                )
+            )
 
             # Get download info using HfApi
             api = HfApi(token=self.huggingface_token)
             model_info = api.model_info(repo_id)
 
             # Estimate total size from siblings
-            total_bytes = sum(
-                getattr(s, 'size', 0) or 0
-                for s in model_info.siblings
-            )
+            total_bytes = sum(getattr(s, "size", 0) or 0 for s in model_info.siblings)
             total_files = len(model_info.siblings)
 
-            self.emit_progress(DownloadProgress(
-                stage="checking_disk",
-                progress_percent=0,
-                current_file=None,
-                total_files=total_files,
-                downloaded_files=0,
-                downloaded_bytes=0,
-                total_bytes=total_bytes,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Checking disk space for {total_bytes / (1024**3):.2f}GB..."
-            ))
+            self.emit_progress(
+                DownloadProgress(
+                    stage="checking_disk",
+                    progress_percent=0,
+                    current_file=None,
+                    total_files=total_files,
+                    downloaded_files=0,
+                    downloaded_bytes=0,
+                    total_bytes=total_bytes,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Checking disk space for {total_bytes / (1024**3):.2f}GB...",
+                )
+            )
 
             # Check disk space
             self.check_disk_space(total_bytes)
@@ -323,7 +336,7 @@ class ImprovedDownloader:
             # Start progress monitoring thread
             self.cancel_event.clear()
             stop_monitor = Event()
-            progress_data = {'downloaded_bytes': 0, 'last_size': 0}
+            progress_data = {"downloaded_bytes": 0, "last_size": 0}
 
             def monitor_progress():
                 """Monitor download progress by checking directory size"""
@@ -348,7 +361,7 @@ class ImprovedDownloader:
                                     except (OSError, IOError):
                                         pass
 
-                        progress_data['downloaded_bytes'] = current_size
+                        progress_data["downloaded_bytes"] = current_size
 
                         # Calculate speed and ETA
                         elapsed = current_time - start_time
@@ -364,22 +377,26 @@ class ImprovedDownloader:
 
                         # Calculate progress
                         if total_bytes > 0:
-                            progress_percent = min(100, (current_size / total_bytes) * 100)
+                            progress_percent = min(
+                                100, (current_size / total_bytes) * 100
+                            )
                         else:
                             progress_percent = 0
 
-                        self.emit_progress(DownloadProgress(
-                            stage="downloading",
-                            progress_percent=progress_percent,
-                            current_file=f"{downloaded_files}/{total_files} files",
-                            total_files=total_files,
-                            downloaded_files=downloaded_files,
-                            downloaded_bytes=current_size,
-                            total_bytes=total_bytes,
-                            speed_bytes_per_sec=speed,
-                            eta_seconds=eta,
-                            message=f"Downloading {model_name}: {progress_percent:.1f}%"
-                        ))
+                        self.emit_progress(
+                            DownloadProgress(
+                                stage="downloading",
+                                progress_percent=progress_percent,
+                                current_file=f"{downloaded_files}/{total_files} files",
+                                total_files=total_files,
+                                downloaded_files=downloaded_files,
+                                downloaded_bytes=current_size,
+                                total_bytes=total_bytes,
+                                speed_bytes_per_sec=speed,
+                                eta_seconds=eta,
+                                message=f"Downloading {model_name}: {progress_percent:.1f}%",
+                            )
+                        )
 
                         last_update_time = current_time
 
@@ -395,31 +412,33 @@ class ImprovedDownloader:
 
             try:
                 # Download model
-                self.emit_progress(DownloadProgress(
-                    stage="downloading",
-                    progress_percent=0,
-                    current_file="Starting download...",
-                    total_files=total_files,
-                    downloaded_files=0,
-                    downloaded_bytes=0,
-                    total_bytes=total_bytes,
-                    speed_bytes_per_sec=0,
-                    eta_seconds=0,
-                    message=f"Starting download from HuggingFace..."
-                ))
+                self.emit_progress(
+                    DownloadProgress(
+                        stage="downloading",
+                        progress_percent=0,
+                        current_file="Starting download...",
+                        total_files=total_files,
+                        downloaded_files=0,
+                        downloaded_bytes=0,
+                        total_bytes=total_bytes,
+                        speed_bytes_per_sec=0,
+                        eta_seconds=0,
+                        message=f"Starting download from HuggingFace...",
+                    )
+                )
 
                 # IMPORTANT: Set HF_HUB_CACHE to our cache_dir to avoid duplicate downloads
                 # By default, huggingface_hub caches in ~/.cache/huggingface/hub
                 # We redirect it to our own cache directory to avoid wasting disk space
-                original_hf_cache = os.environ.get('HF_HUB_CACHE')
-                os.environ['HF_HUB_CACHE'] = str(self.cache_dir / '.hf_cache')
-                
+                original_hf_cache = os.environ.get("HF_HUB_CACHE")
+                os.environ["HF_HUB_CACHE"] = str(self.cache_dir / ".hf_cache")
+
                 try:
                     snapshot_download(
                         repo_id=repo_id,
                         local_dir=str(target_dir),
                         # Use our cache directory instead of default ~/.cache/huggingface
-                        cache_dir=str(self.cache_dir / '.hf_cache'),
+                        cache_dir=str(self.cache_dir / ".hf_cache"),
                         token=self.huggingface_token,
                         allow_patterns=allow_patterns,
                         ignore_patterns=ignore_patterns,
@@ -431,9 +450,9 @@ class ImprovedDownloader:
                 finally:
                     # Restore original HF_HUB_CACHE
                     if original_hf_cache is not None:
-                        os.environ['HF_HUB_CACHE'] = original_hf_cache
+                        os.environ["HF_HUB_CACHE"] = original_hf_cache
                     else:
-                        os.environ.pop('HF_HUB_CACHE', None)
+                        os.environ.pop("HF_HUB_CACHE", None)
 
             finally:
                 # Stop monitoring thread
@@ -441,44 +460,43 @@ class ImprovedDownloader:
                 monitor_thread.join(timeout=2.0)
 
             # Emit completion
-            final_size = progress_data['downloaded_bytes']
-            self.emit_progress(DownloadProgress(
-                stage="complete",
-                progress_percent=100,
-                current_file=model_name,
-                total_files=total_files,
-                downloaded_files=total_files,
-                downloaded_bytes=final_size,
-                total_bytes=total_bytes,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Download complete: {model_name}"
-            ))
+            final_size = progress_data["downloaded_bytes"]
+            self.emit_progress(
+                DownloadProgress(
+                    stage="complete",
+                    progress_percent=100,
+                    current_file=model_name,
+                    total_files=total_files,
+                    downloaded_files=total_files,
+                    downloaded_bytes=final_size,
+                    total_bytes=total_bytes,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Download complete: {model_name}",
+                )
+            )
 
             return target_dir
 
         except Exception as e:
             logger.error(f"HuggingFace download failed: {e}")
-            self.emit_progress(DownloadProgress(
-                stage="failed",
-                progress_percent=0,
-                current_file=None,
-                total_files=0,
-                downloaded_files=0,
-                downloaded_bytes=0,
-                total_bytes=0,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Download failed: {str(e)}"
-            ))
+            self.emit_progress(
+                DownloadProgress(
+                    stage="failed",
+                    progress_percent=0,
+                    current_file=None,
+                    total_files=0,
+                    downloaded_files=0,
+                    downloaded_bytes=0,
+                    total_bytes=0,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Download failed: {str(e)}",
+                )
+            )
             raise DownloadError(f"Failed to download from HuggingFace: {e}")
 
-    def download_from_github(
-        self,
-        url: str,
-        asset_name: str,
-        model_name: str
-    ) -> Path:
+    def download_from_github(self, url: str, asset_name: str, model_name: str) -> Path:
         """
         Download asset from GitHub releases with progress tracking.
 
@@ -491,39 +509,43 @@ class ImprovedDownloader:
             Path to downloaded asset
         """
         try:
-            self.emit_progress(DownloadProgress(
-                stage="initializing",
-                progress_percent=0,
-                current_file=None,
-                total_files=1,
-                downloaded_files=0,
-                downloaded_bytes=0,
-                total_bytes=0,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Preparing to download {asset_name} from GitHub..."
-            ))
+            self.emit_progress(
+                DownloadProgress(
+                    stage="initializing",
+                    progress_percent=0,
+                    current_file=None,
+                    total_files=1,
+                    downloaded_files=0,
+                    downloaded_bytes=0,
+                    total_bytes=0,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Preparing to download {asset_name} from GitHub...",
+                )
+            )
 
             # HEAD request to get file size
             headers = {}
             response = requests.head(url, headers=headers, timeout=30)
             response.raise_for_status()
 
-            total_size = int(response.headers.get('content-length', 0))
+            total_size = int(response.headers.get("content-length", 0))
 
             # Check disk space
-            self.emit_progress(DownloadProgress(
-                stage="checking_disk",
-                progress_percent=0,
-                current_file=None,
-                total_files=1,
-                downloaded_files=0,
-                downloaded_bytes=0,
-                total_bytes=total_size,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Checking disk space for {total_size / (1024**3):.2f}GB..."
-            ))
+            self.emit_progress(
+                DownloadProgress(
+                    stage="checking_disk",
+                    progress_percent=0,
+                    current_file=None,
+                    total_files=1,
+                    downloaded_files=0,
+                    downloaded_bytes=0,
+                    total_bytes=total_size,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Checking disk space for {total_size / (1024**3):.2f}GB...",
+                )
+            )
 
             self.check_disk_space(total_size)
 
@@ -532,7 +554,7 @@ class ImprovedDownloader:
             target_dir.mkdir(parents=True, exist_ok=True)
 
             output_path = target_dir / asset_name
-            temp_path = output_path.with_suffix(output_path.suffix + '.tmp')
+            temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
 
             # Download with progress
             start_time = time.time()
@@ -542,22 +564,24 @@ class ImprovedDownloader:
 
             downloaded = 0
 
-            self.emit_progress(DownloadProgress(
-                stage="downloading",
-                progress_percent=0,
-                current_file=asset_name,
-                total_files=1,
-                downloaded_files=0,
-                downloaded_bytes=0,
-                total_bytes=total_size,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Downloading {asset_name}..."
-            ))
+            self.emit_progress(
+                DownloadProgress(
+                    stage="downloading",
+                    progress_percent=0,
+                    current_file=asset_name,
+                    total_files=1,
+                    downloaded_files=0,
+                    downloaded_bytes=0,
+                    total_bytes=total_size,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Downloading {asset_name}...",
+                )
+            )
 
             last_update_time = start_time
 
-            with open(temp_path, 'wb') as f:
+            with open(temp_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if self.cancel_event.is_set():
                         raise DownloadError("Download cancelled by user")
@@ -580,46 +604,153 @@ class ImprovedDownloader:
                                 speed = 0
                                 eta = 0
 
-                            progress_percent = min(100, (downloaded / total_size) * 100) if total_size > 0 else 0
+                            progress_percent = (
+                                min(100, (downloaded / total_size) * 100)
+                                if total_size > 0
+                                else 0
+                            )
 
-                            self.emit_progress(DownloadProgress(
-                                stage="downloading",
-                                progress_percent=progress_percent,
-                                current_file=asset_name,
-                                total_files=1,
-                                downloaded_files=1,
-                                downloaded_bytes=downloaded,
-                                total_bytes=total_size,
-                                speed_bytes_per_sec=speed,
-                                eta_seconds=eta,
-                                message=f"Downloading {asset_name}: {progress_percent:.1f}%"
-                            ))
+                            self.emit_progress(
+                                DownloadProgress(
+                                    stage="downloading",
+                                    progress_percent=progress_percent,
+                                    current_file=asset_name,
+                                    total_files=1,
+                                    downloaded_files=1,
+                                    downloaded_bytes=downloaded,
+                                    total_bytes=total_size,
+                                    speed_bytes_per_sec=speed,
+                                    eta_seconds=eta,
+                                    message=f"Downloading {asset_name}: {progress_percent:.1f}%",
+                                )
+                            )
 
                             last_update_time = current_time
 
             # Rename temp file to final path
             temp_path.rename(output_path)
 
-            # Emit completion
-            self.emit_progress(DownloadProgress(
-                stage="complete",
-                progress_percent=100,
-                current_file=asset_name,
-                total_files=1,
-                downloaded_files=1,
-                downloaded_bytes=downloaded,
-                total_bytes=total_size,
-                speed_bytes_per_sec=0,
-                eta_seconds=0,
-                message=f"Download complete: {asset_name}"
-            ))
+            # Extract tar.bz2 archives automatically
+            if asset_name.endswith(".tar.bz2") or asset_name.endswith(".tbz2"):
+                self.emit_progress(
+                    DownloadProgress(
+                        stage="extract",
+                        progress_percent=0,
+                        current_file=asset_name,
+                        total_files=1,
+                        downloaded_files=1,
+                        downloaded_bytes=downloaded,
+                        total_bytes=total_size,
+                        speed_bytes_per_sec=0,
+                        eta_seconds=0,
+                        message=f"Extracting {asset_name}...",
+                    )
+                )
+
+                # Safe extraction with path traversal protection and flatten
+                with tarfile.open(output_path, "r:bz2") as tar:
+                    members = tar.getmembers()
+
+                    # Find common prefix (root directory in archive)
+                    if members:
+                        # Get the first path component
+                        first_part = members[0].name.split("/")[0]
+                        # Check if all members start with the same prefix
+                        has_common_prefix = all(
+                            m.name.startswith(first_part + "/") or m.name == first_part
+                            for m in members
+                        )
+                    else:
+                        has_common_prefix = False
+
+                    for member in members:
+                        # Security: Prevent path traversal attacks
+                        member_path = os.path.normpath(member.name)
+                        if member_path.startswith("..") or os.path.isabs(member_path):
+                            raise DownloadError(
+                                f"Unsafe path in archive: {member.name}"
+                            )
+
+                        # Strip the root directory if present (flatten structure)
+                        if has_common_prefix and "/" in member.name:
+                            # Remove the first path component
+                            parts = member.name.split("/", 1)
+                            if len(parts) > 1:
+                                member.name = parts[1]
+                            else:
+                                # This is the root directory itself, skip it
+                                continue
+
+                        # Skip if name is empty after stripping
+                        if not member.name:
+                            continue
+
+                        # Extract to target directory
+                        tar.extract(member, path=target_dir)
+
+                # Remove the archive after extraction
+                output_path.unlink()
+
+                self.emit_progress(
+                    DownloadProgress(
+                        stage="complete",
+                        progress_percent=100,
+                        current_file=asset_name,
+                        total_files=1,
+                        downloaded_files=1,
+                        downloaded_bytes=downloaded,
+                        total_bytes=total_size,
+                        speed_bytes_per_sec=0,
+                        eta_seconds=0,
+                        message=f"Extraction complete: {asset_name}",
+                    )
+                )
+
+                # Remove the archive after extraction
+                output_path.unlink()
+            else:
+                # Emit completion for non-archive files
+                self.emit_progress(
+                    DownloadProgress(
+                        stage="complete",
+                        progress_percent=100,
+                        current_file=asset_name,
+                        total_files=1,
+                        downloaded_files=1,
+                        downloaded_bytes=downloaded,
+                        total_bytes=total_size,
+                        speed_bytes_per_sec=0,
+                        eta_seconds=0,
+                        message=f"Download complete: {asset_name}",
+                    )
+                )
 
             return target_dir
 
         except Exception as e:
             logger.error(f"GitHub download failed: {e}")
-            self.emit_progress(DownloadProgress(
-                stage="failed",
+            self.emit_progress(
+                DownloadProgress(
+                    stage="failed",
+                    progress_percent=0,
+                    current_file=None,
+                    total_files=0,
+                    downloaded_files=0,
+                    downloaded_bytes=0,
+                    total_bytes=0,
+                    speed_bytes_per_sec=0,
+                    eta_seconds=0,
+                    message=f"Download failed: {str(e)}",
+                )
+            )
+            raise DownloadError(f"Failed to download from GitHub: {e}")
+
+    def cancel(self):
+        """Cancel the current download"""
+        self.cancel_event.set()
+        self.emit_progress(
+            DownloadProgress(
+                stage="cancelled",
                 progress_percent=0,
                 current_file=None,
                 total_files=0,
@@ -628,35 +759,20 @@ class ImprovedDownloader:
                 total_bytes=0,
                 speed_bytes_per_sec=0,
                 eta_seconds=0,
-                message=f"Download failed: {str(e)}"
-            ))
-            raise DownloadError(f"Failed to download from GitHub: {e}")
-
-    def cancel(self):
-        """Cancel the current download"""
-        self.cancel_event.set()
-        self.emit_progress(DownloadProgress(
-            stage="cancelled",
-            progress_percent=0,
-            current_file=None,
-            total_files=0,
-            downloaded_files=0,
-            downloaded_bytes=0,
-            total_bytes=0,
-            speed_bytes_per_sec=0,
-            eta_seconds=0,
-            message="Download cancelled by user"
-        ))
+                message="Download cancelled by user",
+            )
+        )
 
 
 # Convenience functions for backward compatibility with main.py
+
 
 def download_model(
     model_name: str,
     cache_dir: str,
     model_type: str,
     token_file: Optional[str] = None,
-    progress_callback: Optional[Callable[[DownloadProgress], None]] = None
+    progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
 ):
     """
     Download a model with improved progress tracking.
@@ -675,7 +791,7 @@ def download_model(
     huggingface_token = None
     if token_file:
         try:
-            with open(token_file, 'r') as f:
+            with open(token_file, "r") as f:
                 huggingface_token = f.read().strip()
         except (IOError, OSError) as e:
             logger.error(f"Failed to read token file: {e}")
@@ -686,7 +802,7 @@ def download_model(
     downloader = ImprovedDownloader(
         cache_dir=Path(cache_dir),
         huggingface_token=huggingface_token,
-        progress_callback=progress_callback or emit_progress_wrapper
+        progress_callback=progress_callback or emit_progress_wrapper,
     )
 
     # Model repositories mapping
@@ -702,18 +818,20 @@ def download_model(
 
     # Emit initial progress event to signal download start
     # This helps UI immediately switch to loading state
-    emit_progress_wrapper(DownloadProgress(
-        stage="initializing",
-        progress_percent=0,
-        current_file=None,
-        total_files=0,
-        downloaded_files=0,
-        downloaded_bytes=0,
-        total_bytes=0,
-        speed_bytes_per_sec=0,
-        eta_seconds=0,
-        message=f"Starting download of {model_name}..."
-    ))
+    emit_progress_wrapper(
+        DownloadProgress(
+            stage="initializing",
+            progress_percent=0,
+            current_file=None,
+            total_files=0,
+            downloaded_files=0,
+            downloaded_bytes=0,
+            total_bytes=0,
+            speed_bytes_per_sec=0,
+            eta_seconds=0,
+            message=f"Starting download of {model_name}...",
+        )
+    )
 
     try:
         if model_type == "whisper":
@@ -723,8 +841,7 @@ def download_model(
                 return
 
             result_path = downloader.download_from_huggingface(
-                repo_id=repo_id,
-                model_name=model_name
+                repo_id=repo_id, model_name=model_name
             )
 
             # Emit completion event
@@ -737,12 +854,11 @@ def download_model(
                 # Download both models
                 segmentation_dir = downloader.download_from_huggingface(
                     repo_id="pyannote/segmentation-3.0",
-                    model_name="pyannote-segmentation-3.0"
+                    model_name="pyannote-segmentation-3.0",
                 )
 
                 embedding_dir = downloader.download_from_huggingface(
-                    repo_id="pyannote/embedding",
-                    model_name="pyannote-embedding-3.0"
+                    repo_id="pyannote/embedding", model_name="pyannote-embedding-3.0"
                 )
 
                 # Combine paths for completion
@@ -758,13 +874,13 @@ def download_model(
                 downloader.download_from_github(
                     url=segmentation_url,
                     asset_name="sherpa-onnx-segmentation.tar.bz2",
-                    model_name="sherpa-onnx-segmentation"
+                    model_name="sherpa-onnx-segmentation",
                 )
 
                 downloader.download_from_github(
                     url=embedding_url,
                     asset_name="3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
-                    model_name="sherpa-onnx-embedding"
+                    model_name="sherpa-onnx-embedding",
                 )
 
                 target_dir = downloader.cache_dir / model_name
@@ -805,16 +921,17 @@ def emit_progress_wrapper(progress: DownloadProgress):
         "progress": int(progress.progress_percent),  # UI expects integer
         "message": progress.message,
         "data": {
-            "current": current_mb,      # MB value for Rust backend
-            "total": total_mb,          # MB value for Rust backend
+            "current": current_mb,  # MB value for Rust backend
+            "total": total_mb,  # MB value for Rust backend
             "percent": int(progress.progress_percent),
-            "speed_mb_s": speed_mb_s,   # Speed in MB/s
+            "speed_mb_s": speed_mb_s,  # Speed in MB/s
         },
     }
     print(json.dumps(data), flush=True)
 
 
 # Keep existing helper functions for compatibility
+
 
 def emit_error(error: str):
     """Emit an error to stdout as JSON."""

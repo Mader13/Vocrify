@@ -24,6 +24,8 @@ pub mod ffmpeg_manager;
 pub mod whisper_engine;
 pub mod sherpa_diarizer;
 pub mod model_manager;
+pub mod python_bridge;
+pub mod engine_router;
 
 // Re-export FFmpeg types for frontend
 pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgress, get_ffmpeg_status, download_ffmpeg};
@@ -36,6 +38,12 @@ pub use sherpa_diarizer::{SherpaDiarizer, DiarizationProvider, SpeakerSegment};
 
 // Re-export ModelManager types for frontend
 pub use model_manager::{ModelManager, ModelType, ModelInfo};
+
+// Re-export PythonBridge types for frontend
+pub use python_bridge::{PythonBridge, PythonTranscriptionResult, SpeakerSegment as PythonSpeakerSegment};
+
+// Re-export EngineRouter types for frontend
+pub use engine_router::{EngineRouter, EnginePreference, EngineChoice, RouterTranscriptionOptions, RouterTranscriptionResult};
 
 /// Maximum concurrent model downloads
 const MAX_CONCURRENT_DOWNLOADS: usize = 3;
@@ -2504,9 +2512,23 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         });
     }
     
-    // Sherpa-ONNX diarization
-    let seg_path = models_dir.join("sherpa-onnx-segmentation");
-    let emb_path = models_dir.join("sherpa-onnx-embedding");
+    // Sherpa-ONNX diarization - check both flat and nested structures
+    // Nested: models/sherpa-onnx-diarization/sherpa-onnx-segmentation/
+    // Flat: models/sherpa-onnx-segmentation/
+    let nested_seg_path = models_dir.join("sherpa-onnx-diarization").join("sherpa-onnx-segmentation");
+    let nested_emb_path = models_dir.join("sherpa-onnx-diarization").join("sherpa-onnx-embedding");
+    let flat_seg_path = models_dir.join("sherpa-onnx-segmentation");
+    let flat_emb_path = models_dir.join("sherpa-onnx-embedding");
+    
+    let (seg_path, emb_path) = if nested_seg_path.exists() && nested_emb_path.exists() {
+        (nested_seg_path, nested_emb_path)
+    } else if flat_seg_path.exists() && flat_emb_path.exists() {
+        (flat_seg_path, flat_emb_path)
+    } else {
+        // No sherpa-onnx-diarization found
+        return Ok(models);
+    };
+    
     if seg_path.exists() && emb_path.exists() {
         let mut total_size = 0u64;
         for p in [&seg_path, &emb_path] {
