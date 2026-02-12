@@ -812,41 +812,179 @@ interface SettingsState {
 
 ---
 
-## 📋 ФАЗА 3: Оптимизация
+## 📋 ФАЗА 3: Миграция на transcribe-rs
 
-### ✅ Задача 3.1: Удалить Python зависимости для Whisper
+> 🔄 **ОБНОВЛЕНИЕ:** Заменяем whisper-rs на transcribe-rs (https://github.com/cjpais/transcribe-rs)
+>
+> **transcribe-rs** - унифицированная Rust-библиотека с поддержкой:
+>
+> - **Whisper** (GGML) - Metal/Vulkan GPU
+> - **Parakeet** (ONNX) - 30x real-time на M4 Max
+> - **Moonshine** (ONNX) - мультиязычный
+> - **SenseVoice** (ONNX) - китайский/японский/корейский
 
-**Файл:** `ai-engine/requirements.txt`
+### 🔴 Задача 3.1: Заменить whisper-rs на transcribe-rs
 
-Удалить:
+**Файл:** `src-tauri/Cargo.toml`
+
+**Было:**
+
+```toml
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.14", features = ["metal", "tracing_backend"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+whisper-rs = { version = "0.14", features = ["vulkan", "tracing_backend"] }
+```
+
+**Стало:**
+
+```toml
+[dependencies]
+transcribe-rs = { version = "0.2.2", features = ["whisper", "parakeet"] }
+```
+
+**Преимущества:**
+
+- Один dependency вместо двух платформенных
+- Parakeet теперь тоже в Rust (не нужен Python)
+- Единый API для всех движков
+
+---
+
+### 🔴 Задача 3.2: Переписать TranscriptionManager
+
+**Файл:** `src-tauri/src/transcription_manager.rs` (новый, заменить engine_router.rs)
+
+**Архитектура:**
+
+```rust
+use transcribe_rs::{
+    TranscriptionEngine,
+    engines::{
+        whisper::{WhisperEngine, WhisperInferenceParams},
+        parakeet::{ParakeetEngine, ParakeetModelParams},
+    },
+};
+
+enum LoadedEngine {
+    Whisper(WhisperEngine),
+    Parakeet(ParakeetEngine),
+}
+
+pub struct TranscriptionManager {
+    engine: Arc<Mutex<Option<LoadedEngine>>>,
+    models_dir: PathBuf,
+}
+```
+
+**API:**
+
+- `load_model(model_id: &str)` - загрузка модели
+- `transcribe_file(path: &Path)` - транскрипция файла
+- `transcribe_samples(samples: &[f32])` - транскрипция сэмплов
+
+---
+
+### 🔴 Задача 3.3: Обновить ModelManager для transcribe-rs
+
+**Файл:** `src-tauri/src/model_manager.rs`
+
+**Изменения:**
+
+- Добавить поддержку Parakeet моделей (ONNX формат)
+- Обновить URL для скачивания:
+  - Parakeet V3: `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
+  - Whisper GGML: `https://huggingface.co/ggerganov/whisper.cpp`
+
+**Структура моделей:**
 
 ```
-faster-whisper
-ctranslate2
+models/
+├── whisper-base/
+│   └── ggml-base.bin
+├── parakeet-tdt-0.6b-v3-int8/
+│   ├── encoder-model.int8.onnx
+│   ├── decoder_joint-model.int8.onnx
+│   ├── nemo128.onnx
+│   └── vocab.txt
 ```
 
 ---
 
-### ✅ Задача 3.2: Удалить Python зависимости для Sherpa
+### 🔴 Задача 3.4: Добавить Tauri команды
 
-**Файл:** `ai-engine/requirements.txt`
+**Файл:** `src-tauri/src/lib.rs`
 
-Удалить:
+**Команды:**
 
-```
-onnxruntime  # если используется только для sherpa
+```rust
+#[tauri::command]
+async fn load_model(model_id: String, state: State<'_, AppState>) -> Result<(), String>
+
+#[tauri::command]
+async fn transcribe_rust(
+    task_id: String,
+    file_path: String,
+    model_id: String,
+    language: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<TranscriptionResult, String>
+
+#[tauri::command]
+async fn unload_model(state: State<'_, AppState>) -> Result<(), String>
 ```
 
 ---
 
-### ✅ Задача 3.3: Обновить документацию
+### 🔴 Задача 3.5: Интегрировать в UI
+
+**Файл:** `src/services/transcription.ts`
+
+**Изменения:**
+
+- Удалить Python fallback для Whisper/Parakeet
+- Оставить Python только для диаризации
+- Обновить типы моделей
+
+**Новый flow:**
+
+```
+1. UI вызывает transcribe_rust (Rust)
+2. Rust транскрибирует через transcribe-rs
+3. Если нужна диаризация → вызов Python bridge
+4. Результат возвращается в UI
+```
+
+---
+
+### ✅ Задача 3.6: Удалить Python зависимости
+
+**Файл:** `ai-engine/requirements.txt`
+
+**Удалить:**
+
+```
+faster-whisper==1.2.1
+```
+
+**Оставить (диаризация):**
+
+```
+pyannote.audio==3.3.1
+sherpa-onnx==1.12.23
+onnxruntime==1.18.0
+```
+
+---
+
+### ✅ Задача 3.7: Обновить документацию
 
 **Файлы:**
 
-- `AGENTS.md` - обновить команды и GPU поддержку
-- `README.md` - обновить требования
-- `docs/MIGRATION.md` (новый) - гайд миграции
-- `docs/GPU_SUPPORT.md` (новый) - документация по GPU поддержке
+- `AGENTS.md` - новая архитектура
+- `README.md` - новые модели (Parakeet V3)
+- `docs/MODELS.md` (новый) - гайд по моделям
 
 ---
 
@@ -855,59 +993,82 @@ onnxruntime  # если используется только для sherpa
 ```
 Задача  | Зависит от  | Параллельно с | Сложность | Время
 --------|-------------|---------------|-----------|-------
-1.1     | -           | 1.3, 1.7      | ⭐⭐       | 30 мин
-1.2     | 1.1         | -             | ⭐⭐       | 20 мин
-1.3     | -           | 1.1, 1.7      | ⭐         | 15 мин
-1.4     | 1.1, 1.2    | -             | ⭐⭐       | 45 мин
-1.5     | 1.1-1.4, 1.7| -             | ⭐         | 30 мин
-1.6     | 1.2         | -             | ⭐⭐       | 20 мин
-1.7     | -           | 1.1, 1.3      | ⭐⭐       | 1 час
-2.1     | -           | 2.3           | ⭐         | 15 мин
-2.2     | 2.1         | -             | ⭐⭐⭐⭐    | 4 часа
-2.3     | -           | 2.1           | ⭐⭐       | 2 часа
-2.4     | 2.2, 2.3    | -             | ⭐⭐⭐     | 3 часа
-2.5     | 2.2         | -             | ⭐⭐⭐     | 2.5 часа
-2.6     | 2.4, 2.5    | -             | ⭐⭐⭐     | 3 часа
-3.1     | 2.6         | -             | ⭐         | 15 мин
-3.2     | 2.6         | -             | ⭐         | 15 мин
-3.3     | Все         | -             | ⭐⭐       | 1.5 часа
+1.1     | -           | 1.3, 1.7      | ⭐⭐       | 30 мин  ✅ DONE
+1.2     | 1.1         | -             | ⭐⭐       | 20 мин  ✅ DONE
+1.3     | -           | 1.1, 1.7      | ⭐         | 15 мин  ✅ DONE
+1.4     | 1.1, 1.2    | -             | ⭐⭐       | 45 мин  ✅ DONE
+1.5     | 1.1-1.4, 1.7| -             | ⭐         | 30 мин  ✅ DONE
+1.6     | 1.2         | -             | ⭐⭐       | 20 мин  ✅ DONE
+1.7     | -           | 1.1, 1.3      | ⭐⭐       | 1 час   ✅ DONE
+2.1     | -           | 2.3           | ⭐         | 15 мин  ✅ DONE (устарело)
+2.2     | 2.1         | -             | ⭐⭐⭐⭐    | 4 часа  ✅ DONE (устарело)
+2.3     | -           | 2.1           | ⭐⭐       | 2 часа  ✅ DONE (устарело)
+2.4     | 2.2, 2.3    | -             | ⭐⭐⭐     | 3 часа  ✅ DONE (устарело)
+2.5     | 2.2         | -             | ⭐⭐⭐     | 2.5 часа ✅ DONE (устарело)
+2.6     | 2.4, 2.5    | -             | ⭐⭐⭐     | 3 часа  ⚠️ УСТАРЕЛО
+3.1     | -           | 3.3           | ⭐         | 30 мин  🔴 transcribe-rs
+3.2     | 3.1         | -             | ⭐⭐⭐     | 3 часа  🔴 TranscriptionManager
+3.3     | -           | 3.1           | ⭐⭐       | 1.5 часа 🔴 ModelManager
+3.4     | 3.2         | -             | ⭐⭐       | 1 час
+3.5     | 3.4         | -             | ⭐⭐       | 1.5 часа
+3.6     | 3.5         | -             | ⭐         | 15 мин
+3.7     | 3.6         | -             | ⭐⭐       | 1 час
 ```
 
-**Общее время:** ~20 часов (2-3 рабочих дня)
+**Общее время Фазы 3:** ~8.5 часов (1-2 рабочих дня)
+
+**Параллелизация:**
+
+- 3.1 + 3.3 можно делать параллельно (Cargo.toml + ModelManager)
+- 3.2 после 3.1
+- 3.4-3.7 последовательно
 
 ---
 
 ## 🎯 Критерии успеха
 
-### Фаза 1
+### Фаза 1 ✅ ВЫПОЛНЕНО
 
-- [ ] PyAnnote скачивается → определяется → удаляется корректно
-- [ ] Sherpa скачивается → определяется → удаляется корректно
-- [ ] Whisper работает как раньше
-- [ ] Тест `test_model_lifecycle.py` проходит
-- [ ] Тест `get_local_models` (Rust) проходит
-- [ ] Vulkan device detection работает
-- [ ] SH2.mp4 транскрибируется с диаризацией
+- [x] PyAnnote скачивается → определяется → удаляется корректно
+- [x] Sherpa скачивается → определяется → удаляется корректно
+- [x] Whisper работает как раньше
+- [x] Тест `test_model_lifecycle.py` проходит
+- [x] Тест `get_local_models` (Rust) проходит
+- [x] Vulkan device detection работает
+- [x] SH2.mp4 транскрибируется с диаризацией
 
-### Фаза 2
+### Фаза 2 ⚠️ УСТАРЕЛО
 
-- [ ] Whisper работает через whisper-rs (GGML модели)
-- [ ] GPU ускорение: CUDA (NVIDIA), Metal (Apple), Vulkan (AMD/Intel)
-- [ ] **Авто‑fallback на CPU при ошибке GPU**
-- [ ] **Авто‑fallback на Python при ошибке Rust Whisper**
-- [ ] PyAnnote/Parakeet диаризация работает через Python bridge
-- [ ] Device detection кешируется (один раз на запуск)
-- [ ] Feature flag `rust-whisper` для rollback работает
-- [ ] **Один билд Windows/Linux с CUDA+Vulkan SDK**
-- [ ] Cold start < 1.5 сек до первого сегмента
-- [ ] RTF < 0.1 на GPU (10× быстрее реального времени)
+> Модули whisper-rs созданы, но будут заменены на transcribe-rs
 
-### Фаза 3
+- [x] Модули созданы (whisper_engine.rs, engine_router.rs, python_bridge.rs, model_manager.rs)
+- [ ] **🔴 ЗАМЕНА:** whisper-rs → transcribe-rs
 
-- [ ] Размер venv сокращен на ~200MB
-- [ ] Время запуска < 1 сек
-- [ ] Документация актуальна
-- [ ] GPU поддержка задокументирована
+### Фаза 3 🔴 НОВЫЙ ПЛАН (transcribe-rs)
+
+- [ ] transcribe-rs добавлен в Cargo.toml
+- [ ] TranscriptionManager реализован
+- [ ] Parakeet V3 работает через Rust
+- [ ] Whisper работает через Rust
+- [ ] UI интегрирован с Rust-движком
+- [ ] Python используется только для диаризации
+- [ ] faster-whisper удалён из requirements.txt
+- [ ] Документация обновлена
+
+### Производительность (цель)
+
+| Модель       | Устройство | Цель           |
+| ------------ | ---------- | -------------- |
+| Parakeet V3  | M4 Max     | 30x real-time  |
+| Parakeet V3  | RTX 4060   | 20x real-time  |
+| Whisper Base | RTX 4060   | 10x real-time  |
+| Whisper Base | CPU        | 1-2x real-time |
+
+### Что остаётся в Python
+
+- **PyAnnote диаризация** - требует HuggingFace токен
+- **Sherpa-ONNX диаризация** - альтернатива без токена
+- **Всё остальное** → Rust (transcribe-rs)
 
 ---
 
@@ -927,19 +1088,34 @@ onnxruntime  # если используется только для sherpa
 
 ## 🚀 Готовность к началу
 
-**Параллельный запуск (Фаза 1):**
+### Фаза 1 ✅ ЗАВЕРШЕНА
 
-- Группа A: 1.1 + 1.3 + 1.7 (независимые)
-- Группа B: 1.2 + 1.6 (после 1.1)
-- Группа C: 1.4 (после 1.1, 1.2)
-- Группа D: 1.5 (после всех)
+### Фаза 2 ⚠️ УСТАРЕЛА
 
-**Параллельный запуск (Фаза 2):**
+Модули whisper-rs будут заменены на transcribe-rs.
 
-- Группа A: 2.1 (Cargo.toml) + 2.3 (PythonBridge) — независимые
-- Группа B: 2.2 (WhisperEngine) после 2.1
-- Группа C: 2.4 (EngineRouter) после 2.2 + 2.3
-- Группа D: 2.5 (ModelManager) после 2.2
-- Группа E: 2.6 (UI миграция) после 2.4 + 2.5
+### Фаза 3 🔴 ГОТОВНА К НАЧАЛУ
+
+**Параллельный запуск:**
+
+```
+Группа A: 3.1 (Cargo.toml) + 3.3 (ModelManager) — независимые
+Группа B: 3.2 (TranscriptionManager) после 3.1
+Группа C: 3.4 (Tauri команды) после 3.2
+Группа D: 3.5 (UI интеграция) после 3.4
+Группа E: 3.6 (удаление Python) + 3.7 (документация) после 3.5
+```
+
+**Риски:**
+
+- transcribe-rs v0.2.2 может иметь баги (проверить issues)
+- Модели Parakeet нужно скачивать в другом формате (ONNX)
+- Требуется тестирование на всех платформах
+
+**Митигация:**
+
+- Начать с Whisper (проверенный путь)
+- Добавить Parakeet после успешного тестирования Whisper
+- Оставить Python fallback на случай проблем
 
 ---

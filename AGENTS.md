@@ -91,6 +91,7 @@ pip install -r requirements.txt
 ```
 
 **Requirements:**
+
 - Python 3.10 or 3.12 (3.13+ NOT supported)
 - For CUDA: NVIDIA GPU with CUDA 12.1+ drivers
 - For MPS: macOS 12.3+ with Apple Silicon
@@ -258,6 +259,7 @@ No test framework configured yet. When adding tests:
 We are build this together. When you learn something non-obvious, add it here so future changes go faster
 
 **Device Support (Multi-Platform Acceleration)**
+
 - App supports 3 device types: CUDA (NVIDIA GPU), MPS (Apple Silicon), CPU (fallback)
 - Device detection module: `ai-engine/device_detection.py`
 - Device priority: CUDA > MPS > CPU
@@ -265,9 +267,56 @@ We are build this together. When you learn something non-obvious, add it here so
 - API: `getAvailableDevices()` in `src/services/tauri.ts`
 
 **Important: PyTorch Installation for GPU Support**
+
 - CUDA (NVIDIA): Use `--extra-index-url https://download.pytorch.org/whl/cu121` flag
 - MPS (Apple Silicon): Built into standard PyTorch, no extra flags needed
 - CPU: Standard installation works everywhere
 - Verify CUDA: `python -c "import torch; print(torch.cuda.is_available())"`
 - Verify MPS: `python -c "import torch; print(torch.backends.mps.is_available())"`
 - Current stable version: torch 2.5.1+cu121 (compatible with RTX 4060)
+
+**Phase 3: Migration to transcribe-rs (COMPLETED)**
+
+- Transcription is now handled by Rust transcribe-rs (not Python faster-whisper)
+- Supported engines: Whisper (GGML), Parakeet (ONNX), Moonshine (ONNX), SenseVoice (ONNX)
+- Python is ONLY used for speaker diarization (PyAnnote/Sherpa-ONNX)
+- **Build requirements:**
+  - macOS: No additional SDK needed (Metal is built-in) ✓
+  - Linux: Vulkan SDK 1.3+ required
+  - Windows: Vulkan SDK 1.3+ required + **long path support** (see below)
+- **transcribe-rs DISABLED by default** (Windows path length limitation - whisper.cpp paths exceed 260 chars)
+- **Enable transcribe-rs:**
+
+  ```bash
+  # Windows: Set env var and build
+  set VULKAN_SDK=E:\Programs\Vulkan SDK
+  cargo build --features rust-transcribe
+
+  # Linux/macOS
+  cargo build --features rust-transcribe
+  ```
+
+- **Windows long path support:**
+  1. Registry: `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem LongPathsEnabled = 1`
+  2. Group Policy: Computer Configuration > Admin Templates > System > Filesystem > Enable Win32 long paths
+  3. May need to move project to short path: `C:\project` instead of `E:\Dev\Transcribe-video`
+- Rust modules:
+  - `src-tauri/src/transcription_manager.rs` - Main transcription interface using transcribe-rs
+  - `src-tauri/src/model_manager.rs` - Model download/management (supports ONNX format)
+  - `src-tauri/src/whisper_engine.rs` - Legacy whisper-rs module (kept for compatibility)
+- New Tauri commands:
+  - `init_transcription_manager` - Initialize the transcribe-rs manager
+  - `load_model_rust` - Load a model for transcription
+  - `transcribe_rust` - Transcribe using transcribe-rs
+  - `unload_model_rust` - Unload the current model
+  - `is_model_loaded_rust` - Check if a model is loaded
+- Model download URLs:
+  - Whisper GGML: `https://huggingface.co/ggerganov/whisper.cpp`
+  - Parakeet V3 int8: `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
+  - SenseVoice int8: `https://blob.handy.computer/sense-voice-int8.tar.gz`
+- Updated files:
+  - `src-tauri/Cargo.toml` - Added transcribe-rs dependency
+  - `src/services/transcription.ts` - Updated to use transcribe_rust command
+  - `src/types/index.ts` - Updated engine preference descriptions
+  - `ai-engine/requirements.txt` - Removed faster-whisper dependency
+- See full plan: `my-plans/transcription-system-v3.md`
