@@ -488,14 +488,24 @@ class ModelRegistry:
                         "deleted_paths": deleted_paths,
                     }
 
-            if not deleted_paths:
-                return {
-                    "success": False,
-                    "message": f"Sherpa diarization models not found",
-                    "deleted_paths": deleted_paths,
-                }
+            # Delete flat structure (old structure that Rust get_local_models_internal checks)
+            # This is critical - Rust checks for sherpa-onnx-segmentation and sherpa-onnx-embedding
+            # in the cache root, so we must delete them here
+            flat_seg = self.cache_dir / "sherpa-onnx-segmentation"
+            flat_emb = self.cache_dir / "sherpa-onnx-embedding"
+            for flat_dir in [flat_seg, flat_emb]:
+                if flat_dir.exists():
+                    try:
+                        shutil.rmtree(flat_dir)
+                        deleted_paths.append(str(flat_dir))
+                    except Exception as e:
+                        return {
+                            "success": False,
+                            "message": f"Failed to delete sherpa flat directory: {str(e)}",
+                            "deleted_paths": deleted_paths,
+                        }
 
-            # Fallback: Check individual directories (old structure)
+            # Fallback: Check legacy individual directories (very old structure)
             if not deleted_paths:
                 sherpa_dir = self.diarization_cache / "sherpa-onnx"
                 seg_dir_legacy = sherpa_dir / "sherpa-onnx-pyannote-segmentation-3-0"
@@ -606,6 +616,20 @@ class ModelRegistry:
                 "message": f"Unknown model: {model_name}",
                 "deleted_paths": deleted_paths,
             }
+
+        # Verify all deleted paths are actually removed
+        import time
+
+        time.sleep(0.5)  # Give filesystem time to sync
+
+        for path_str in deleted_paths:
+            path = Path(path_str)
+            if path.exists():
+                return {
+                    "success": False,
+                    "message": f"Failed to verify deletion of {model_name}: {path_str} still exists",
+                    "deleted_paths": deleted_paths,
+                }
 
         return {
             "success": True,
