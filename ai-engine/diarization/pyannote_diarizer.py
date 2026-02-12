@@ -7,11 +7,11 @@ Uses pretrained PyAnnote models with offline mode support.
 import os
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from pydub import AudioSegment
 
-from .base import BaseDiarizer
+from .base import BaseDiarizer, SpeakerTurn
 from model_registry import ModelRegistry
 
 
@@ -111,7 +111,7 @@ class PyAnnoteDiarizer(BaseDiarizer):
         self,
         segments: List[Dict],
         file_path: str,
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], List[SpeakerTurn]]:
         """
         Add speaker labels using PyAnnote.
 
@@ -120,10 +120,10 @@ class PyAnnoteDiarizer(BaseDiarizer):
             file_path: Path to audio file
 
         Returns:
-            Segments with speaker labels
+            Tuple of (segments with speaker labels, list of speaker turns)
         """
         if not segments:
-            return segments
+            return segments, []
 
         temp_wav = None
         try:
@@ -145,9 +145,17 @@ class PyAnnoteDiarizer(BaseDiarizer):
 
             if not diarization:
                 print("Warning: PyAnnote returned no speaker segments")
-                return segments
+                return segments, []
 
-            # Map speakers to segments
+            # Build speaker turns from PyAnnote diarization
+            speaker_turns = []
+            for turn, _, speaker in diarization.itertracks(yield_label=True):
+                speaker_turn = SpeakerTurn(
+                    speaker=speaker, start=turn.start, end=turn.end
+                )
+                speaker_turns.append(speaker_turn)
+
+            # Map speakers to transcription segments
             for seg in segments:
                 start = seg["start"]
                 end = seg["end"]
@@ -156,11 +164,11 @@ class PyAnnoteDiarizer(BaseDiarizer):
                 speaker = self._find_speaker_at_time(diarization, start, end)
                 seg["speaker"] = speaker if speaker else None
 
-            return segments
+            return segments, speaker_turns
 
         except Exception as e:
             print(f"PyAnnote diarization error: {e}")
-            return segments
+            return segments, []
         finally:
             if temp_wav and os.path.exists(temp_wav):
                 try:

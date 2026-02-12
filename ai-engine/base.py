@@ -64,11 +64,13 @@ class DiarizationMixin:
         from diarization import get_diarizer
 
         try:
+            print(f"[INFO] Initializing diarization provider: {provider}")
             self._diarizer = get_diarizer(provider, device=device)
             self._diarization_provider = provider
+            print(f"[INFO] Diarization provider '{provider}' initialized successfully")
         except Exception as e:
-            print(f"Warning: Failed to initialize {provider} diarizer: {e}")
-            print("Continuing without diarization")
+            print(f"[ERROR] Failed to initialize {provider} diarizer: {e}")
+            print("[WARN] Continuing without diarization")
             self._diarizer = None
             self._diarization_provider = "none"
 
@@ -76,7 +78,7 @@ class DiarizationMixin:
         self,
         segments: list[dict],
         file_path: str,
-    ) -> list[dict]:
+    ) -> tuple[list[dict], list]:
         """
         Add speaker labels to transcription segments using the configured diarizer.
 
@@ -85,16 +87,27 @@ class DiarizationMixin:
             file_path: Path to the original media file
 
         Returns:
-            Segments with speaker labels added (or unchanged if no diarizer)
+            Tuple of (segments with speaker labels, list of speaker turns)
         """
         if not self._diarizer:
-            return segments
+            print(
+                f"[WARN] Diarization skipped: no diarizer initialized (provider={self._diarization_provider})"
+            )
+            return segments, []
 
         try:
-            return self._diarizer.diarize(segments, file_path)
+            print(
+                f"[INFO] Running diarization with {self._diarization_provider} on {len(segments)} segments..."
+            )
+            result = self._diarizer.diarize(segments, file_path)
+            print(f"[INFO] Diarization complete: {len(result[1])} speaker turns found")
+            return result
         except Exception as e:
-            print(f"Warning: Diarization failed: {e}")
-            return segments
+            print(f"[ERROR] Diarization failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return segments, []
 
     @property
     def supports_diarization(self) -> bool:

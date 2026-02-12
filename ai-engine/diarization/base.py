@@ -3,7 +3,17 @@ Base class for speaker diarization providers.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from typing import List, Dict, Optional, Tuple
+
+
+@dataclass
+class SpeakerTurn:
+    """A speaker turn with start/end times."""
+
+    speaker: str
+    start: float
+    end: float
 
 
 class BaseDiarizer(ABC):
@@ -27,7 +37,7 @@ class BaseDiarizer(ABC):
         self,
         segments: List[Dict],
         file_path: str,
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], List[SpeakerTurn]]:
         """
         Add speaker labels to transcription segments.
 
@@ -36,7 +46,7 @@ class BaseDiarizer(ABC):
             file_path: Path to the original media file
 
         Returns:
-            Segments with 'speaker' field populated
+            Tuple of (segments with 'speaker' field populated, list of speaker turns)
         """
         pass
 
@@ -45,3 +55,39 @@ class BaseDiarizer(ABC):
     def name(self) -> str:
         """Return the diarizer name."""
         pass
+
+    def _segments_to_turns(self, segments: List[Dict]) -> List[SpeakerTurn]:
+        """
+        Convert segments with speaker labels to speaker turns.
+        Helper for diarizers that need to reconstruct turns from segments.
+
+        Args:
+            segments: Segments with 'speaker' field
+
+        Returns:
+            List of speaker turns
+        """
+        if not segments:
+            return []
+
+        turns = []
+        i = 0
+        while i < len(segments):
+            speaker = segments[i].get("speaker")
+            if not speaker:
+                i += 1
+                continue
+
+            start = segments[i]["start"]
+            end = segments[i]["end"]
+
+            # Merge consecutive same-speaker segments
+            j = i + 1
+            while j < len(segments) and segments[j].get("speaker") == speaker:
+                end = segments[j]["end"]
+                j += 1
+
+            turns.append(SpeakerTurn(speaker=speaker, start=start, end=end))
+            i = j
+
+        return turns

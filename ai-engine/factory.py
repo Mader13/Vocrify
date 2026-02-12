@@ -40,6 +40,7 @@ class ModelFactory:
             return provider
 
         registry = ModelRegistry(cache_dir=cache_dir)
+        logger.info(f"Validating diarization provider: {provider}")
 
         if provider == "sherpa-onnx" or provider == "sherpa":
             paths = registry.get_sherpa_diarization_paths()
@@ -75,6 +76,7 @@ class ModelFactory:
                 )
                 return "none"
 
+        logger.info(f"Diarization provider validated: {provider}")
         return provider
 
     @classmethod

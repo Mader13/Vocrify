@@ -44,14 +44,11 @@ class BatchProcessor:
         # Lazy import of model_pool to avoid circular dependency
         if model_pool is None:
             from model_pool import model_pool as default_pool
+
             self.model_pool = default_pool
 
     def transcribe_batch(
-        self,
-        files: List[str],
-        model_name: str,
-        device: str = "cpu",
-        **options
+        self, files: List[str], model_name: str, device: str = "cpu", **options
     ) -> List[Dict[str, Any]]:
         """
         Transcribe multiple files in parallel.
@@ -70,20 +67,12 @@ class BatchProcessor:
 
         # Check if model supports native batching (Parakeet)
         if model_name.startswith("parakeet"):
-            return self._transcribe_batch_native(
-                files, model_name, device, **options
-            )
+            return self._transcribe_batch_native(files, model_name, device, **options)
         else:
-            return self._transcribe_batch_parallel(
-                files, model_name, device, **options
-            )
+            return self._transcribe_batch_parallel(files, model_name, device, **options)
 
     def _transcribe_batch_parallel(
-        self,
-        files: List[str],
-        model_name: str,
-        device: str = "cpu",
-        **options
+        self, files: List[str], model_name: str, device: str = "cpu", **options
     ) -> List[Dict[str, Any]]:
         """
         Transcribe multiple files in parallel using ThreadPoolExecutor.
@@ -95,10 +84,7 @@ class BatchProcessor:
             model = self.model_pool.get_model(model_name, device=device, **options)
         except Exception as e:
             logger.error(f"Failed to load model {model_name}: {e}")
-            return [
-                {"file": file, "error": str(e)}
-                for file in files
-            ]
+            return [{"file": file, "error": str(e)} for file in files]
 
         # Submit all tasks
         results = []
@@ -108,10 +94,7 @@ class BatchProcessor:
             future_to_file = {}
             for file_path in files:
                 future = executor.submit(
-                    self._transcribe_single,
-                    model,
-                    file_path,
-                    **options
+                    self._transcribe_single, model, file_path, **options
                 )
                 future_to_file[future] = file_path
 
@@ -121,28 +104,28 @@ class BatchProcessor:
 
                 try:
                     result = future.result(timeout=3600)  # 1 hour timeout per file
-                    results.append({
-                        "file": file_path,
-                        "result": result,
-                    })
+                    results.append(
+                        {
+                            "file": file_path,
+                            "result": result,
+                        }
+                    )
                     logger.info(f"Successfully transcribed: {file_path}")
 
                 except Exception as e:
                     error_msg = str(e)
-                    results.append({
-                        "file": file_path,
-                        "error": error_msg,
-                    })
+                    results.append(
+                        {
+                            "file": file_path,
+                            "error": error_msg,
+                        }
+                    )
                     logger.error(f"Failed to transcribe {file_path}: {error_msg}")
 
         return results
 
     def _transcribe_batch_native(
-        self,
-        files: List[str],
-        model_name: str,
-        device: str = "cpu",
-        **options
+        self, files: List[str], model_name: str, device: str = "cpu", **options
     ) -> List[Dict[str, Any]]:
         """
         Transcribe multiple files using native batch processing.
@@ -155,13 +138,10 @@ class BatchProcessor:
             model = self.model_pool.get_model(model_name, device=device, **options)
 
             # Check if model supports batch processing
-            if hasattr(model, 'transcribe_batch'):
+            if hasattr(model, "transcribe_batch"):
                 # Use native batch processing
                 try:
-                    results_batch = model.transcribe_batch(
-                        files,
-                        **options
-                    )
+                    results_batch = model.transcribe_batch(files, **options)
 
                     # Convert batch results to standard format
                     results = [
@@ -169,25 +149,26 @@ class BatchProcessor:
                         for file, result in zip(files, results_batch)
                     ]
 
-                    logger.info(f"Native batch processing completed for {len(files)} files")
+                    logger.info(
+                        f"Native batch processing completed for {len(files)} files"
+                    )
                     return results
 
                 except Exception as e:
-                    logger.warning(f"Native batch processing failed: {e}. Falling back to parallel processing.")
+                    logger.warning(
+                        f"Native batch processing failed: {e}. Falling back to parallel processing."
+                    )
                     # Fall through to parallel processing
 
         except Exception as e:
-            logger.warning(f"Failed to load model for native batching: {e}. Using parallel processing.")
+            logger.warning(
+                f"Failed to load model for native batching: {e}. Using parallel processing."
+            )
 
         # Fallback to parallel processing
         return self._transcribe_batch_parallel(files, model_name, device, **options)
 
-    def _transcribe_single(
-        self,
-        model: Any,
-        file_path: str,
-        **options
-    ) -> List[Dict]:
+    def _transcribe_single(self, model: Any, file_path: str, **options) -> List[Dict]:
         """
         Transcribe a single file.
 
@@ -209,17 +190,13 @@ class BatchProcessor:
         )
 
         # Diarization if requested
-        if enable_diarization and hasattr(model, 'diarize'):
-            segments = model.diarize(segments, file_path)
+        if enable_diarization and hasattr(model, "diarize"):
+            segments, _speaker_turns = model.diarize(segments, file_path)
 
         return segments
 
     async def transcribe_batch_async(
-        self,
-        files: List[str],
-        model_name: str,
-        device: str = "cpu",
-        **options
+        self, files: List[str], model_name: str, device: str = "cpu", **options
     ) -> List[Dict[str, Any]]:
         """
         Transcribe multiple files asynchronously.
@@ -240,12 +217,7 @@ class BatchProcessor:
 
         # Run in thread pool to avoid blocking event loop
         return await loop.run_in_executor(
-            None,
-            self.transcribe_batch,
-            files,
-            model_name,
-            device,
-            **options
+            None, self.transcribe_batch, files, model_name, device, **options
         )
 
 
@@ -255,7 +227,7 @@ def transcribe_multiple_files(
     model_name: str = "whisper-base",
     device: str = "cpu",
     max_workers: int = 4,
-    **options
+    **options,
 ) -> List[Dict[str, Any]]:
     """
     Convenience function to transcribe multiple files.

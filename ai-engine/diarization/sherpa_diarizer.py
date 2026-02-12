@@ -7,11 +7,11 @@ Uses offline ONNX models for fast CPU/CUDA speaker segmentation and embedding.
 import os
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 from pydub import AudioSegment
 
-from .base import BaseDiarizer
+from .base import BaseDiarizer, SpeakerTurn
 from model_registry import ModelRegistry
 
 
@@ -83,9 +83,9 @@ class SherpaDiarizer(BaseDiarizer):
             )
 
             # Create embedding config
-            emb_dir = emb_path.parent
+            # emb_path is the direct path to the .onnx file (not in a subdirectory)
             emb_config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
-                model=str(emb_dir / "model.onnx"),
+                model=str(emb_path),
                 provider=provider,
             )
 
@@ -115,7 +115,7 @@ class SherpaDiarizer(BaseDiarizer):
         self,
         segments: List[Dict],
         file_path: str,
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], List[SpeakerTurn]]:
         """
         Add speaker labels using Sherpa-ONNX.
 
@@ -124,10 +124,10 @@ class SherpaDiarizer(BaseDiarizer):
             file_path: Path to audio file
 
         Returns:
-            Segments with speaker labels
+            Tuple of (segments with speaker labels, list of speaker turns)
         """
         if not segments:
-            return segments
+            return segments, []
 
         temp_wav = None
         try:
@@ -139,9 +139,19 @@ class SherpaDiarizer(BaseDiarizer):
 
             if not result or not result.segments:
                 print("Warning: Sherpa-ONNX returned no speaker segments")
-                return segments
+                return segments, []
 
-            # Map speakers to segments
+            # Build speaker turns from Sherpa segments
+            speaker_turns = []
+            for spk_seg in result.segments:
+                turn = SpeakerTurn(
+                    speaker=f"SPEAKER_{spk_seg.speaker:02d}",
+                    start=spk_seg.start / 1000.0,  # Convert ms to seconds
+                    end=spk_seg.end / 1000.0,
+                )
+                speaker_turns.append(turn)
+
+            # Map speakers to transcription segments
             for seg in segments:
                 start = seg["start"]
                 end = seg["end"]
@@ -150,11 +160,11 @@ class SherpaDiarizer(BaseDiarizer):
                 speaker = self._find_speaker_at_time(result.segments, start, end)
                 seg["speaker"] = speaker if speaker else None
 
-            return segments
+            return segments, speaker_turns
 
         except Exception as e:
             print(f"Sherpa-ONNX diarization error: {e}")
-            return segments
+            return segments, []
         finally:
             if temp_wav and os.path.exists(temp_wav):
                 try:

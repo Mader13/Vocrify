@@ -170,18 +170,23 @@ class ModelRegistry:
         Returns:
             Dict with 'segmentation' and 'embedding' paths (or None if not cached)
         """
-        sherpa_dir = self.diarization_cache / "sherpa-onnx"
+        # Models are downloaded to sherpa-onnx-diarization/ by downloader.py
+        sherpa_dir = self.cache_dir / "sherpa-onnx-diarization"
 
-        # Segmentation model
+        # Segmentation model: sherpa-onnx-diarization/sherpa-onnx-segmentation/sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx
         seg_path = (
-            sherpa_dir / "sherpa-onnx-pyannote-segmentation-3-0" / "model.int8.onnx"
+            sherpa_dir
+            / "sherpa-onnx-segmentation"
+            / "sherpa-onnx-pyannote-segmentation-3-0"
+            / "model.int8.onnx"
         )
 
-        # Embedding model
+        # Embedding model: sherpa-onnx-diarization/sherpa-onnx-embedding/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
+        # Note: The embedding is downloaded as a single .onnx file, not in a subdirectory
         emb_path = (
             sherpa_dir
-            / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k"
-            / "model.onnx"
+            / "sherpa-onnx-embedding"
+            / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
         )
 
         return {
@@ -289,10 +294,10 @@ class ModelRegistry:
         sherpa_paths = self.get_sherpa_diarization_paths()
         models.append(
             ModelInfo(
-                name="sherpa-diarization",
+                name="sherpa-onnx-diarization",
                 provider="sherpa-onnx",
                 available=all(p is not None for p in sherpa_paths.values()),
-                path=self.diarization_cache / "sherpa-onnx",
+                path=self.cache_dir / "sherpa-onnx-diarization",
             )
         )
 
@@ -315,7 +320,7 @@ class ModelRegistry:
 
         Args:
             model_name: Model name (e.g., "whisper-base", "distil-large-v3",
-                        "parakeet-0.6b", "sherpa-diarization", "pyannote-diarization")
+                        "parakeet-0.6b", "sherpa-onnx-diarization", "pyannote-diarization")
 
         Returns:
             Dict with 'success' (bool), 'message' (str), and 'deleted_paths' (list of str)
@@ -466,37 +471,31 @@ class ModelRegistry:
                         "deleted_paths": deleted_paths,
                     }
 
-        elif model_name == "sherpa-diarization":
-            # Sherpa diarization - check direct directories first
-            # Downloader creates: {cache_dir}/sherpa-onnx-segmentation/ and {cache_dir}/sherpa-onnx-embedding/
+        elif model_name == "sherpa-onnx-diarization":
+            # Sherpa diarization - models are in {cache_dir}/sherpa-onnx-diarization/
+            # Structure: {cache_dir}/sherpa-onnx-diarization/sherpa-onnx-segmentation/ and sherpa-onnx-embedding/
 
-            # Segmentation model
-            seg_dir = self.cache_dir / "sherpa-onnx-segmentation"
-            if seg_dir.exists():
+            # Check if the parent directory exists
+            sherpa_parent = self.cache_dir / "sherpa-onnx-diarization"
+            if sherpa_parent.exists():
                 try:
-                    shutil.rmtree(seg_dir)
-                    deleted_paths.append(str(seg_dir))
+                    shutil.rmtree(sherpa_parent)
+                    deleted_paths.append(str(sherpa_parent))
                 except Exception as e:
                     return {
                         "success": False,
-                        "message": f"Failed to delete sherpa segmentation: {str(e)}",
+                        "message": f"Failed to delete sherpa diarization: {str(e)}",
                         "deleted_paths": deleted_paths,
                     }
 
-            # Embedding model
-            emb_dir = self.cache_dir / "sherpa-onnx-embedding"
-            if emb_dir.exists():
-                try:
-                    shutil.rmtree(emb_dir)
-                    deleted_paths.append(str(emb_dir))
-                except Exception as e:
-                    return {
-                        "success": False,
-                        "message": f"Failed to delete sherpa embedding: {str(e)}",
-                        "deleted_paths": deleted_paths,
-                    }
+            if not deleted_paths:
+                return {
+                    "success": False,
+                    "message": f"Sherpa diarization models not found",
+                    "deleted_paths": deleted_paths,
+                }
 
-            # Fallback: Check legacy diarization/sherpa-onnx structure
+            # Fallback: Check individual directories (old structure)
             if not deleted_paths:
                 sherpa_dir = self.diarization_cache / "sherpa-onnx"
                 seg_dir_legacy = sherpa_dir / "sherpa-onnx-pyannote-segmentation-3-0"
@@ -511,7 +510,9 @@ class ModelRegistry:
                             "deleted_paths": deleted_paths,
                         }
 
-                emb_dir_legacy = sherpa_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k"
+                emb_dir_legacy = (
+                    sherpa_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k"
+                )
                 if emb_dir_legacy.exists():
                     try:
                         shutil.rmtree(emb_dir_legacy)
@@ -579,7 +580,9 @@ class ModelRegistry:
                     if hub_dir.exists():
                         # Find all pyannote model directories
                         for item in hub_dir.iterdir():
-                            if item.is_dir() and item.name.startswith("models--pyannote--"):
+                            if item.is_dir() and item.name.startswith(
+                                "models--pyannote--"
+                            ):
                                 try:
                                     shutil.rmtree(item)
                                     deleted_paths.append(str(item))

@@ -79,6 +79,20 @@ from logger import logger, transcription_logger, upload_logger, model_logger
 from model_pool import model_pool
 from model_registry import ModelRegistry, ModelInfo
 
+# Import tenacity for retry logic
+try:
+    from tenacity import (
+        retry,
+        stop_after_attempt,
+        wait_exponential,
+        retry_if_exception_type,
+        before_sleep_log,
+    )
+
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+
 # Disable HuggingFace progress bars to avoid interfering with JSON output
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
@@ -875,6 +889,56 @@ def safe_extract(tar: "tarfile.TarFile", target_dir: str) -> None:
     tar.extractall(path=target_dir)
 
 
+def _download_with_retry(url: str, timeout: int, max_retries: int = 5):
+    """
+    Download with retry logic for handling connection resets.
+    Falls back to simple requests if tenacity is not available.
+    """
+    import requests
+    import time
+
+    if TENACITY_AVAILABLE:
+        # Use tenacity for robust retry logic
+        @retry(
+            stop=stop_after_attempt(max_retries),
+            wait=wait_exponential(multiplier=1, min=2, max=60),
+            retry=retry_if_exception_type(
+                (
+                    requests.ConnectionError,
+                    requests.Timeout,
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                )
+            ),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+        )
+        def _do_request():
+            return requests.get(url, stream=True, timeout=timeout)
+
+        return _do_request()
+    else:
+        # Fallback: manual retry logic
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return requests.get(url, stream=True, timeout=timeout)
+            except (
+                requests.ConnectionError,
+                requests.Timeout,
+                ConnectionResetError,
+                ConnectionAbortedError,
+            ) as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    wait_time = min(2**attempt, 60)  # Exponential backoff, max 60s
+                    logger.warning(
+                        f"Download attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                else:
+                    raise last_error
+
+
 def download_sherpa_onnx_model(model_name: str, url: str, target_dir: str):
     """Download Sherpa-ONNX model from GitHub releases."""
     import requests
@@ -892,7 +956,7 @@ def download_sherpa_onnx_model(model_name: str, url: str, target_dir: str):
         return
 
     try:
-        response = requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT)
+        response = _download_with_retry(url, DOWNLOAD_TIMEOUT)
         response.raise_for_status()
 
         # Security: Check content length before downloading
@@ -985,7 +1049,9 @@ def emit_result(
             json.dumps(
                 {
                     "type": "debug",
-                    "message": f"Emitting {len(speaker_turns)} speaker turns",
+                    "message": f"Emitting {len(speaker_turns)} speaker turns: {speaker_turns[:3]}..."
+                    if len(speaker_turns) > 3
+                    else f"Emitting {len(speaker_turns)} speaker turns: {speaker_turns}",
                 }
             ),
             flush=True,
@@ -1741,12 +1807,12 @@ def download_model(
                     _current_diarization_download["active"] = True
                     _current_diarization_download["model_name"] = model_name
 
-                    # Stage 1: Download segmentation
+                    # Stage 1: Download segmentation to sherpa-onnx-diarization/sherpa-onnx-segmentation/
                     _current_diarization_download["stage"] = "segmentation"
                     downloader.download_from_github(
                         url=IMPROVED_SHERPA_URLS["sherpa-onnx-segmentation"],
                         asset_name="sherpa-onnx-segmentation.tar.bz2",
-                        model_name="sherpa-onnx-segmentation",
+                        model_name="sherpa-onnx-diarization/sherpa-onnx-segmentation",
                     )
 
                     # Emit stage completion
@@ -1756,12 +1822,12 @@ def download_model(
                     }
                     print(json.dumps(data), flush=True)
 
-                    # Stage 2: Download embedding
+                    # Stage 2: Download embedding to sherpa-onnx-diarization/sherpa-onnx-embedding/
                     _current_diarization_download["stage"] = "embedding"
                     downloader.download_from_github(
                         url=IMPROVED_SHERPA_URLS["sherpa-onnx-embedding"],
                         asset_name="3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
-                        model_name="sherpa-onnx-embedding",
+                        model_name="sherpa-onnx-diarization/sherpa-onnx-embedding",
                     )
 
                     # Emit stage completion
@@ -1775,7 +1841,7 @@ def download_model(
                     _current_diarization_download["active"] = False
                     _current_diarization_download["stage"] = None
 
-                    target_dir = downloader.cache_dir / model_name
+                    target_dir = downloader.cache_dir / "sherpa-onnx-diarization"
                     size_mb = get_model_size_mb(str(target_dir))
                     emit_download_complete(model_name, size_mb, str(target_dir))
 
@@ -2343,10 +2409,23 @@ def list_models(cache_dir: str):
         emit_models_list(models)
         return
 
+    # Individual diarization components to skip (these are part of composite models)
+    skip_individual_components = {
+        "pyannote-segmentation-3.0",
+        "pyannote-embedding-3.0",
+        "sherpa-onnx-segmentation",
+        "sherpa-onnx-embedding",
+    }
+
     for model_name in os.listdir(cache_dir):
         model_path = os.path.join(cache_dir, model_name)
         if not os.path.isdir(model_path):
             logger.debug(f"Skipping non-directory entry: {model_name}")
+            continue
+
+        # Skip individual diarization components (they are part of composite models)
+        if model_name in skip_individual_components:
+            logger.debug(f"Skipping individual diarization component: {model_name}")
             continue
 
         # Check for expected subdirectories in diarization models
@@ -2646,6 +2725,16 @@ def run_server_mode():
                     continue
 
                 # Validate diarization settings
+                print(
+                    json.dumps(
+                        {
+                            "type": "debug",
+                            "message": f"Diarization settings: enable={enable_diarization}, provider={diarization_provider}",
+                        }
+                    ),
+                    flush=True,
+                    file=sys.stderr,
+                )
                 if enable_diarization and diarization_provider == "none":
                     transcription_logger.error(
                         "Diarization enabled but provider is 'none'"
@@ -2685,6 +2774,21 @@ def run_server_mode():
                     # Initialize model (from pool or create new)
                     transcription_logger.model_loading(model_name, 0)
                     emit_progress("loading", 0, f"Loading {model_name} model...")
+
+                    # Debug: log what diarization provider we're passing to model_pool
+                    actual_provider = (
+                        diarization_provider if enable_diarization else "none"
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "type": "debug",
+                                "message": f"Calling model_pool.get_model with diarization_provider={actual_provider} (enable={enable_diarization})",
+                            }
+                        ),
+                        flush=True,
+                        file=sys.stderr,
+                    )
 
                     model = model_pool.get_model(
                         model_name=model_name,
@@ -2759,18 +2863,78 @@ def run_server_mode():
                             progress_metrics,
                         )
 
-                        # Handle both tuple return (new Whisper/DistilWhisper) and list return (Parakeet)
-                        diarize_result = model.diarize(segments, str(file_obj))
-                        if (
-                            isinstance(diarize_result, tuple)
-                            and len(diarize_result) == 2
-                        ):
-                            segments, speaker_turns = diarize_result
-                            # Split segments by speaker boundaries using word timestamps
+                        # Run diarization - returns tuple of (segments, speaker_turns)
+                        segments, speaker_turns_raw = model.diarize(
+                            segments, str(file_obj)
+                        )
+
+                        # Debug logging: Log speaker_turns_raw type and length
+                        print(
+                            json.dumps(
+                                {
+                                    "type": "debug",
+                                    "message": f"speaker_turns_raw type: {type(speaker_turns_raw).__name__}, length: {len(speaker_turns_raw) if hasattr(speaker_turns_raw, '__len__') else 'N/A'}",
+                                }
+                            ),
+                            flush=True,
+                            file=sys.stderr,
+                        )
+
+                        # Debug logging: Log first few speaker turns if available
+                        if speaker_turns_raw and hasattr(speaker_turns_raw, "__iter__"):
+                            first_turns = list(speaker_turns_raw)[:3]
+                            first_turns_info = []
+                            for turn in first_turns:
+                                if (
+                                    hasattr(turn, "speaker")
+                                    and hasattr(turn, "start")
+                                    and hasattr(turn, "end")
+                                ):
+                                    first_turns_info.append(
+                                        {
+                                            "speaker": turn.speaker,
+                                            "start": turn.start,
+                                            "end": turn.end,
+                                        }
+                                    )
+                            print(
+                                json.dumps(
+                                    {
+                                        "type": "debug",
+                                        "message": f"First {len(first_turns_info)} speaker_turns_raw: {first_turns_info}",
+                                    }
+                                ),
+                                flush=True,
+                                file=sys.stderr,
+                            )
+
+                        # Convert SpeakerTurn objects to dictionaries for JSON serialization
+                        if speaker_turns_raw:
+                            speaker_turns = [
+                                {
+                                    "speaker": turn.speaker,
+                                    "start": turn.start,
+                                    "end": turn.end,
+                                }
+                                for turn in speaker_turns_raw
+                            ]
+                            print(
+                                json.dumps(
+                                    {
+                                        "type": "debug",
+                                        "message": f"Converted {len(speaker_turns)} speaker turns to dict format",
+                                    }
+                                ),
+                                flush=True,
+                                file=sys.stderr,
+                            )
+
+                            # Create speaker segments - either via split_by_speakers or use segments directly
                             if hasattr(model, "split_by_speakers"):
                                 speaker_segments = model.split_by_speakers(
                                     segments, speaker_turns
                                 )
+                                # Debug logging: Log speaker_segments length and method
                                 print(
                                     json.dumps(
                                         {
@@ -2781,9 +2945,40 @@ def run_server_mode():
                                     flush=True,
                                     file=sys.stderr,
                                 )
-                        else:
-                            # Legacy model that returns just segments
-                            segments = diarize_result
+                                print(
+                                    json.dumps(
+                                        {
+                                            "type": "debug",
+                                            "message": "Using split_by_speakers method",
+                                        }
+                                    ),
+                                    flush=True,
+                                    file=sys.stderr,
+                                )
+                            else:
+                                # Fallback: use segments with speaker labels as speaker_segments
+                                speaker_segments = segments
+                                # Debug logging: Log speaker_segments length and method
+                                print(
+                                    json.dumps(
+                                        {
+                                            "type": "debug",
+                                            "message": f"Using {len(segments)} segments with speaker labels as speaker_segments",
+                                        }
+                                    ),
+                                    flush=True,
+                                    file=sys.stderr,
+                                )
+                                print(
+                                    json.dumps(
+                                        {
+                                            "type": "debug",
+                                            "message": "Using fallback method (segments with speaker labels)",
+                                        }
+                                    ),
+                                    flush=True,
+                                    file=sys.stderr,
+                                )
 
                         # Count unique speakers
                         unique_speakers = set(
@@ -2793,6 +2988,51 @@ def run_server_mode():
                         transcription_logger.diarization_complete(len(unique_speakers))
                         emit_progress(
                             "diarizing", 95, "Diarization complete", progress_metrics
+                        )
+
+                    # Debug logging: Before emit_result, log final counts and first 3 segments
+                    speaker_turns_count = (
+                        len(speaker_turns) if speaker_turns is not None else 0
+                    )
+                    speaker_segments_count = (
+                        len(speaker_segments) if speaker_segments is not None else 0
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "type": "debug",
+                                "message": f"Final counts - speaker_turns: {speaker_turns_count}, speaker_segments: {speaker_segments_count}",
+                            }
+                        ),
+                        flush=True,
+                        file=sys.stderr,
+                    )
+                    if speaker_segments and len(speaker_segments) > 0:
+                        first_3_segments = speaker_segments[:3]
+                        first_3_with_speaker = []
+                        for seg in first_3_segments:
+                            if isinstance(seg, dict):
+                                text_val = seg.get("text", "")
+                                # Truncate text if too long
+                                if text_val and len(text_val) > 50:
+                                    text_val = text_val[:50] + "..."
+                                first_3_with_speaker.append(
+                                    {
+                                        "speaker": seg.get("speaker"),
+                                        "start": seg.get("start"),
+                                        "end": seg.get("end"),
+                                        "text": text_val,
+                                    }
+                                )
+                        print(
+                            json.dumps(
+                                {
+                                    "type": "debug",
+                                    "message": f"First 3 speaker_segments with speaker field: {first_3_with_speaker}",
+                                }
+                            ),
+                            flush=True,
+                            file=sys.stderr,
                         )
 
                     # Result
@@ -3144,16 +3384,22 @@ def main():
         if args.diarization:
             emit_progress("diarizing", 85, "Running speaker diarization...")
 
-            # Handle both tuple return (new Whisper/DistilWhisper) and list return (Parakeet)
-            diarize_result = model.diarize(segments, str(file_path))
-            if isinstance(diarize_result, tuple) and len(diarize_result) == 2:
-                segments, speaker_turns = diarize_result
-                # Split segments by speaker boundaries using word timestamps
+            # Run diarization - returns tuple of (segments, speaker_turns)
+            segments, speaker_turns_raw = model.diarize(segments, str(file_path))
+
+            # Convert SpeakerTurn objects to dictionaries for JSON serialization
+            if speaker_turns_raw:
+                speaker_turns = [
+                    {"speaker": turn.speaker, "start": turn.start, "end": turn.end}
+                    for turn in speaker_turns_raw
+                ]
+
+                # Create speaker segments - either via split_by_speakers or use segments directly
                 if hasattr(model, "split_by_speakers"):
                     speaker_segments = model.split_by_speakers(segments, speaker_turns)
-            else:
-                # Legacy model that returns just segments
-                segments = diarize_result
+                else:
+                    # Fallback: use segments with speaker labels as speaker_segments
+                    speaker_segments = segments
 
             emit_progress("diarizing", 95, "Diarization complete")
 

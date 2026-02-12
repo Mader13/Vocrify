@@ -4,6 +4,8 @@ Speaker diarization module.
 Provides multiple diarization backends: Sherpa-ONNX and PyAnnote.
 """
 
+from typing import Optional
+
 from .base import BaseDiarizer
 
 # Import diarizers with try/except to handle missing dependencies
@@ -24,7 +26,9 @@ except ImportError:
     PyAnnoteDiarizer = None
 
 
-def get_diarizer(provider: str, device: str = "cpu", **kwargs) -> BaseDiarizer:
+def get_diarizer(
+    provider: str, device: str = "cpu", **kwargs
+) -> Optional[BaseDiarizer]:
     """
     Factory function to get a diarization provider.
 
@@ -39,10 +43,21 @@ def get_diarizer(provider: str, device: str = "cpu", **kwargs) -> BaseDiarizer:
     Raises:
         ValueError: If provider is unknown or unavailable
     """
+    original_provider = provider
     provider = provider.lower()
 
     if provider == "none" or not provider:
+        print(f"[DEBUG] Diarization provider is 'none', skipping initialization")
         return None
+
+    # Handle 'sherpa-onnx' as alias for 'sherpa'
+    if provider == "sherpa-onnx":
+        print(f"[DEBUG] Normalizing provider 'sherpa-onnx' -> 'sherpa'")
+        provider = "sherpa"
+
+    print(
+        f"[DEBUG] Creating diarizer for provider: {original_provider} (normalized: {provider})"
+    )
 
     if provider == "sherpa":
         if not SHERPA_AVAILABLE:

@@ -1,8 +1,11 @@
 # Transcribe Video - AI Engine Dependencies
+# Phase 3: Python is now ONLY used for speaker diarization
+# Transcription is handled by Rust transcribe-rs (Whisper, Parakeet, Moonshine)
+#
 # Install with: pip install -r requirements.txt
 #
 # CRITICAL: Requires Python 3.8 - 3.12 ONLY
-# Python 3.13+ is NOT supported by faster-whisper and pyannote.audio
+# Python 3.13+ is NOT supported by pyannote.audio
 # Current system has Python 3.14.2 - you MUST use Python 3.12 or earlier
 #
 # Quick fix on Windows:
@@ -13,9 +16,8 @@
 # ============================================================================
 # CORE TRANSCRIPTION ENGINE
 # ============================================================================
-# Primary transcription engine using CTranslate2 (faster than OpenAI Whisper)
-# Supports: CPU/CUDA, word timestamps, VAD filtering
-faster-whisper==1.2.1
+# Phase 3: Transcription is now handled by Rust transcribe-rs
+# Python is only used for speaker diarization
 
 # ============================================================================
 # SPEAKER DIARIZATION (Multi-speaker identification)

@@ -233,6 +233,8 @@ class ImprovedDownloader:
             (
                 requests.ConnectionError,
                 requests.Timeout,
+                ConnectionResetError,
+                ConnectionAbortedError,
             )
         ),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -524,10 +526,32 @@ class ImprovedDownloader:
                 )
             )
 
-            # HEAD request to get file size
+            # HEAD request to get file size (with retry)
             headers = {}
-            response = requests.head(url, headers=headers, timeout=30)
-            response.raise_for_status()
+            max_retries = 5
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    response = requests.head(url, headers=headers, timeout=30)
+                    response.raise_for_status()
+                    break
+                except (
+                    requests.ConnectionError,
+                    requests.Timeout,
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                ) as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = min(2**attempt, 60)
+                        logger.warning(
+                            f"HEAD request attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        raise DownloadError(
+                            f"Failed to get file info after {max_retries} attempts: {last_error}"
+                        )
 
             total_size = int(response.headers.get("content-length", 0))
 
@@ -556,13 +580,8 @@ class ImprovedDownloader:
             output_path = target_dir / asset_name
             temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
 
-            # Download with progress
+            # Download with progress and retry
             start_time = time.time()
-
-            response = requests.get(url, stream=True, headers=headers, timeout=60)
-            response.raise_for_status()
-
-            downloaded = 0
 
             self.emit_progress(
                 DownloadProgress(
@@ -579,6 +598,35 @@ class ImprovedDownloader:
                 )
             )
 
+            # Download with retry logic
+            max_retries = 5
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    response = requests.get(
+                        url, stream=True, headers=headers, timeout=60
+                    )
+                    response.raise_for_status()
+                    break
+                except (
+                    requests.ConnectionError,
+                    requests.Timeout,
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                ) as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = min(2**attempt, 60)
+                        logger.warning(
+                            f"Download attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s..."
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        raise DownloadError(
+                            f"Failed to download after {max_retries} attempts: {last_error}"
+                        )
+
+            downloaded = 0
             last_update_time = start_time
 
             with open(temp_path, "wb") as f:
@@ -706,8 +754,9 @@ class ImprovedDownloader:
                     )
                 )
 
-                # Remove the archive after extraction
-                output_path.unlink()
+                # Remove the archive after extraction if it exists
+                if output_path.exists():
+                    output_path.unlink()
             else:
                 # Emit completion for non-archive files
                 self.emit_progress(
@@ -867,23 +916,26 @@ def download_model(
                 emit_download_complete(model_name, size_mb, str(target_dir))
 
             elif model_name == "sherpa-onnx-diarization":
-                # Download from GitHub
+                # Download from GitHub to sherpa-onnx-diarization/ subdirectory
+                # This matches the path expected by model_registry.py
                 segmentation_url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
                 embedding_url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
 
+                # Download segmentation model to sherpa-onnx-diarization/sherpa-onnx-segmentation/
                 downloader.download_from_github(
                     url=segmentation_url,
                     asset_name="sherpa-onnx-segmentation.tar.bz2",
-                    model_name="sherpa-onnx-segmentation",
+                    model_name="sherpa-onnx-diarization/sherpa-onnx-segmentation",
                 )
 
+                # Download embedding model to sherpa-onnx-diarization/sherpa-onnx-embedding/
                 downloader.download_from_github(
                     url=embedding_url,
                     asset_name="3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
-                    model_name="sherpa-onnx-embedding",
+                    model_name="sherpa-onnx-diarization/sherpa-onnx-embedding",
                 )
 
-                target_dir = downloader.cache_dir / model_name
+                target_dir = downloader.cache_dir / "sherpa-onnx-diarization"
                 size_mb = get_model_size_mb(str(target_dir))
                 emit_download_complete(model_name, size_mb, str(target_dir))
 

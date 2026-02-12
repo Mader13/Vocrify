@@ -27,10 +27,10 @@ class ModelPool:
     - Statistics tracking
     """
 
-    _instance: Optional['ModelPool'] = None
+    _instance: Optional["ModelPool"] = None
     _lock = threading.Lock()
 
-    def __new__(cls) -> 'ModelPool':
+    def __new__(cls) -> "ModelPool":
         """Ensure singleton pattern."""
         if cls._instance is None:
             with cls._lock:
@@ -57,23 +57,23 @@ class ModelPool:
         """
         Generate cache key from parameters.
 
-        Key format: model_name_device_model_size
-        Diarization settings don't affect the transcription model.
+        Key format: model_name_device_model_size_diarization
+        Diarization settings affect the model because diarizer is attached to it.
         """
         # Extract model size from kwargs
-        size = kwargs.get('model_size', 'base')
+        size = kwargs.get("model_size", "base")
 
         # Normalize key components
-        model_name_normalized = model_name.replace("whisper-", "").replace("parakeet-", "")
+        model_name_normalized = model_name.replace("whisper-", "").replace(
+            "parakeet-", ""
+        )
 
-        return f"{model_name_normalized}_{device}_{size}"
+        # Include diarization provider in key to ensure models with/without diarization are cached separately
+        diarization_provider = kwargs.get("diarization_provider", "none")
 
-    def get_model(
-        self,
-        model_name: str,
-        device: str = "cpu",
-        **kwargs
-    ) -> Any:
+        return f"{model_name_normalized}_{device}_{size}_{diarization_provider}"
+
+    def get_model(self, model_name: str, device: str = "cpu", **kwargs) -> Any:
         """
         Get or create model instance.
 
@@ -86,6 +86,9 @@ class ModelPool:
             Model instance (cached or newly created)
         """
         key = self._get_key(model_name, device, **kwargs)
+        logger.info(
+            f"Model cache key: {key} (diarization_provider={kwargs.get('diarization_provider', 'none')})"
+        )
 
         # Check if model exists in cache
         with self._lock:
@@ -108,23 +111,22 @@ class ModelPool:
             try:
                 # Import here to avoid circular dependency
                 import sys
+
                 ai_engine_path = Path(__file__).parent
                 if str(ai_engine_path) not in sys.path:
                     sys.path.insert(0, str(ai_engine_path))
 
                 from factory import ModelFactory
 
-                model = ModelFactory.create(
-                    model_name,
-                    device=device,
-                    **kwargs
-                )
+                model = ModelFactory.create(model_name, device=device, **kwargs)
 
                 # Store in cache
                 self._models[key] = model
                 self._access_order.append(key)
 
-                logger.info(f"Model loaded and cached: {key} (total cached: {len(self._models)})")
+                logger.info(
+                    f"Model loaded and cached: {key} (total cached: {len(self._models)})"
+                )
                 return model
 
             except Exception as e:
@@ -158,7 +160,9 @@ class ModelPool:
                     continue
 
                 # Remove model_name and device from config to avoid duplicate parameters
-                config_filtered = {k: v for k, v in config.items() if k not in ('model_name', 'device')}
+                config_filtered = {
+                    k: v for k, v in config.items() if k not in ("model_name", "device")
+                }
                 self.get_model(model_name, device=device, **config_filtered)
                 loaded += 1
 
@@ -186,9 +190,9 @@ class ModelPool:
 
             # Try to clean up model resources
             try:
-                if hasattr(model, 'cleanup'):
+                if hasattr(model, "cleanup"):
                     model.cleanup()
-                elif hasattr(model, '_model') and hasattr(model._model, 'cleanup'):
+                elif hasattr(model, "_model") and hasattr(model._model, "cleanup"):
                     model._model.cleanup()
             except Exception as e:
                 logger.debug(f"Error during model cleanup: {e}")
@@ -199,7 +203,7 @@ class ModelPool:
             # Try to clean up models before clearing
             for key, model in self._models.items():
                 try:
-                    if hasattr(model, 'cleanup'):
+                    if hasattr(model, "cleanup"):
                         model.cleanup()
                 except Exception as e:
                     logger.debug(f"Error during cleanup of {key}: {e}")
