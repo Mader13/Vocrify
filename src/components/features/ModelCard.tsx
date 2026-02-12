@@ -7,7 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { useTasks } from "@/stores";
 
 const modelCardVariants = cva(
-  "relative overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:translate-y-[-1px]",
+  "relative overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-px",
   {
     variants: {
       variant: {
@@ -33,10 +33,24 @@ interface ModelCardProps
   onDelete: () => void;
   onSelect?: () => void;
   isSelected?: boolean;
+  animationDelayMs?: number;
 }
 
 export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
-  ({ className, model, download, onDownload, onDownloadCancel, onDelete, onSelect, isSelected, variant, ...props }, ref) => {
+  ({
+    className,
+    model,
+    download,
+    onDownload,
+    onDownloadCancel,
+    onDelete,
+    onSelect,
+    isSelected,
+    variant,
+    animationDelayMs = 0,
+    style,
+    ...props
+  }, ref) => {
     const isDownloading = download?.status === "downloading";
     const isCancelled = download?.status === "cancelled";
     const isError = download?.status === "error";
@@ -64,10 +78,26 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
       return `${mb} MB`;
     };
 
+    const [hasEntered, setHasEntered] = React.useState(false);
+
+    React.useEffect(() => {
+      // Respect prefers-reduced-motion via CSS classes; still delay mount for stagger effect
+      const t = setTimeout(() => setHasEntered(true), animationDelayMs);
+      return () => clearTimeout(t);
+    }, [animationDelayMs]);
+
     return (
       <div
         ref={ref}
-        className={cn(modelCardVariants({ variant: cardVariant }), isSelected && "ring-2 ring-primary ring-offset-2", className)}
+        className={cn(
+          modelCardVariants({ variant: cardVariant }),
+          "motion-safe:duration-500 motion-safe:ease-out motion-safe:will-change-transform motion-reduce:transition-none motion-reduce:transform-none",
+          hasEntered ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1",
+          "focus-within:ring-2 focus-within:ring-primary/40",
+          isSelected && "ring-2 ring-primary ring-offset-2",
+          className
+        )}
+        style={{ ...(style || {}), transitionDelay: `${animationDelayMs}ms` }}
         {...props}
       >
         {/* Token warning badge */}
@@ -165,20 +195,76 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
             </div>
           </div>
         )}
-        <div className="p-4 flex flex-col h-full min-h-[280px]">
-          <div className="flex-1 flex flex-col">
-            <div className="flex items-start gap-3">
-              <span className="text-2xl">{MODEL_ICONS[model.modelType]}</span>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-sm leading-tight">{model.name}</h3>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{model.description}</p>
-                <span className="inline-flex items-center text-xs font-medium text-muted-foreground/80 bg-muted/30 px-2 py-0.5 rounded mt-2">
-                  {formatSize(model.sizeMb)}
-                </span>
+        <div className="p-4 sm:p-5">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto] xl:items-center">
+            <div className="min-w-0">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 text-2xl">{MODEL_ICONS[model.modelType]}</span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-sm font-semibold leading-tight sm:text-base">
+                    {model.name}
+                  </h3>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+                    {model.description}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                      {formatSize(model.sizeMb)}
+                    </span>
+
+                    {!isDownloading && !isError && (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs",
+                          isInstalled
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                            : "border-border/70 bg-muted/20 text-muted-foreground"
+                        )}
+                      >
+                        {isInstalled ? (
+                          <>
+                            <svg
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                            Установлено
+                          </>
+                        ) : (
+                          <>
+                            <svg
+                              className="h-3.5 w-3.5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                              />
+                            </svg>
+                            Не установлено
+                          </>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="mt-6 space-y-4">
+            <div className="min-w-0">
+              <div className="space-y-3 rounded-lg border border-border/60 bg-background/30 p-3 sm:p-4">
               {isDownloading && download && (
                 <div className="space-y-3">
                   {/* Show current stage info for multi-stage downloads */}
@@ -191,7 +277,6 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                     </div>
                   )}
 
-                  {/* Main progress bar */}
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">
                       {formatSize(download.currentMb)} / {formatSize(download.totalMb)}
@@ -200,7 +285,6 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                   </div>
                   <Progress value={download.progress} className="h-1.5" />
 
-                  {/* Show individual stage progress bars for multi-stage downloads */}
                   {download.stages && (
                     <div className="space-y-2">
                       {download.stages.segmentation && (
@@ -236,7 +320,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                   {onDownloadCancel && (
                     <button
                       onClick={onDownloadCancel}
-                      className="w-full px-3 py-1.5 text-xs bg-destructive/10 text-destructive rounded-lg hover:bg-destructive/20 transition-all duration-150"
+                      className="w-full rounded-lg bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-all duration-150 hover:bg-destructive/20"
                     >
                       Отмена
                     </button>
@@ -251,59 +335,25 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
               )}
 
               {!isDownloading && !isError && (
-                <div className="flex items-center gap-2">
-                  {isInstalled ? (
-                    <div className="flex items-center gap-2 text-sm text-success">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                      Установлено
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                        />
-                      </svg>
-                      Не установлено
-                    </div>
-                  )}
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  Нажмите на "Скачать" для начала загрузки модели.
+                </p>
               )}
+              </div>
             </div>
-          </div>
 
-          <div className="mt-4 flex gap-2 border-t pt-4">
+            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
             {isInstalled ? (
               <>
                 {onSelect && (
                   <button
                     onClick={onSelect}
                     className={cn(
-                      "flex-1 inline-flex items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 h-10",
-                      isSelected
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:shadow-sm active:scale-[0.98]"
-                    )}
+                        "inline-flex h-10 min-w-40 items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
+                        isSelected
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:shadow-sm active:scale-[0.98]"
+                      )}
                   >
                     {isSelected ? (
                       <>
@@ -347,8 +397,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                   disabled={needsToken}
                   title={needsToken ? "Требуется HuggingFace токен" : undefined}
                   className={cn(
-                    "inline-flex items-center justify-center rounded-lg bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-sm active:scale-[0.98] h-10",
-                    onSelect && "flex-1"
+                    "inline-flex h-10 min-w-36 items-center justify-center rounded-lg bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground transition-all duration-150 hover:bg-secondary/80 hover:shadow-sm active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                   )}
                 >
                   <svg
@@ -368,7 +417,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                 </button>
                 <button
                   onClick={onDelete}
-                  className="inline-flex items-center justify-center rounded-lg border border-destructive/20 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-all duration-150 hover:shadow-sm active:scale-[0.98] h-10"
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-destructive/20 px-3 py-2 text-sm font-medium text-destructive transition-all duration-150 hover:bg-destructive/10 hover:shadow-sm active:scale-[0.98]"
                 >
                   <svg
                     className="w-4 h-4"
@@ -390,7 +439,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                 onClick={onDownload}
                 disabled={isDownloading || needsToken}
                 title={needsToken ? "Требуется HuggingFace токен" : undefined}
-                className="flex-1 inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-sm active:scale-[0.98] h-10"
+                className="inline-flex h-10 min-w-40 items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 hover:shadow-sm active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <svg
                   className="w-4 h-4 mr-2"
@@ -408,6 +457,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                 {isDownloading ? "Загрузка..." : needsToken ? "Требуется токен" : "Скачать"}
               </button>
             )}
+            </div>
           </div>
         </div>
       </div>

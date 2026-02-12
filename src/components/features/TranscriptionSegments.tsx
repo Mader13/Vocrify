@@ -336,6 +336,7 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
         <div
           ref={containerRef}
           onScroll={handleScroll}
+          onWheel={(e) => e.stopPropagation()}
           className={cn(
             "flex flex-col overflow-y-auto",
             isVideoVisible ? "max-h-[400px]" : "h-full"
@@ -381,7 +382,7 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
     };
 
     return (
-      <div className={cn(isVideoVisible ? "max-h-[400px]" : "h-full")}>
+      <div className={cn(isVideoVisible ? "max-h-[400px]" : "h-full")} onWheel={(e) => e.stopPropagation()}>
         <List
           rowCount={segments.length}
           rowHeight={80}

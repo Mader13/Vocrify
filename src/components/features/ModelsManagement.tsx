@@ -1,12 +1,12 @@
 import * as React from "react";
-import { FolderOpen } from "lucide-react";
+import { CheckCircle2, FolderOpen, HardDrive } from "lucide-react";
 import { useModelsStore } from "@/stores/modelsStore";
 import { ModelCard } from "@/components/features/ModelCard";
-import { TranscriptionModelDisplay } from "@/components/features/ModelDisplayCard";
 import { HuggingFaceTokenCard } from "@/components/features/HuggingFaceTokenCard";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { openModelsFolder } from "@/services/tauri";
+import { MODEL_NAMES } from "@/types";
 
 export function ModelsManagement() {
   const {
@@ -49,6 +49,9 @@ export function ModelsManagement() {
   const installedModelsCount = availableModels.filter(
     (m) => m.installed,
   ).length;
+  const whisperModels = availableModels.filter((m) => m.modelType === "whisper");
+  const parakeetModels = availableModels.filter((m) => m.modelType === "parakeet");
+  const diarizationModels = availableModels.filter((m) => m.modelType === "diarization");
 
   const handleOpenModelsFolder = async () => {
     const result = await openModelsFolder();
@@ -66,9 +69,9 @@ export function ModelsManagement() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-8 flex items-center justify-between">
+    <div className="h-full overflow-y-auto p-4 sm:p-6">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold">Управление моделями</h1>
             <p className="text-muted-foreground mt-2">
@@ -85,25 +88,29 @@ export function ModelsManagement() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-8">
+        <div className="mb-8 grid grid-cols-1 gap-3 lg:grid-cols-4">
           {selectedTranscriptionModel && (
-            <div className="lg:col-span-2">
-              <TranscriptionModelDisplay
-                model={selectedTranscriptionModel}
-                size="large"
-              />
+            <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:border-primary/40 hover:shadow-sm lg:col-span-2">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                Выбранная модель
+              </p>
+              <p className="mt-2 line-clamp-1 text-lg font-semibold">
+                {MODEL_NAMES[selectedTranscriptionModel as keyof typeof MODEL_NAMES] ??
+                  selectedTranscriptionModel}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Используется по умолчанию для новых задач транскрипции.
+              </p>
             </div>
           )}
 
-          <div className="relative group overflow-hidden rounded-2xl border bg-card/50 backdrop-blur-sm h-full transition-all duration-500 ease-out border-blue-500/30 hover:border-blue-500/60 hover:-translate-y-1 hover:shadow-2xl hover:shadow-blue-500/20">
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br from-blue-500/20 via-blue-500/5 to-transparent" />
-            <div className="relative h-full flex items-center gap-4 p-5">
-              <div className="relative flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 text-2xl shadow-lg group-hover:scale-105 transition-all duration-500">
-                💾
-                <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-white/20 to-transparent" />
+          <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:-translate-y-px hover:border-blue-500/40 hover:shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                <HardDrive className="h-5 w-5" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">
+              <div className="min-w-0 flex-1">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Занято моделями
                 </p>
                 <p className="text-xl font-semibold">
@@ -111,26 +118,22 @@ export function ModelsManagement() {
                 </p>
               </div>
             </div>
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-0 group-hover:opacity-30 transition-opacity duration-500" />
           </div>
 
-          <div className="relative group overflow-hidden rounded-2xl border bg-card/50 backdrop-blur-sm h-full transition-all duration-500 ease-out border-emerald-500/30 hover:border-emerald-500/60 hover:-translate-y-1 hover:shadow-2xl hover:shadow-emerald-500/20">
-            <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br from-emerald-500/20 via-emerald-500/5 to-transparent" />
-            <div className="relative h-full flex items-center gap-4 p-5">
-              <div className="relative flex-shrink-0 flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 text-2xl shadow-lg group-hover:scale-105 transition-all duration-500">
-                ✅
-                <div className="absolute inset-0 rounded-xl bg-gradient-to-tr from-white/20 to-transparent" />
+          <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:-translate-y-px hover:border-emerald-500/40 hover:shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="h-5 w-5" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">
+              <div className="min-w-0 flex-1">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Скачено моделей
                 </p>
-                <p className="text-xl font-semibold group-hover:text-transparent group-hover:bg-gradient-to-r group-hover:from-foreground group-hover:to-foreground/70 group-hover:bg-clip-text transition-all duration-300">
+                <p className="text-xl font-semibold">
                   {installedModelsCount}
                 </p>
               </div>
             </div>
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-0 group-hover:opacity-30 transition-opacity duration-500" />
           </div>
         </div>
 
@@ -156,19 +159,18 @@ export function ModelsManagement() {
           </div>
         )}
 
-        <div className="space-y-6">
+        <div className="space-y-8">
           <div>
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
               <span>🐍</span> Whisper Models
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {availableModels
-                .filter((m) => m.modelType === "whisper")
-                .map((model) => (
+            <div className="space-y-3">
+              {whisperModels.map((model, index) => (
                   <ModelCard
                     key={model.name}
                     model={model}
                     download={downloads[model.name]}
+                    animationDelayMs={index * 45}
                     onDownload={() => downloadModel(model.name, "whisper")}
                     onDownloadCancel={() => cancelModelDownload(model.name)}
                     onDelete={() =>
@@ -185,14 +187,13 @@ export function ModelsManagement() {
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
               <span>🦜</span> Parakeet Models
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {availableModels
-                .filter((m) => m.modelType === "parakeet")
-                .map((model) => (
+            <div className="space-y-3">
+              {parakeetModels.map((model, index) => (
                   <ModelCard
                     key={model.name}
                     model={model}
                     download={downloads[model.name]}
+                    animationDelayMs={100 + index * 45}
                     onDownload={() => downloadModel(model.name, "parakeet")}
                     onDownloadCancel={() => cancelModelDownload(model.name)}
                     onDelete={() =>
@@ -212,14 +213,13 @@ export function ModelsManagement() {
             <div className="mb-4">
               <HuggingFaceTokenCard />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {availableModels
-                .filter((m) => m.modelType === "diarization")
-                .map((model) => (
+            <div className="space-y-3">
+              {diarizationModels.map((model, index) => (
                   <ModelCard
                     key={model.name}
                     model={model}
                     download={downloads[model.name]}
+                    animationDelayMs={180 + index * 45}
                     onDownload={() => downloadModel(model.name, "diarization")}
                     onDownloadCancel={() => cancelModelDownload(model.name)}
                     onDelete={() =>

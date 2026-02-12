@@ -25,6 +25,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 // ============================================================================
 
 import { create } from "zustand";
+import { useTasks, useModelsStore, useUIStore } from "@/stores";
+import type { startTranscription } from "@/services/tauri";
 
 export type NotificationType = "success" | "error" | "warning" | "info";
 

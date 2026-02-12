@@ -363,14 +363,16 @@ export type DiarizationProvider = "none" | "pyannote" | "sherpa-onnx";
 
 /**
  * Engine preference for transcription
- * - "auto": Rust whisper-rs primary, Python fallback (default)
- * - "rust": Only Rust whisper-rs, error if unavailable
- * - "python": Only Python engine (Phase 1 behavior)
+ * Phase 3: Updated for transcribe-rs
+ * - "auto": Rust transcribe-rs primary, Python fallback for diarization (default)
+ * - "rust": Only Rust transcribe-rs, error if unavailable
+ * - "python": Only Python engine (for debugging)
  */
 export type EnginePreference = "auto" | "rust" | "python";
 
 /**
  * Engine preference display names and descriptions
+ * Phase 3: Updated for transcribe-rs
  */
 export const ENGINE_PREFERENCES: Record<
   EnginePreference,
@@ -378,15 +380,15 @@ export const ENGINE_PREFERENCES: Record<
 > = {
   auto: {
     name: "Auto (рекомендуется)",
-    description: "Rust whisper-rs с автоматическим fallback на Python",
+    description: "Rust transcribe-rs с автоматическим fallback на Python",
   },
   rust: {
     name: "Rust только",
-    description: "Только Rust whisper-rs, ошибка при недоступности",
+    description: "Только Rust transcribe-rs, ошибка при недоступности",
   },
   python: {
     name: "Python только",
-    description: "Только Python движок (старое поведение)",
+    description: "Только Python движок (для отладки)",
   },
 };
 

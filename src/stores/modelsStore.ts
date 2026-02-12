@@ -206,17 +206,9 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
         throw new Error(result.error || "Download failed");
       }
 
-      // Download completed successfully - update model list
-      set((state) => ({
-        downloads: {
-          ...state.downloads,
-          [name]: {
-            ...state.downloads[name],
-            status: "completed",
-            progress: 100,
-          },
-        },
-      }));
+      // Download completed successfully
+      // Note: Status is managed by event listeners (onModelDownloadComplete)
+      // which calls setDownloadCompleted to update the state
 
       // Reload models to update installed status
       get().loadModels();
@@ -389,25 +381,25 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
   },
 
   setDownloadCompleted: (modelName: string) => {
+    logger.modelInfo("Download completed event received", { modelName });
+    
     set((state) => {
-      // Remove download entry and mark model as installed
+      // Remove download entry - backend will verify installation
       const newDownloads = { ...state.downloads };
       delete newDownloads[modelName];
 
       return {
         downloads: newDownloads,
-        availableModels: state.availableModels.map((model) =>
-          model.name === modelName
-            ? { ...model, installed: true }
-            : model
-        ),
+        // Don't set installed: true here - let loadModels() verify from backend
+        // This prevents showing "installed" before backend confirms all files exist
       };
     });
 
-    // Reload models from backend to ensure sync (with slight delay to let filesystem settle)
+    // Reload models from backend to verify installation (with delay for filesystem)
     setTimeout(() => {
+      logger.modelDebug("Reloading models after download complete", { modelName });
       get().loadModels();
-    }, 500);
+    }, 1000); // Increased delay for multi-stage downloads
   },
 
   setDownloadError: (modelName: string, error: string) => {
@@ -439,10 +431,10 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
         return state;
       }
 
-      // Initialize stages object if not exists
-      const stages = download.stages || {};
+      // Initialize stages object if not exists - ALWAYS create new object for immutability
+      const stages = { ...download.stages };
 
-      // Update the specific stage
+      // Update the specific stage - create new object for the stage too
       stages[stage as keyof typeof stages] = {
         progress,
         currentMb,

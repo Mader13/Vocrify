@@ -1,13 +1,13 @@
 /**
  * Transcription Service with Engine Fallback
  *
+ * Phase 3: Updated for transcribe-rs
  * This module provides intelligent routing between:
- * - Rust whisper-rs (Whisper GGML models) - fast, GPU-accelerated
- * - Python engine (Parakeet, PyAnnote) - feature-rich, Python-only models
+ * - Rust transcribe-rs (Whisper GGML, Parakeet ONNX) - fast, GPU-accelerated
+ * - Python engine (PyAnnote diarization only) - diarization support
  *
  * Routing logic:
- * - Whisper models → Rust (with auto-fallback to Python)
- * - Parakeet models → Python (NVIDIA NeMo)
+ * - Whisper/Parakeet models → Rust transcribe-rs (with auto-fallback to Python)
  * - Diarization → Python (PyAnnote/Sherpa-ONNX)
  */
 
@@ -17,22 +17,33 @@ import type {
 } from "@/types";
 import { startTranscription } from "./tauri";
 import { logger } from "@/lib/logger";
+import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Check if a model should use Rust whisper-rs
+ * Check if a model should use Rust transcribe-rs
+ * Phase 3: transcribe-rs supports Whisper, Parakeet, Moonshine, SenseVoice
  */
 export function shouldUseRustEngine(model: string): boolean {
-  // Parakeet models always use Python
-  if (model.startsWith("parakeet") || model.startsWith("nvidia/")) {
-    return false;
+  // All transcribe-rs supported models use Rust
+  if (model.startsWith("whisper") || 
+      model.startsWith("distil-") ||
+      model.startsWith("parakeet") || 
+      model.startsWith("moonshine") ||
+      model.startsWith("sense")) {
+    return true;
   }
 
-  // Whisper/Distil-Whisper models can use Rust
-  return true;
+  // Short names like "base", "small", "tiny" are Whisper models
+  if (["tiny", "base", "small", "medium", "large", "large-v2", "large-v3"].includes(model)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
  * Get the engine name for display purposes
+ * Phase 3: Updated for transcribe-rs
  */
 export function getEngineName(model: string, preference: EnginePreference): string {
   if (!shouldUseRustEngine(model)) {
@@ -41,12 +52,12 @@ export function getEngineName(model: string, preference: EnginePreference): stri
 
   switch (preference) {
     case "rust":
-      return "rust-whisper";
+      return "transcribe-rs";
     case "python":
       return "python";
     case "auto":
     default:
-      return "rust-whisper (auto)";
+      return "transcribe-rs (auto)";
   }
 }
 
@@ -94,63 +105,83 @@ export async function transcribeWithFallback(
     return startTranscription(taskId, filePath, options);
   }
 
-  // Try Rust whisper-rs first
+  // Try Rust transcribe-rs first
   if (preference === "rust" || preference === "auto") {
     try {
-      logger.transcriptionInfo("Attempting Rust whisper-rs transcription", {
+      logger.transcriptionInfo("Attempting Rust transcribe-rs transcription", {
         taskId,
         model: options.model,
       });
 
-      // For now, we still use Python backend as the Rust engine
-      // is not fully integrated yet. This will be updated when
-      // the Rust transcription command is ready.
-      // TODO: Replace with actual Rust whisper-rs invocation
-      // const result = await invoke("transcribe_rust", { taskId, filePath, options });
+      // Phase 3: Call Rust transcribe-rs engine
+      const result = await invoke<{
+        segments: Array<{
+          start: number;
+          end: number;
+          text: string;
+          speaker?: string;
+          confidence: number;
+        }>;
+        language: string;
+        duration: number;
+      }>("transcribe_rust", {
+        taskId,
+        filePath,
+        options: {
+          model: options.model,
+          device: options.device,
+          language: options.language,
+          enableDiarization: options.enableDiarization,
+          diarizationProvider: options.diarizationProvider,
+          numSpeakers: options.numSpeakers,
+        },
+      });
 
-      // Currently using Python backend for all transcription
-      // Rust engine integration is in progress
-      const result = await startTranscription(taskId, filePath, options);
+      logger.transcriptionInfo("Transcription completed successfully with Rust engine", {
+        taskId,
+        engine: "transcribe-rs",
+        duration: result.duration,
+        segments: result.segments.length,
+      });
 
-      if (result.success) {
-        logger.transcriptionInfo("Transcription completed successfully", {
+      // Emit completion event for the UI
+      const event = new CustomEvent("transcription-complete", {
+        detail: {
           taskId,
-          engine: "python", // Will be "rust" when Rust engine is integrated
-        });
-        return result;
-      }
+          result: {
+            segments: result.segments.map(s => ({
+              start: s.start,
+              end: s.end,
+              text: s.text,
+              speaker: s.speaker,
+              confidence: s.confidence,
+            })),
+            language: result.language,
+            duration: result.duration,
+          },
+        },
+      });
+      window.dispatchEvent(event);
 
-      // If Rust failed and preference is "auto", try Python fallback
-      if (preference === "auto" && !result.success) {
-        logger.transcriptionWarn(
-          "Primary engine failed, attempting Python fallback",
-          {
-            taskId,
-            originalError: result.error,
-          }
-        );
+      return { success: true };
+    } catch (rustError) {
+      logger.transcriptionWarn(
+        "Rust engine failed, attempting Python fallback",
+        {
+          taskId,
+          error: String(rustError),
+        }
+      );
 
-        return startTranscription(taskId, filePath, options);
-      }
-
-      return result;
-    } catch (error) {
-      // Unexpected error - try Python fallback if auto
+      // If auto mode, fall back to Python
       if (preference === "auto") {
-        logger.transcriptionWarn(
-          "Unexpected error, attempting Python fallback",
-          {
-            taskId,
-            error: String(error),
-          }
-        );
-
         return startTranscription(taskId, filePath, options);
       }
 
+      // If rust-only mode, return the error
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: rustError instanceof Error ? rustError.message : String(rustError),
       };
     }
   }
@@ -160,14 +191,15 @@ export async function transcribeWithFallback(
 }
 
 /**
- * Check if Rust whisper-rs is available
- * This can be used to show UI indicators about engine availability
+ * Check if Rust transcribe-rs is available
+ * Phase 3: Check if the Rust transcription manager is initialized
  */
 export async function checkRustEngineAvailable(): Promise<boolean> {
   try {
-    // TODO: Implement actual check when Rust engine is integrated
-    // For now, return false to indicate Python is being used
-    return false;
+    // Try to initialize the transcription manager
+    await invoke("init_transcription_manager");
+    // If we get here, transcribe-rs is available
+    return true;
   } catch {
     return false;
   }
@@ -175,6 +207,7 @@ export async function checkRustEngineAvailable(): Promise<boolean> {
 
 /**
  * Get the current engine status
+ * Phase 3: transcribe-rs is now the recommended engine
  */
 export async function getEngineStatus(): Promise<{
   rustAvailable: boolean;
@@ -183,10 +216,10 @@ export async function getEngineStatus(): Promise<{
 }> {
   const rustAvailable = await checkRustEngineAvailable();
 
-  // Python is always available (it's the fallback)
+  // Python is always available (it's the fallback for diarization)
   const pythonAvailable = true;
 
-  // Recommend Rust if available, otherwise Python
+  // Phase 3: Recommend transcribe-rs (Rust) for all supported models
   const recommendedEngine = rustAvailable ? "rust" : "python";
 
   return {
@@ -194,4 +227,32 @@ export async function getEngineStatus(): Promise<{
     pythonAvailable,
     recommendedEngine,
   };
+}
+
+/**
+ * Initialize the transcription manager (call at app startup)
+ * Phase 3: Required to use transcribe-rs
+ */
+export async function initTranscriptionManager(): Promise<void> {
+  try {
+    await invoke("init_transcription_manager");
+    logger.info("TranscriptionManager initialized successfully");
+  } catch (error) {
+    logger.warn("Failed to initialize TranscriptionManager:", error);
+    // Don't throw - Python fallback will still work
+  }
+}
+
+/**
+ * Load a model for transcription
+ * Phase 3: Required before transcribing with transcribe-rs
+ */
+export async function loadModel(modelName: string): Promise<void> {
+  try {
+    await invoke("load_model_rust", { modelName });
+    logger.info(`Model loaded: ${modelName}`);
+  } catch (error) {
+    logger.error(`Failed to load model ${modelName}:`, error);
+    throw error;
+  }
 }

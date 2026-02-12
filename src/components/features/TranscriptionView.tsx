@@ -224,9 +224,11 @@ export function TranscriptionView() {
   const [highlightedSearchIndex, setHighlightedSearchIndex] = useState<number>(-1);
 
   // Determine if speaker data is available for the current task
-  const hasSpeakerData = task?.result?.speakerSegments && task.result.speakerSegments.length > 0;
+  // Check both speakerTurns and speakerSegments for compatibility
+  const hasSpeakerData = !!(task?.result?.speakerTurns?.length || task?.result?.speakerSegments?.length);
 
   // Select segments based on display mode
+  // Use speakerSegments if available, otherwise fall back to segments (which may have speaker labels)
   const displaySegments = displayMode === "segments"
     ? task?.result?.segments
     : task?.result?.speakerSegments || task?.result?.segments;
@@ -605,7 +607,7 @@ export function TranscriptionView() {
         </CardHeader>
         <CardContent className="p-0 flex-1 overflow-hidden flex flex-col" ref={transcriptionContainerRef}>
           {displaySegments && displaySegments.length > 0 ? (
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
               <TranscriptionSegments
                 segments={displaySegments}
                 currentTime={currentTime}
