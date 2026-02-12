@@ -108,6 +108,7 @@ pub struct EngineRouter {
     /// Python bridge for fallback and Python-only models
     python_bridge: PythonBridge,
     /// Models directory
+    #[allow(dead_code)]
     models_dir: PathBuf,
     /// Engine preference
     preference: EnginePreference,
@@ -347,6 +348,7 @@ impl EngineRouter {
     }
 
     /// Get Whisper model path
+    #[allow(dead_code)]
     fn get_whisper_model_path(&self, model_name: &str) -> Result<PathBuf, EngineRouterError> {
         // Map model name to GGML filename
         let ggml_name = match model_name {
@@ -388,6 +390,7 @@ impl EngineRouter {
     }
 
     /// Load audio file as f32 samples
+    #[allow(dead_code)]
     async fn load_audio(&self, _audio_path: &Path) -> Result<Vec<f32>, EngineRouterError> {
         // TODO: Implement audio loading using FFmpeg or symphonia
         // For now, return empty - this will be implemented in a separate module

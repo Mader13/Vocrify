@@ -5,6 +5,12 @@
 //! - List installed models
 //! - Delete models
 //! - Get model paths
+//!
+//! Phase 3: Updated for transcribe-rs supporting:
+//! - Whisper (GGML format)
+//! - Parakeet (ONNX format)
+//! - Moonshine (ONNX format) - Future
+//! - SenseVoice (ONNX format) - Future
 
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
@@ -46,6 +52,8 @@ pub enum ModelManagerError {
 pub enum ModelType {
     Whisper,
     Parakeet,
+    Moonshine,  // Phase 3: Added for transcribe-rs
+    SenseVoice, // Phase 3: Added for transcribe-rs
     Diarization,
 }
 
@@ -54,8 +62,15 @@ impl ModelType {
         match self {
             ModelType::Whisper => "Whisper",
             ModelType::Parakeet => "Parakeet",
+            ModelType::Moonshine => "Moonshine",
+            ModelType::SenseVoice => "SenseVoice",
             ModelType::Diarization => "Diarization",
         }
+    }
+
+    /// Check if this model type is supported by transcribe-rs
+    pub fn is_transcribe_rs_supported(&self) -> bool {
+        matches!(self, ModelType::Whisper | ModelType::Parakeet | ModelType::Moonshine | ModelType::SenseVoice)
     }
 }
 
@@ -206,10 +221,26 @@ impl ModelManager {
 
                 Ok(path)
             }
-            ModelType::Parakeet | ModelType::Diarization => {
-                // These are handled by Python backend for now
+            ModelType::Parakeet => {
+                // Phase 3: Download Parakeet ONNX model from blob.handy.computer
+                let path = download_parakeet_model(model_name, &self.models_dir, progress).await?;
+                Ok(path)
+            }
+            ModelType::Moonshine => {
+                // Phase 3: Moonshine models downloaded from HuggingFace
                 Err(ModelManagerError::DownloadFailed(
-                    format!("{:?} models must be downloaded via Python backend", model_type)
+                    "Moonshine models must be downloaded manually from HuggingFace".to_string()
+                ))
+            }
+            ModelType::SenseVoice => {
+                // Phase 3: SenseVoice models downloaded from blob.handy.computer
+                let path = download_sensevoice_model(model_name, &self.models_dir, progress).await?;
+                Ok(path)
+            }
+            ModelType::Diarization => {
+                // Diarization models are handled by Python backend
+                Err(ModelManagerError::DownloadFailed(
+                    "Diarization models must be downloaded via Python backend".to_string()
                 ))
             }
         }
@@ -236,6 +267,16 @@ impl ModelManager {
         }
 
         if model_name == "sherpa-onnx-diarization" {
+            // Check parent directory first (current structure)
+            let sherpa_parent = self.models_dir.join("sherpa-onnx-diarization");
+
+            if sherpa_parent.exists() {
+                std::fs::remove_dir_all(&sherpa_parent)?;
+                eprintln!("[INFO] Deleted sherpa-onnx-diarization directory");
+                return Ok(());
+            }
+
+            // Fallback: Check individual directories (old structure)
             let seg_path = self.models_dir.join("sherpa-onnx-segmentation");
             let emb_path = self.models_dir.join("sherpa-onnx-embedding");
 
@@ -314,6 +355,7 @@ impl ModelManager {
     }
 
     fn detect_model_type(&self, model_name: &str) -> Option<ModelType> {
+        // Whisper models
         if model_name.starts_with("whisper-") {
             return Some(ModelType::Whisper);
         }
@@ -326,8 +368,19 @@ impl ModelManager {
             return Some(ModelType::Whisper);
         }
 
+        // Phase 3: Parakeet models for transcribe-rs
         if model_name.starts_with("parakeet-") {
             return Some(ModelType::Parakeet);
+        }
+
+        // Phase 3: Moonshine models for transcribe-rs
+        if model_name.starts_with("moonshine-") {
+            return Some(ModelType::Moonshine);
+        }
+
+        // Phase 3: SenseVoice models for transcribe-rs
+        if model_name.starts_with("sense-") || model_name.starts_with("sensevoice-") {
+            return Some(ModelType::SenseVoice);
         }
 
         None
@@ -396,6 +449,223 @@ impl ModelManager {
 
         Ok(())
     }
+}
+
+/// Download Parakeet ONNX model from blob.handy.computer with streaming progress
+/// Phase 3: Added for transcribe-rs Parakeet engine support
+pub async fn download_parakeet_model(
+    model_name: &str,
+    output_dir: &Path,
+    progress: Option<ProgressCallback>,
+) -> Result<PathBuf, ModelManagerError> {
+    use reqwest::Client;
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+    use futures_util::StreamExt;
+
+    // Map model names to download URLs
+    let (url, target_dir_name) = match model_name {
+        "parakeet-tdt-0.6b-v3" | "parakeet-v3" => {
+            ("https://blob.handy.computer/parakeet-v3-int8.tar.gz", "parakeet-tdt-0.6b-v3-int8")
+        }
+        "parakeet-tdt-0.6b-v3-int8" => {
+            ("https://blob.handy.computer/parakeet-v3-int8.tar.gz", "parakeet-tdt-0.6b-v3-int8")
+        }
+        _ => {
+            return Err(ModelManagerError::InvalidName(
+                format!("Unknown Parakeet model: {}. Supported: parakeet-tdt-0.6b-v3", model_name)
+            ));
+        }
+    };
+
+    eprintln!("[INFO] Downloading Parakeet model from: {}", url);
+
+    let client = Client::new();
+    let response = client.get(url)
+        .send()
+        .await
+        .map_err(|e| ModelManagerError::DownloadFailed(format!("Failed to download model: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(ModelManagerError::DownloadFailed(format!(
+            "Failed to download model: HTTP {}",
+            response.status()
+        )));
+    }
+
+    let total_size = response.content_length().unwrap_or(0);
+    let total_mb = total_size / (1024 * 1024);
+    eprintln!("[INFO] Model size: {} MB", total_mb);
+
+    // Download with streaming progress
+    let mut downloaded: u64 = 0;
+    let mut last_progress_time = std::time::Instant::now();
+    let mut last_downloaded: u64 = 0;
+    let mut buffer = Vec::with_capacity(total_size as usize);
+    
+    let mut stream = response.bytes_stream();
+    
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result
+            .map_err(|e| ModelManagerError::DownloadFailed(format!("Download stream error: {}", e)))?;
+        
+        buffer.extend_from_slice(&chunk);
+        downloaded += chunk.len() as u64;
+        
+        // Update progress every 500ms to avoid overwhelming the UI
+        let now = std::time::Instant::now();
+        if now.duration_since(last_progress_time).as_millis() >= 500 || downloaded == total_size {
+            let elapsed_secs = now.duration_since(last_progress_time).as_secs_f64();
+            let bytes_since_last = downloaded - last_downloaded;
+            let speed_mb_s = if elapsed_secs > 0.0 {
+                (bytes_since_last as f64) / (1024.0 * 1024.0) / elapsed_secs
+            } else {
+                0.0
+            };
+            
+            let percent = if total_size > 0 {
+                (downloaded as f64 / total_size as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            eprintln!("[INFO] Download progress: {:.1}% ({} MB / {} MB) @ {:.2} MB/s", 
+                     percent, downloaded / (1024 * 1024), total_mb, speed_mb_s);
+            
+            if let Some(ref callback) = progress {
+                callback(downloaded, total_size, percent);
+            }
+            
+            last_progress_time = now;
+            last_downloaded = downloaded;
+        }
+    }
+
+    // Create output directory
+    let target_dir = output_dir.join(target_dir_name);
+    std::fs::create_dir_all(&target_dir)?;
+
+    // Extract tarball
+    eprintln!("[INFO] Extracting model to: {:?}", target_dir);
+    let tar = GzDecoder::new(&buffer[..]);
+    let mut archive = Archive::new(tar);
+    archive.unpack(&target_dir)
+        .map_err(|e| ModelManagerError::DownloadFailed(format!("Failed to extract model: {}", e)))?;
+
+    // Final progress update
+    if let Some(callback) = progress {
+        callback(total_size, total_size, 100.0);
+    }
+
+    eprintln!("[INFO] Parakeet model downloaded and extracted to: {:?}", target_dir);
+    Ok(target_dir)
+}
+
+/// Download SenseVoice ONNX model from blob.handy.computer with streaming progress
+/// Phase 3: Added for transcribe-rs SenseVoice engine support
+pub async fn download_sensevoice_model(
+    model_name: &str,
+    output_dir: &Path,
+    progress: Option<ProgressCallback>,
+) -> Result<PathBuf, ModelManagerError> {
+    use reqwest::Client;
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+    use futures_util::StreamExt;
+
+    // Map model names to download URLs
+    let (url, target_dir_name) = match model_name {
+        "sense-voice" | "sense-voice-int8" => {
+            ("https://blob.handy.computer/sense-voice-int8.tar.gz", "sense-voice")
+        }
+        _ => {
+            return Err(ModelManagerError::InvalidName(
+                format!("Unknown SenseVoice model: {}. Supported: sense-voice-int8", model_name)
+            ));
+        }
+    };
+
+    eprintln!("[INFO] Downloading SenseVoice model from: {}", url);
+
+    let client = Client::new();
+    let response = client.get(url)
+        .send()
+        .await
+        .map_err(|e| ModelManagerError::DownloadFailed(format!("Failed to download model: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(ModelManagerError::DownloadFailed(format!(
+            "Failed to download model: HTTP {}",
+            response.status()
+        )));
+    }
+
+    let total_size = response.content_length().unwrap_or(0);
+    let total_mb = total_size / (1024 * 1024);
+    eprintln!("[INFO] Model size: {} MB", total_mb);
+
+    // Download with streaming progress
+    let mut downloaded: u64 = 0;
+    let mut last_progress_time = std::time::Instant::now();
+    let mut last_downloaded: u64 = 0;
+    let mut buffer = Vec::with_capacity(total_size as usize);
+    
+    let mut stream = response.bytes_stream();
+    
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result
+            .map_err(|e| ModelManagerError::DownloadFailed(format!("Download stream error: {}", e)))?;
+        
+        buffer.extend_from_slice(&chunk);
+        downloaded += chunk.len() as u64;
+        
+        // Update progress every 500ms to avoid overwhelming the UI
+        let now = std::time::Instant::now();
+        if now.duration_since(last_progress_time).as_millis() >= 500 || downloaded == total_size {
+            let elapsed_secs = now.duration_since(last_progress_time).as_secs_f64();
+            let bytes_since_last = downloaded - last_downloaded;
+            let speed_mb_s = if elapsed_secs > 0.0 {
+                (bytes_since_last as f64) / (1024.0 * 1024.0) / elapsed_secs
+            } else {
+                0.0
+            };
+            
+            let percent = if total_size > 0 {
+                (downloaded as f64 / total_size as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            eprintln!("[INFO] Download progress: {:.1}% ({} MB / {} MB) @ {:.2} MB/s", 
+                     percent, downloaded / (1024 * 1024), total_mb, speed_mb_s);
+            
+            if let Some(ref callback) = progress {
+                callback(downloaded, total_size, percent);
+            }
+            
+            last_progress_time = now;
+            last_downloaded = downloaded;
+        }
+    }
+
+    // Create output directory
+    let target_dir = output_dir.join(target_dir_name);
+    std::fs::create_dir_all(&target_dir)?;
+
+    // Extract tarball
+    eprintln!("[INFO] Extracting model to: {:?}", target_dir);
+    let tar = GzDecoder::new(&buffer[..]);
+    let mut archive = Archive::new(tar);
+    archive.unpack(&target_dir)
+        .map_err(|e| ModelManagerError::DownloadFailed(format!("Failed to extract model: {}", e)))?;
+
+    // Final progress update
+    if let Some(callback) = progress {
+        callback(total_size, total_size, 100.0);
+    }
+
+    eprintln!("[INFO] SenseVoice model downloaded and extracted to: {:?}", target_dir);
+    Ok(target_dir)
 }
 
 #[cfg(test)]

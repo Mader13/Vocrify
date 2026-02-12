@@ -26,12 +26,25 @@ pub mod sherpa_diarizer;
 pub mod model_manager;
 pub mod python_bridge;
 pub mod engine_router;
+pub mod transcription_manager;
 
 // Re-export FFmpeg types for frontend
 pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgress, get_ffmpeg_status, download_ffmpeg};
 
 // Re-export Whisper types for frontend
 pub use whisper_engine::{WhisperEngine, DeviceType as WhisperDeviceType, TranscriptionSegment as WhisperSegment};
+
+// Re-export TranscriptionManager types for frontend (Phase 3: transcribe-rs)
+#[allow(unused_imports)]
+pub use transcription_manager::{
+    TranscriptionManager,
+    TranscriptionError,
+    TranscriptionResult as TResult,
+    TranscriptionSegment as TSegment,
+    TranscriptionOptions as TOptions,
+    SpeakerTurn as TSpeakerTurn,
+    EngineType,
+};
 
 // Re-export Diarization types for frontend
 pub use sherpa_diarizer::{SherpaDiarizer, DiarizationProvider, SpeakerSegment};
@@ -150,6 +163,31 @@ pub struct TranscriptionOptions {
     pub enable_diarization: bool,
     pub diarization_provider: Option<String>,
     pub num_speakers: i32,
+}
+
+/// Transcription options for Rust transcribe-rs (Phase 3)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RustTranscriptionOptions {
+    pub model: String,
+    pub device: String,
+    pub language: Option<String>,
+    pub enable_diarization: bool,
+    pub diarization_provider: Option<String>,
+    pub num_speakers: i32,
+}
+
+/// Implement From for RustTranscriptionOptions -> TranscriptionOptions
+impl From<RustTranscriptionOptions> for TranscriptionOptions {
+    fn from(opts: RustTranscriptionOptions) -> Self {
+        Self {
+            model: opts.model,
+            device: opts.device,
+            language: opts.language.unwrap_or_else(|| "auto".to_string()),
+            enable_diarization: opts.enable_diarization,
+            diarization_provider: opts.diarization_provider,
+            num_speakers: opts.num_speakers,
+        }
+    }
 }
 
 /// A single transcription segment
@@ -409,6 +447,9 @@ pub struct ModelDownloadProgress {
 }
 
 type TaskManagerState = Arc<Mutex<TaskManager>>;
+
+/// TranscriptionManager state for Rust-based transcription
+type TranscriptionManagerState = Arc<Mutex<Option<TranscriptionManager>>>;
 
 /// Check if a stderr line represents a critical error
 fn is_critical_error(line: &str) -> bool {
@@ -1643,6 +1684,63 @@ async fn spawn_model_download(
     cache_dir: PathBuf,
     token_file: Option<PathBuf>,
 ) -> Result<(), AppError> {
+    use crate::model_manager::{download_parakeet_model, download_sensevoice_model};
+
+    // Use Rust streaming downloads for models managed in Rust
+    if model_type == "parakeet" {
+        let app_clone = app.clone();
+        let model_name_clone = model_name.clone();
+
+        let progress_callback = Box::new(move |current: u64, total: u64, percent: f64| {
+            let progress = ModelDownloadProgress {
+                model_name: model_name_clone.clone(),
+                current_mb: current / (1024 * 1024),
+                total_mb: total / (1024 * 1024),
+                percent,
+                speed_mb_s: 0.0,
+                status: "downloading".to_string(),
+            };
+            let _ = app_clone.emit("model-download-progress", progress);
+        });
+
+        download_parakeet_model(&model_name, &cache_dir, Some(progress_callback))
+            .await
+            .map_err(|e| AppError::ModelError(e.to_string()))?;
+
+        let _ = app.emit("model-download-complete", serde_json::json!({
+            "modelName": model_name,
+        }));
+
+        return Ok(());
+    }
+
+    if model_type == "sensevoice" {
+        let app_clone = app.clone();
+        let model_name_clone = model_name.clone();
+
+        let progress_callback = Box::new(move |current: u64, total: u64, percent: f64| {
+            let progress = ModelDownloadProgress {
+                model_name: model_name_clone.clone(),
+                current_mb: current / (1024 * 1024),
+                total_mb: total / (1024 * 1024),
+                percent,
+                speed_mb_s: 0.0,
+                status: "downloading".to_string(),
+            };
+            let _ = app_clone.emit("model-download-progress", progress);
+        });
+
+        download_sensevoice_model(&model_name, &cache_dir, Some(progress_callback))
+            .await
+            .map_err(|e| AppError::ModelError(e.to_string()))?;
+
+        let _ = app.emit("model-download-complete", serde_json::json!({
+            "modelName": model_name,
+        }));
+
+        return Ok(());
+    }
+
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
     
@@ -2346,6 +2444,294 @@ async fn reset_setup(app: AppHandle) -> Result<(), String> {
     reset_setup_impl(&app)
 }
 
+/// ============================================================================
+// Phase 3: Rust Transcription Commands
+// ============================================================================
+
+/// Initialize the transcription manager (call at app startup)
+#[tauri::command]
+async fn init_transcription_manager(
+    _app: AppHandle,
+    state: State<'_, TranscriptionManagerState>,
+) -> Result<(), String> {
+    let manager_guard = state.lock().await;
+    match manager_guard.as_ref() {
+        Some(_) => {
+            eprintln!("[INFO] TranscriptionManager already initialized");
+            Ok(())
+        }
+        None => {
+            eprintln!("[INFO] TranscriptionManager not initialized, this is unexpected");
+            Err("TranscriptionManager not found in state".to_string())
+        }
+    }
+}
+
+/// Load a model for Rust transcription
+#[tauri::command]
+async fn load_model_rust(
+    model_name: String,
+    state: State<'_, TranscriptionManagerState>,
+) -> Result<(), String> {
+    let manager_guard = state.lock().await;
+    let manager = manager_guard.as_ref()
+        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+
+    #[cfg(feature = "rust-transcribe")]
+    {
+        manager.load_model(&model_name).await
+            .map_err(|e| format!("Failed to load model: {}", e))
+    }
+
+    #[cfg(not(feature = "rust-transcribe"))]
+    {
+        Err("rust-transcribe feature is not enabled".to_string())
+    }
+}
+
+/// Transcribe using Rust transcribe-rs engine
+#[tauri::command]
+async fn transcribe_rust(
+    task_id: String,
+    file_path: String,
+    options: crate::RustTranscriptionOptions,
+    app: AppHandle,
+    state: State<'_, TranscriptionManagerState>,
+) -> Result<TranscriptionResult, String> {
+    eprintln!("[INFO] transcribe_rust called: task_id={}, file={}, model={}",
+        task_id, file_path, options.language.as_ref().map(|s| s.as_str()).unwrap_or("auto"));
+
+    // Validate file path
+    let validated_path = validate_file_path(&file_path)
+        .map_err(|e| e.to_string())?;
+
+    let manager_guard = state.lock().await;
+    let manager = manager_guard.as_ref()
+        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+
+    #[cfg(feature = "rust-transcribe")]
+    {
+        // Emit progress start
+        let _ = app.emit("progress-update", serde_json::json!({
+            "taskId": task_id,
+            "progress": 5,
+            "stage": "loading",
+            "message": "Starting Rust transcription...",
+        }));
+
+        // Convert RustTranscriptionOptions to transcription_manager::TranscriptionOptions
+        let tm_options = transcription_manager::TranscriptionOptions::from(options.clone());
+
+        let result = manager.transcribe_file(&validated_path, &tm_options).await
+            .map_err(|e| {
+                eprintln!("[ERROR] Rust transcription failed: {}", e);
+
+                // Emit error to frontend
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "taskId": task_id,
+                    "error": e.to_string(),
+                }));
+                e.to_string()
+            })?;
+
+        // Emit completion
+        let _ = app.emit("transcription-complete", serde_json::json!({
+            "taskId": task_id,
+            "result": result,
+        }));
+
+        eprintln!("[INFO] Rust transcription complete: {} segments", result.segments.len());
+
+        // Convert transcription_manager::TranscriptionResult to crate::TranscriptionResult
+        let lib_result: TranscriptionResult = TranscriptionResult {
+            segments: result.segments.into_iter().map(|s| TranscriptionSegment {
+                start: s.start,
+                end: s.end,
+                text: s.text,
+                speaker: s.speaker,
+                confidence: s.confidence,
+            }).collect(),
+            language: result.language,
+            duration: result.duration,
+            speaker_turns: result.speaker_turns.map(|turns| turns.into_iter().map(|t| SpeakerTurn {
+                start: t.start,
+                end: t.end,
+                speaker: t.speaker,
+            }).collect()),
+            speaker_segments: result.speaker_segments.map(|segs| segs.into_iter().map(|s| TranscriptionSegment {
+                start: s.start,
+                end: s.end,
+                text: s.text,
+                speaker: s.speaker,
+                confidence: s.confidence,
+            }).collect()),
+        };
+
+        Ok(lib_result)
+    }
+
+    #[cfg(not(feature = "rust-transcribe"))]
+    {
+        Err("rust-transcribe feature is not enabled".to_string())
+    }
+}
+
+/// Unload current model
+#[tauri::command]
+async fn unload_model_rust(
+    state: State<'_, TranscriptionManagerState>,
+) -> Result<(), String> {
+    let manager_guard = state.lock().await;
+    let manager = manager_guard.as_ref()
+        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+
+    #[cfg(feature = "rust-transcribe")]
+    {
+        manager.unload_model();
+        Ok(())
+    }
+
+    #[cfg(not(feature = "rust-transcribe"))]
+    {
+        Err("rust-transcribe feature is not enabled".to_string())
+    }
+}
+
+/// Check if a model is currently loaded
+#[tauri::command]
+async fn is_model_loaded_rust(
+    state: State<'_, TranscriptionManagerState>,
+) -> Result<bool, String> {
+    let manager_guard = state.lock().await;
+    let manager = manager_guard.as_ref()
+        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+
+    #[cfg(feature = "rust-transcribe")]
+    {
+        Ok(manager.is_model_loaded())
+    }
+
+    #[cfg(not(feature = "rust-transcribe"))]
+    {
+        Ok(false)
+    }
+}
+
+/// Get the currently loaded model name
+#[tauri::command]
+async fn get_current_model_rust(
+    state: State<'_, TranscriptionManagerState>,
+) -> Result<Option<String>, String> {
+    let manager_guard = state.lock().await;
+    let manager = manager_guard.as_ref()
+        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+
+    #[cfg(feature = "rust-transcribe")]
+    {
+        Ok(manager.get_current_model())
+    }
+
+    #[cfg(not(feature = "rust-transcribe"))]
+    {
+        Ok(None)
+    }
+}
+
+/// ============================================================================
+// Python Diarization Commands (for integration with Rust transcription)
+// ============================================================================
+
+/// Run PyAnnote diarization via Python subprocess
+#[tauri::command]
+async fn diarize_pyannote(
+    app: AppHandle,
+    task_id: String,
+    audio_path: String,
+    hf_token: Option<String>,
+    num_speakers: Option<i32>,
+) -> Result<Vec<crate::python_bridge::SpeakerSegment>, String> {
+    eprintln!("[INFO] diarize_pyannote called: task_id={}, audio={}", task_id, audio_path);
+
+    // Validate file path
+    let validated_path = validate_file_path(&audio_path)
+        .map_err(|e| e.to_string())?;
+
+    // Get Python executable and engine path
+    let python_exe = get_python_executable(&app);
+    let engine_path = get_python_engine_path(&app);
+
+    // Emit progress
+    let _ = app.emit("progress-update", serde_json::json!({
+        "taskId": task_id,
+        "progress": 50,
+        "stage": "diarization",
+        "message": "Running PyAnnote diarization...",
+    }));
+
+    // Create Python bridge and run diarization
+    let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
+    let bridge = crate::python_bridge::PythonBridge::new(&python_exe, &engine_path, &models_dir);
+
+    let result = bridge.diarize_pyannote(&validated_path, hf_token.as_deref(), num_speakers).await
+        .map_err(|e| {
+            eprintln!("[ERROR] PyAnnote diarization failed: {}", e);
+
+            let _ = app.emit("transcription-error", serde_json::json!({
+                "taskId": task_id,
+                "error": format!("PyAnnote diarization failed: {}", e),
+            }));
+            e.to_string()
+        })?;
+
+    eprintln!("[INFO] PyAnnote diarization complete: {} segments", result.len());
+    Ok(result as Vec<crate::python_bridge::SpeakerSegment>)
+}
+
+/// Run Sherpa-ONNX diarization via Python subprocess
+#[tauri::command]
+async fn diarize_sherpa(
+    app: AppHandle,
+    task_id: String,
+    audio_path: String,
+    num_speakers: Option<i32>,
+) -> Result<Vec<crate::python_bridge::SpeakerSegment>, String> {
+    eprintln!("[INFO] diarize_sherpa called: task_id={}, audio={}", task_id, audio_path);
+
+    // Validate file path
+    let validated_path = validate_file_path(&audio_path)
+        .map_err(|e| e.to_string())?;
+
+    // Get Python executable and engine path
+    let python_exe = get_python_executable(&app);
+    let engine_path = get_python_engine_path(&app);
+
+    // Emit progress
+    let _ = app.emit("progress-update", serde_json::json!({
+        "taskId": task_id,
+        "progress": 50,
+        "stage": "diarization",
+        "message": "Running Sherpa-ONNX diarization...",
+    }));
+
+    // Create Python bridge and run diarization
+    let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
+    let bridge = crate::python_bridge::PythonBridge::new(&python_exe, &engine_path, &models_dir);
+
+    let result = bridge.diarize_sherpa(&validated_path, num_speakers).await
+        .map_err(|e| {
+            eprintln!("[ERROR] Sherpa diarization failed: {}", e);
+
+            let _ = app.emit("transcription-error", serde_json::json!({
+                "taskId": task_id,
+                "error": format!("Sherpa diarization failed: {}", e),
+            }));
+            e.to_string()
+        })?;
+
+    eprintln!("[INFO] Sherpa diarization complete: {} segments", result.len());
+    Ok(result as Vec<crate::python_bridge::SpeakerSegment>)
+}
+
 /// Read a file as Base64 encoded string
 /// This is used for loading media files into WaveSurfer.js which cannot fetch from Tauri asset URLs
 #[tauri::command]
@@ -2368,12 +2754,28 @@ async fn read_file_as_base64(file_path: String) -> Result<String, AppError> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let task_manager: TaskManagerState = Arc::new(Mutex::new(TaskManager::default()));
-    
+
+    // Get models directory for TranscriptionManager
+    let models_dir = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("..")
+        .join("models_cache");
+
+    let _ = std::fs::create_dir_all(&models_dir);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(task_manager)
+        .manage(TranscriptionManagerState::new(Mutex::new(
+            Some(TranscriptionManager::new(&models_dir)
+                .unwrap_or_else(|e| {
+                    eprintln!("[WARN] Failed to create TranscriptionManager: {}", e);
+                    // Continue with fallback models_dir
+                    TranscriptionManager::new(&models_dir).unwrap()
+                }))
+        )))
         .invoke_handler(tauri::generate_handler![
             start_transcription,
             cancel_transcription,
@@ -2398,6 +2800,16 @@ pub fn run() {
             save_huggingface_token,
             get_huggingface_token_command,
             read_file_as_base64,
+            // Phase 3: Rust Transcription commands
+            init_transcription_manager,
+            load_model_rust,
+            transcribe_rust,
+            unload_model_rust,
+            is_model_loaded_rust,
+            get_current_model_rust,
+            // Python Diarization commands
+            diarize_pyannote,
+            diarize_sherpa,
             // Setup Wizard commands
             check_python_environment,
             check_ffmpeg_status,

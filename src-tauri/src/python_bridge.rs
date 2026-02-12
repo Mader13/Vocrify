@@ -319,6 +319,7 @@ impl PythonBridge {
 enum DiarizationMessage {
     Segments { segments: Vec<SpeakerSegment> },
     Error { error: String },
+    #[allow(dead_code)]
     Progress { message: String },
 }
 
@@ -334,7 +335,9 @@ enum TranscriptionMessage {
         speaker_turns: Option<Vec<SpeakerSegment>>,
     },
     Error { error: String },
+    #[allow(dead_code)]
     Progress { stage: String, progress: u8, message: String },
+    #[allow(dead_code)]
     Segment { segment: PythonTranscriptionSegment, index: u32 },
 }
 

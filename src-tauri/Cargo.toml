@@ -10,51 +10,62 @@ name = "transcribe_video_lib"
 crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.5.5", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
-tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-store = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["full", "process"] }
-thiserror = "1"
-uuid = { version = "1", features = ["v4"] }
-dunce = "1"
+# Pin ort to match Handy's version to avoid ndarray conflicts
+ort = { version = "=2.0.0-rc.10" }
+tauri = { version = "2.10.2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2.5.3"
+tauri-plugin-dialog = "2.6.0"
+tauri-plugin-store = "2.4.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.49.0", features = ["full", "process"] }
+thiserror = "2.0.18"
+uuid = { version = "1.20.0", features = ["v4"] }
+dunce = "1.0.5"
 scopeguard = "1.2"
-tempfile = "3"
+tempfile = "3.25.0"
 reqwest = { version = "0.12", features = ["stream"] }
-which = "6"
-zip = "2"
-flate2 = "1"
-tar = "0.4"
-base64 = "0.22"
-chrono = "0.4"
+futures-util = "0.3"
+which = "8.0.0"
+zip = "7.4.0"
+flate2 = "1.1.9"
+tar = "0.4.44"
+base64 = "0.22.1"
+chrono = "0.4.43"
 
 # ============================================================================
-# Phase 2: Rust-based AI Engine
+# Phase 3: transcribe-rs - Unified Rust Transcription Engine
 # ============================================================================
 #
-# whisper-rs builds whisper.cpp from source with GPU support.
-# Build requirements:
-# - CMake (for building whisper.cpp)
-# - Vulkan SDK (for AMD/Intel GPU) OR CUDA Toolkit (for NVIDIA GPU)
-#
-# GPU acceleration at runtime:
-# - macOS: Metal (automatic, no SDK needed)
-# - Windows/Linux: Vulkan (AMD/Intel) or CUDA (NVIDIA) - detected at runtime
+# transcribe-rs supports multiple engines: Whisper, Parakeet, Moonshine, SenseVoice
+# GPU acceleration:
+# - macOS: Metal (automatic)
+# - Windows/Linux: Vulkan (AMD/Intel) or CUDA (NVIDIA)
 
-[target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.14", features = ["metal", "tracing_backend"] }
+# Audio processing
+audrey = "0.3"
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-whisper-rs = { version = "0.14", features = ["vulkan", "tracing_backend"] }
+# Phase 3: transcribe-rs - all engines included by default
+# NOTE: Building with rust-transcribe requires Vulkan SDK on Windows/Linux
+# Disable default features to skip transcribe-rs for faster builds
+transcribe-rs = { version = "=0.2.2", optional = true, features = ["whisper", "parakeet", "moonshine"] }
 
 # Sherpa-ONNX for speaker diarization (future)
 # sherpa-rs = { version = "0.1", features = ["download-binaries"] }
 
 [features]
-default = ["rust-whisper"]
-rust-whisper = []
+# Phase 3: transcribe-rs (disabled by default - Windows path length issue)
+# To enable: cargo build --features rust-transcribe
+default = ["rust-transcribe"]
+rust-transcribe = ["dep:transcribe-rs"]
+rust-whisper = []  # Deprecated: kept for backward compatibility
+
+# Build requirements for rust-transcribe:
+# - macOS: No additional SDK needed (Metal is built-in) ✓
+# - Windows/Linux: Vulkan SDK 1.3+ required (https://vulkan.lunarg.com/)
+# - Windows: Long path support must be enabled + may need project at short path (C:\project)
+#
+# To disable all GPU: cargo build --no-default-features
