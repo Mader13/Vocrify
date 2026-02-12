@@ -2047,6 +2047,9 @@ async fn delete_model(
 
     eprintln!("Model deleted successfully via Python: {}", model_name);
 
+    // Give filesystem time to sync before returning success
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
     // Clear selected model from store if the deleted model matches
     // Store format can be: "transcription:model_name" or "diarization:model_name" or legacy "model_name"
     let store_path = get_store_path(&app);
@@ -2137,6 +2140,44 @@ async fn get_disk_usage(app: AppHandle) -> Result<DiskUsage, AppError> {
         total_size_mb,
         free_space_mb,
     })
+}
+
+/// Clear model cache directories
+#[tauri::command]
+async fn clear_cache(app: AppHandle) -> Result<(), AppError> {
+    let models_dir = get_models_dir(&app)?;
+
+    // Directories to clear
+    let cache_dirs = vec![
+        models_dir.join(".hf_cache"),
+        models_dir.join("hf_cache"),
+    ];
+
+    let mut cleared_count = 0;
+    let mut error_count = 0;
+
+    for cache_dir in cache_dirs {
+        if cache_dir.exists() {
+            match std::fs::remove_dir_all(&cache_dir) {
+                Ok(_) => {
+                    eprintln!("[INFO] Cleared cache directory: {:?}", cache_dir);
+                    cleared_count += 1;
+                }
+                Err(e) => {
+                    eprintln!("[WARN] Failed to clear cache directory {:?}: {}", cache_dir, e);
+                    error_count += 1;
+                }
+            }
+        }
+    }
+
+    if cleared_count == 0 && error_count == 0 {
+        eprintln!("[INFO] No cache directories found to clear");
+    } else {
+        eprintln!("[INFO] Cache clear completed: {} cleared, {} errors", cleared_count, error_count);
+    }
+
+    Ok(())
 }
 
 /// Save selected model to store
@@ -2791,6 +2832,7 @@ pub fn run() {
             cancel_model_download,
             get_local_models,
             delete_model,
+            clear_cache,
             get_disk_usage,
             save_selected_model,
             load_selected_model,

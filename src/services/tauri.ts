@@ -499,6 +499,20 @@ export async function getDiskUsage(): Promise<CommandResult<DiskUsage>> {
 
     return { success: true, data: normalized };
   } catch (error) {
+    console.error("Failed to get disk usage:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+/**
+ * Clear model cache directories
+ */
+export async function clearCache(): Promise<CommandResult<void>> {
+  try {
+    await invoke<void>("clear_cache");
+    return { success: true, data: undefined };
+  } catch (error) {
+    console.error("Failed to clear cache:", error);
     return { success: false, error: String(error) };
   }
 }

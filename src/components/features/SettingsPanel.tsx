@@ -12,7 +12,7 @@ import {
   DialogClose,
 } from "@/components/ui";
 import { useUIStore, useTasks, useSetupStore } from "@/stores";
-import { selectOutputDirectory } from "@/services/tauri";
+import { selectOutputDirectory, clearCache } from "@/services/tauri";
 import { LANGUAGE_NAMES } from "@/types";
 import type { Language } from "@/types";
 
@@ -68,9 +68,14 @@ export function SettingsPanel() {
     resetSettings();
   };
 
-  const handleClearCache = () => {
-    localStorage.removeItem("vocrify-settings");
-    window.location.reload();
+  const handleClearCache = async () => {
+    const result = await clearCache();
+    if (result.success) {
+      // Reload the page to apply changes
+      window.location.reload();
+    } else {
+      console.error("Failed to clear cache:", result.error);
+    }
   };
 
   const handleRerunSetup = async () => {
