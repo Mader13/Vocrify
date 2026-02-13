@@ -113,6 +113,9 @@ export async function transcribeWithFallback(
         model: options.model,
       });
 
+      // Ensure model is loaded for transcribe-rs before transcription.
+      await invoke("load_model_rust", { modelName: options.model });
+
       // Phase 3: Call Rust transcribe-rs engine
       const result = await invoke<{
         segments: Array<{

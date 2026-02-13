@@ -578,6 +578,21 @@ export async function onModelDownloadError(
 }
 
 /**
+ * Subscribe to model download retrying events
+ * Emitted when a temporary network error occurs and download will retry
+ */
+export async function onModelDownloadRetrying(
+  callback: (modelName: string, message: string) => void
+): Promise<UnlistenFn> {
+  return listen<{ modelName: string; message: string }>(
+    "model-download-retrying",
+    (event) => {
+      callback(event.payload.modelName, event.payload.message);
+    }
+  );
+}
+
+/**
  * Subscribe to model download stage progress events
  */
 export async function onModelDownloadStage(
