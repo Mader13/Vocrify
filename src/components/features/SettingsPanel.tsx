@@ -13,8 +13,8 @@ import {
 } from "@/components/ui";
 import { useUIStore, useTasks, useSetupStore } from "@/stores";
 import { selectOutputDirectory, clearCache } from "@/services/tauri";
-import { LANGUAGE_NAMES } from "@/types";
-import type { Language } from "@/types";
+import { DEVICE_NAMES, ENGINE_PREFERENCES, LANGUAGE_NAMES } from "@/types";
+import type { DeviceType, EnginePreference, Language } from "@/types";
 
 export function SettingsPanel() {
   const isSettingsOpen = useUIStore((s) => s.isSettingsOpen);
@@ -50,7 +50,11 @@ export function SettingsPanel() {
   };
 
   const handleDeviceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings({ defaultDevice: e.target.value as "cpu" | "cuda" });
+    updateSettings({ defaultDevice: e.target.value as DeviceType });
+  };
+
+  const handleEnginePreferenceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    updateSettings({ enginePreference: e.target.value as EnginePreference });
   };
 
   const handleMaxConcurrentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -109,11 +113,35 @@ export function SettingsPanel() {
               value={settings.defaultDevice}
               onChange={handleDeviceChange}
             >
-              <option value="cpu">CPU (процессор)</option>
-              <option value="cuda">CUDA (графический процессор)</option>
+              {Object.entries(DEVICE_NAMES).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </Select>
             <p className="text-xs text-muted-foreground">
-              Выберите между процессором и видеокартой
+              Выберите авто-режим или конкретный backend (CPU/GPU)
+            </p>
+          </div>
+
+          {/* Engine Section */}
+          <div className="space-y-2">
+            <label htmlFor="engine" className="text-sm font-medium">
+              Движок транскрибации
+            </label>
+            <Select
+              id="engine"
+              value={settings.enginePreference}
+              onChange={handleEnginePreferenceChange}
+            >
+              {Object.entries(ENGINE_PREFERENCES).map(([value, meta]) => (
+                <option key={value} value={value}>
+                  {meta.name}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {ENGINE_PREFERENCES[settings.enginePreference ?? "auto"].description}
             </p>
           </div>
 

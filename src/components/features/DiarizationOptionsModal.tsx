@@ -144,7 +144,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                     </div>
 
                     {/* Toggle */}
-                    <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="flex items-center gap-3 shrink-0">
                       <Switch
                         checked={file.enableDiarization}
                         onCheckedChange={(checked) =>
@@ -241,7 +241,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
           {!hasProviders && (
             <Card className="mt-4 p-5 bg-amber-50/80 dark:bg-amber-950/30 border-amber-200/60 dark:border-amber-800/40">
               <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center flex-shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center shrink-0">
                   <Info className="w-4 h-4 text-amber-600 dark:text-amber-500" />
                 </div>
                 <div className="flex-1">
@@ -270,7 +270,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
         {hasProviders && (
           <div className="px-7 pb-4">
             <div className="flex items-start gap-2.5 p-3 rounded-lg bg-muted/40 border border-border/40">
-              <Info className="w-4 h-4 text-primary/70 flex-shrink-0 mt-0.5" />
+              <Info className="w-4 h-4 text-primary/70 shrink-0 mt-0.5" />
               <p className="text-[15px] text-muted-foreground leading-relaxed">
                 Для качественного разделения по спикерам настоятельно рекомендуется указывать точное количество спикеров
               </p>

@@ -73,7 +73,7 @@ function DeviceCard({ device, isRecommended }: DeviceCardProps) {
       <div className="flex items-start gap-3">
         <div
           className={cn(
-            "flex-shrink-0 p-2 rounded-lg",
+            "shrink-0 p-2 rounded-lg",
             isRecommended ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"
           )}
         >

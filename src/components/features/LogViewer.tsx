@@ -148,7 +148,7 @@ export function LogViewer({ className }: LogViewerProps) {
                 log.level === LogLevel.WARN && "bg-yellow-900/20"
               )}
             >
-              <div className="text-lg flex-shrink-0">
+              <div className="text-lg shrink-0">
                 {getLevelIcon(log.level)}
               </div>
               

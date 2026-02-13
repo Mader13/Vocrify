@@ -136,7 +136,7 @@ export function CheckCard({
     >
       {/* Header with icon and title */}
       <div className="flex items-start gap-3">
-        <div className="flex-shrink-0 mt-0.5">
+        <div className="shrink-0 mt-0.5">
           {getStatusIcon(status, progress)}
         </div>
         <div className="flex-1 min-w-0">
@@ -205,7 +205,7 @@ export interface CheckItemProps {
 export function CheckItem({ label, status, sublabel }: CheckItemProps) {
   return (
     <div className="flex items-center gap-2 py-1.5">
-      <div className="flex-shrink-0">
+      <div className="shrink-0">
         {getStatusIcon(status)}
       </div>
       <div className="flex-1 min-w-0">

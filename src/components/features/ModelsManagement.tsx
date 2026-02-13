@@ -43,6 +43,16 @@ export function ModelsManagement() {
     return `${mb} MB`;
   };
 
+  const formatEta = (etaS?: number): string | null => {
+    if (!etaS || etaS <= 0) {
+      return null;
+    }
+    const totalSeconds = Math.round(etaS);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
+  };
+
   const totalDownloads = Object.values(downloads).filter(
     (d) => d.status === "downloading",
   );
@@ -104,8 +114,8 @@ export function ModelsManagement() {
             </div>
           )}
 
-          <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:-translate-y-px hover:border-blue-500/40 hover:shadow-sm">
-            <div className="flex items-center gap-3">
+          <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:-translate-y-px hover:border-blue-500/40 hover:shadow-sm flex items-center">
+            <div className="flex items-center gap-3 w-full">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400">
                 <HardDrive className="h-5 w-5" />
               </div>
@@ -120,8 +130,8 @@ export function ModelsManagement() {
             </div>
           </div>
 
-          <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:-translate-y-px hover:border-emerald-500/40 hover:shadow-sm">
-            <div className="flex items-center gap-3">
+          <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:-translate-y-px hover:border-emerald-500/40 hover:shadow-sm flex items-center">
+            <div className="flex items-center gap-3 w-full">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-5 w-5" />
               </div>
@@ -151,7 +161,9 @@ export function ModelsManagement() {
                   <p className="text-xs text-muted-foreground">
                     {formatSize(download.currentMb)} /{" "}
                     {formatSize(download.totalMb)}
+                    {download.totalEstimated ? " (оценочно)" : ""}
                     {download.speedMbS && ` • ${download.speedMbS} MB/s`}
+                    {formatEta(download.etaS) && ` • осталось ~${formatEta(download.etaS)}`}
                   </p>
                 </div>
               ))}

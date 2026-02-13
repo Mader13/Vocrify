@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 
 import { motion, useReducedMotion } from "framer-motion";
 import {
@@ -32,6 +32,36 @@ import { cn, formatTime } from "@/lib/utils";
 import { useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
 import { MODEL_CONFIGS, MODEL_NAMES } from "@/types";
+
+function sanitizeSegmentsForView(segments?: NonNullable<TranscriptionTask["result"]>["segments"]) {
+  if (!segments || segments.length === 0) return [];
+
+  const valid = segments.filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start);
+  if (valid.length <= 1) return valid;
+
+  const epsilon = 0.05;
+  const minStart = Math.min(...valid.map((s) => s.start));
+  const maxEnd = Math.max(...valid.map((s) => s.end));
+
+  const removeIndexes = new Set<number>();
+
+  valid.forEach((candidate, idx) => {
+    const isFullRange = candidate.start <= minStart + epsilon && candidate.end >= maxEnd - epsilon;
+    if (!isFullRange) return;
+
+    const nestedCount = valid.filter((s, i) => {
+      if (i === idx) return false;
+      return s.start >= candidate.start - epsilon && s.end <= candidate.end + epsilon;
+    }).length;
+
+    if (nestedCount >= 2) {
+      removeIndexes.add(idx);
+    }
+  });
+
+  if (removeIndexes.size === 0) return valid;
+  return valid.filter((_, idx) => !removeIndexes.has(idx));
+}
 
 interface ProcessingViewProps {
   task: TranscriptionTask;
@@ -90,7 +120,7 @@ function QueuedView({ task }: ProcessingViewProps) {
 }
 
 function ProcessingView({ task }: ProcessingViewProps) {
-  const stage = (task as any).stage || "transcribing";
+  const stage = task.stage || "transcribing";
   const normalizedStage = stage === "downloading" ? "loading" : stage;
   const config = stageConfig[normalizedStage as keyof typeof stageConfig] || stageConfig.transcribing;
   const Icon = config.icon;
@@ -208,14 +238,15 @@ function ProcessingView({ task }: ProcessingViewProps) {
  * Layout: Video player (40%) + Transcription segments (60%)
  */
 export function TranscriptionView() {
-  const selectedTaskId = useUIStore((s) => (s as any).selectedTaskId);
-  const displayMode = useUIStore((s) => (s as any).displayMode);
-  const setDisplayMode = useUIStore((s) => (s as any).setDisplayMode);
+  const selectedTaskId = useUIStore((s) => s.selectedTaskId);
+  const displayMode = useUIStore((s) => s.displayMode);
+  const setDisplayMode = useUIStore((s) => s.setDisplayMode);
   const task = useTasks((s) => s.tasks.find((t) => t.id === selectedTaskId));
   const videoRef = useRef<HTMLVideoElement>(null);
   const transcriptionContainerRef = useRef<HTMLDivElement>(null);
 
-  const [colorMode, setColorMode] = useState<WaveformColorMode>(displayMode);
+  // Local state for waveform color mode (independent from text display mode)
+  const [colorMode, setColorMode] = useState<WaveformColorMode>("segments");
   const [isVideoVisible, setIsVideoVisible] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -223,29 +254,21 @@ export function TranscriptionView() {
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedSearchIndex, setHighlightedSearchIndex] = useState<number>(-1);
 
-  // Determine if speaker data is available for the current task
-  // Check both speakerTurns and speakerSegments for compatibility
-  const hasSpeakerData = !!(task?.result?.speakerTurns?.length || task?.result?.speakerSegments?.length);
+  const sanitizedSegments = useMemo(
+    () => sanitizeSegmentsForView(task?.result?.segments),
+    [task?.result?.segments]
+  );
+
+  const sanitizedSpeakerSegments = useMemo(
+    () => sanitizeSegmentsForView(task?.result?.speakerSegments),
+    [task?.result?.speakerSegments]
+  );
 
   // Select segments based on display mode
   // Use speakerSegments if available, otherwise fall back to segments (which may have speaker labels)
   const displaySegments = displayMode === "segments"
-    ? task?.result?.segments
-    : task?.result?.speakerSegments || task?.result?.segments;
-
-  // Debug logging to track data flow
-  useEffect(() => {
-    if (task?.result) {
-      console.log("[TranscriptionView] Task data:", {
-        displayMode,
-        hasSpeakerData,
-        segmentsCount: task.result.segments?.length || 0,
-        speakerTurnsCount: task.result.speakerTurns?.length || 0,
-        speakerSegmentsCount: task.result.speakerSegments?.length || 0,
-        displaySegmentsCount: displaySegments?.length || 0
-      });
-    }
-  }, [displayMode, task?.result]);
+    ? sanitizedSegments
+    : (sanitizedSpeakerSegments.length > 0 ? sanitizedSpeakerSegments : sanitizedSegments);
 
   // Calculate matching segments count
   const matchingSegmentsCount = displaySegments ? displaySegments.filter(segment =>
@@ -367,10 +390,7 @@ export function TranscriptionView() {
     };
   }, [task?.id]);
 
-  // Sync colorMode with displayMode
-  useEffect(() => {
-    setColorMode(displayMode);
-  }, [displayMode]);
+
 
   if (!selectedTaskId || !task) {
     return (
@@ -433,7 +453,7 @@ export function TranscriptionView() {
   return (
     <div className="flex flex-col gap-4 h-full overflow-y-auto">
       {/* Video Player Section - адаптивная высота */}
-      <Card className="flex-shrink-0 flex flex-col">
+      <Card className="shrink-0 flex flex-col">
         <CardHeader className="border-b px-4 py-2">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <CardTitle className="text-lg truncate">{task.fileName}</CardTitle>
@@ -455,33 +475,29 @@ export function TranscriptionView() {
                 )}
               </button>
               <button
-                onClick={() => setColorMode(colorMode === "segments" ? "speakers" : "segments")}
-                className="h-8 px-2 text-xs font-medium rounded-md hover:bg-muted/60 active:bg-muted/80 transition-all duration-150 flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  const newMode = colorMode === "segments" ? "speakers" : "segments";
+                  setColorMode(newMode);
+                  setDisplayMode(newMode);
+                }}
+                className={cn(
+                  "h-8 px-3 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
+                  colorMode === "segments"
+                    ? "bg-muted/60 text-muted-foreground hover:bg-muted/80"
+                    : "bg-primary/10 text-primary hover:bg-primary/20"
+                )}
+                title="Toggle waveform color mode"
               >
                 <Palette className="h-4 w-4" />
-                <span className="hidden sm:inline">{colorMode === "segments" ? "Segments" : "Speakers"}</span>
+                <span>{colorMode === "segments" ? "Segments View" : "Speakers View"}</span>
               </button>
-              {/* Display mode toggle - only visible when speaker data is available */}
-              {hasSpeakerData && (
-                <button
-                  onClick={() => setDisplayMode(displayMode === "segments" ? "speakers" : "segments")}
-                  className={cn(
-                    "h-8 px-3 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
-                    displayMode === "segments"
-                      ? "bg-muted/60 text-muted-foreground hover:bg-muted/80"
-                      : "bg-primary/10 text-primary hover:bg-primary/20"
-                  )}
-                >
-                  <span>{displayMode === "segments" ? "Segments View" : "Speakers View"}</span>
-                </button>
-              )}
               <ExportMenu task={task} />
             </div>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span>Duration: {formatTime(task.result.duration || 0)}</span>
             <span>Language: {task.result.language}</span>
-            <span>Segments: {task.result.segments.length}</span>
+            <span>Segments: {sanitizedSegments.length}</span>
             <span>Model: {MODEL_NAMES[task.options.model] || task.options.model}</span>
           </div>
         </CardHeader>
@@ -498,35 +514,48 @@ export function TranscriptionView() {
 
       {/* Transcription Segments Section */}
       <Card className={cn(
-        "flex flex-col min-h-[200px]",
-        isVideoVisible ? "flex-shrink-0" : "flex-1"
+        "flex flex-col min-h-50",
+        isVideoVisible ? "shrink-0" : "flex-1"
       )}>
-        <CardHeader className="border-b px-4 py-2 flex-shrink-0">
+        <CardHeader className="border-b px-4 py-2 shrink-0">
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg">Transcription</CardTitle>
               {!isVideoVisible && (
-                <button
-                  onClick={togglePlayPause}
-                  className={cn(
-                    "h-9 px-4 text-sm font-semibold rounded-lg transition-all duration-150 flex items-center gap-2 shadow-sm hover:shadow-md active:scale-95",
-                    isPlaying
-                      ? "bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700/50"
-                      : "bg-primary text-primary-foreground hover:bg-primary/90 border border-primary"
-                  )}
-                >
-                  {isPlaying ? (
-                    <>
-                      <Pause className="h-4 w-4" />
-                      <span>Pause</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-4 w-4" />
-                      <span>Play</span>
-                    </>
-                  )}
-                </button>
+                <div className="flex items-center gap-3">
+                  {/* Video time display */}
+                  <div className="flex items-center gap-1.5 text-sm font-mono text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-md">
+                    <span className="text-foreground font-medium">
+                      {formatTime(currentTime)}
+                    </span>
+                    <span className="text-muted-foreground/60">/</span>
+                    <span>
+                      {formatTime(task.result?.duration || 0)}
+                    </span>
+                  </div>
+                  {/* Play/Pause button */}
+                  <button
+                    onClick={togglePlayPause}
+                    className={cn(
+                      "h-9 px-4 text-sm font-semibold rounded-lg transition-all duration-150 flex items-center gap-2 shadow-sm hover:shadow-md active:scale-95",
+                      isPlaying
+                        ? "bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700/50"
+                        : "bg-primary text-primary-foreground hover:bg-primary/90 border border-primary"
+                    )}
+                  >
+                    {isPlaying ? (
+                      <>
+                        <Pause className="h-4 w-4" />
+                        <span>Pause</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4" />
+                        <span>Play</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
             </div>
             {/* Search input with navigation */}

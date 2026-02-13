@@ -8,9 +8,9 @@ import {
   onTranscriptionComplete,
   onTranscriptionError,
   onSegmentUpdate,
-  startTranscription,
   selectMediaFiles,
 } from "@/services/tauri";
+import { transcribeWithFallback } from "@/services/transcription";
 import { initializeModelsStore, useModelsStore } from "@/stores/modelsStore";
 import { initializeNotifications } from "@/components/ui/notification-center";
 import { Button } from "@/components/ui/button";
@@ -68,7 +68,7 @@ function MainApplication() {
   // Model validation hook - replaces duplicate model checking code
   const { validateModelSelection, modelError, setModelError, selectedModel } = useModelValidation();
   const { availableModels, loadModels } = useModelsStore();
-  const { defaultDevice, defaultLanguage, diarizationProvider } = useTasks((s) => s.settings);
+  const { defaultDevice, defaultLanguage, diarizationProvider, enginePreference } = useTasks((s) => s.settings);
 
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -114,6 +114,18 @@ function MainApplication() {
     }).then((unlisten) => unsubscribers.push(unlisten));
 
     onTranscriptionError((taskId, error) => {
+      const existingTask = useTasks.getState().tasks.find((t) => t.id === taskId);
+
+      // Ignore late errors if task is already finalized on UI side
+      if (existingTask?.status === "completed" || existingTask?.status === "cancelled") {
+        logger.transcriptionWarn("Ignoring late transcription error for finalized task", {
+          taskId,
+          status: existingTask.status,
+          error,
+        });
+        return;
+      }
+
       updateTaskStatus(taskId, "failed", undefined, error);
     }).then((unlisten) => unsubscribers.push(unlisten));
 
@@ -138,13 +150,13 @@ function MainApplication() {
         logger.transcriptionInfo("Starting task", { taskId: task.id, fileName: task.filePath });
         processedTasks.add(task.id);
         updateTaskStatus(task.id, "processing");
-        startTranscription(task.id, task.filePath, task.options).catch((error) => {
+        transcribeWithFallback(task.id, task.filePath, task.options, enginePreference).catch((error) => {
           logger.transcriptionError("Task failed", { taskId: task.id, error });
           updateTaskStatus(task.id, "failed", undefined, error.message);
         });
       }
     });
-  }, [tasks, updateTaskStatus]);
+  }, [tasks, updateTaskStatus, enginePreference]);
 
   // Resize handlers
   const handleResizeStart = useCallback(() => {
@@ -479,7 +491,7 @@ function MainApplication() {
           {/* Left panel - Task queue */}
           <div
             className={cn(
-              "hidden lg:flex flex-col border-r flex-shrink-0 transition-all duration-200",
+              "hidden lg:flex flex-col border-r transition-all duration-200",
               isSidebarCollapsed
                 ? "w-12 p-2 items-center overflow-hidden"
                 : "p-4 gap-4 overflow-y-auto"
@@ -492,7 +504,7 @@ function MainApplication() {
               size="icon"
               onClick={toggleSidebar}
               className={cn(
-                "flex-shrink-0 w-11 h-11",
+                "w-11 h-11",
                 !isSidebarCollapsed && "self-end"
               )}
               title={isSidebarCollapsed ? "Развернуть сайдбар" : "Свернуть сайдбар"}
@@ -510,7 +522,7 @@ function MainApplication() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="w-11 h-11 flex-shrink-0"
+                  className="w-11 h-11"
                   onClick={async () => {
                     // Check if transcription model is selected using validation hook
                     if (!validateModelSelection()) {
@@ -546,30 +558,29 @@ function MainApplication() {
                 {!selectedModel && (
                   <ModelWarning
                     onGoToModels={() => useUIStore.getState().setCurrentView("models")}
-                    className="flex-shrink-0"
                   />
                 )}
-                <DropZone className="flex-shrink-0" onFilesSelected={handleFilesFromDialog} />
+                <DropZone onFilesSelected={handleFilesFromDialog} />
                 <TaskList />
               </>
             )}
           </div>
 
           {/* Mobile view - no resize */}
-          <div className="flex lg:hidden flex-col gap-4 border-b p-4 overflow-y-auto w-full flex-shrink-0">
+          <div className="flex lg:hidden flex-col gap-4 border-b p-4 overflow-y-auto w-full">
             {!selectedModel && (
               <ModelWarning
                 onGoToModels={() => useUIStore.getState().setCurrentView("models")}
               />
             )}
-            <DropZone className="flex-shrink-0" onFilesSelected={handleFilesFromDialog} />
+            <DropZone onFilesSelected={handleFilesFromDialog} />
             <TaskList />
           </div>
 
           {/* Resize handle - only on desktop and when not collapsed */}
           {!isSidebarCollapsed && (
             <div
-              className="hidden lg:block w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors flex-shrink-0"
+              className="hidden lg:block w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
               onMouseDown={handleResizeStart}
               title="Drag to resize"
             />

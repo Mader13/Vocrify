@@ -490,6 +490,8 @@ export interface ModelDownloadProgress {
   totalMb: number;
   percent: number;
   speedMbS: number;
+  etaS?: number;
+  totalEstimated?: boolean;
   status: "downloading" | "paused" | "completed" | "error" | "cancelled";
   error?: string;
 }
@@ -524,6 +526,8 @@ export interface ModelDownloadState {
   currentMb: number;
   totalMb: number;
   speedMbS: string;
+  etaS?: number;
+  totalEstimated?: boolean;
   status: "downloading" | "paused" | "completed" | "error" | "cancelled";
   error?: string;
   // Add stage tracking fields
@@ -557,7 +561,7 @@ export const AVAILABLE_MODELS: AvailableModel[] = [
   },
   {
     name: "whisper-base",
-    sizeMb: 150,
+    sizeMb: 139,
     modelType: "whisper",
     description: "Баланс скорости и точности",
     installed: false,
@@ -627,7 +631,7 @@ export const AVAILABLE_MODELS: AvailableModel[] = [
   },
   {
     name: "sherpa-onnx-diarization",
-    sizeMb: 120,
+    sizeMb: 45,
     modelType: "diarization",
     description: "Sherpa-ONNX модель диаризации (включает segmentation + embedding)",
     installed: false,
@@ -639,7 +643,7 @@ export const AVAILABLE_MODELS: AvailableModel[] = [
  */
 export const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "whisper-tiny": "Whisper Tiny (74MB)",
-  "whisper-base": "Whisper Base (150MB)",
+  "whisper-base": "Whisper Base (139MB)",
   "whisper-small": "Whisper Small (466MB)",
   "whisper-medium": "Whisper Medium (1.5GB)",
   "whisper-large-v3": "Whisper Large V3 (3GB)",
@@ -650,8 +654,8 @@ export const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "parakeet-tdt-1.1b": "Parakeet TDT 1.1B (2.5GB)",
   "pyannote-segmentation-3.0": "PyAnnote Segmentation 3.0 (68MB)",
   "pyannote-embedding-3.0": "PyAnnote Embedding 3.0 (395MB)",
-  "sherpa-onnx-segmentation": "Sherpa Segmentation (35MB)",
-  "sherpa-onnx-embedding": "Sherpa Embedding (85MB)",
+  "sherpa-onnx-segmentation": "Sherpa Segmentation (7MB)",
+  "sherpa-onnx-embedding": "Sherpa Embedding (38MB)",
 };
 
 /**

@@ -25,8 +25,6 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 // ============================================================================
 
 import { create } from "zustand";
-import { useTasks, useModelsStore, useUIStore } from "@/stores";
-import type { startTranscription } from "@/services/tauri";
 
 export type NotificationType = "success" | "error" | "warning" | "info";
 
@@ -495,6 +493,15 @@ export class NotificationEmitter {
     const { addNotification } = useNotificationStore.getState();
 
     const task = this.getTaskById(taskId);
+    if (task?.status === "completed" || task?.status === "cancelled") {
+      logger.transcriptionWarn("Ignoring late transcription error notification for finalized task", {
+        taskId,
+        status: task.status,
+        error,
+      });
+      return;
+    }
+
     const fileName = task?.fileName ?? "Unknown file";
 
     addNotification({
@@ -562,8 +569,12 @@ export class NotificationEmitter {
     // Trigger transcription retry
     const task = this.getTaskById(taskId);
     if (task) {
-      const { startTranscription } = require("@/services/tauri");
-      startTranscription(task.id, task.filePath, task.options);
+      const { useTasks } = require("@/stores");
+      const enginePreference = useTasks.getState().settings.enginePreference;
+
+      import("@/services/transcription").then(({ transcribeWithFallback }) => {
+        transcribeWithFallback(task.id, task.filePath, task.options, enginePreference);
+      });
     }
   }
 

@@ -2,12 +2,12 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import type { AvailableModel, ModelDownloadState } from "@/types";
-import { MODEL_ICONS, isPyannoteModel, isSherpaModel } from "@/types";
+import { isPyannoteModel } from "@/types";
 import { Progress } from "@/components/ui/progress";
 import { useTasks } from "@/stores";
 
 const modelCardVariants = cva(
-  "relative overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-px",
+  "relative rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-px",
   {
     variants: {
       variant: {
@@ -57,7 +57,6 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
     const isInstalled = model.installed;
     
     const isPyannote = isPyannoteModel(model.name);
-    const isSherpa = isSherpaModel(model.name);
     const huggingFaceToken = useTasks((s) => s.settings.huggingFaceToken);
     const needsToken = isPyannote && !huggingFaceToken;
 
@@ -76,6 +75,14 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
         return `${(mb / 1024).toFixed(1)} GB`;
       }
       return `${mb} MB`;
+    };
+
+    const formatEta = (etaS?: number): string | null => {
+      if (!etaS || etaS <= 0) return null;
+      const totalSeconds = Math.round(etaS);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
     };
 
     const [hasEntered, setHasEntered] = React.useState(false);
@@ -100,106 +107,11 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
         style={{ ...(style || {}), transitionDelay: `${animationDelayMs}ms` }}
         {...props}
       >
-        {/* Token warning badge */}
-        {needsToken && (
-          <div className="absolute top-3 right-3 z-10 group/icon">
-            <div className="relative">
-              <div className="w-6 h-6 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center cursor-help transition-colors duration-150 hover:bg-amber-500/20">
-                <svg
-                  className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-              </div>
-              {/* Tooltip - shows on icon hover */}
-              <div className="absolute top-full right-0 mt-2 w-56 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/90 border border-amber-200 dark:border-amber-700 shadow-lg opacity-0 invisible group-hover/icon:opacity-100 group-hover/icon:visible transition-all duration-200 z-50">
-                <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                  Требуется HuggingFace токен
-                </p>
-                <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                  Добавьте токен в настройках приложения
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* PyAnnote info badge */}
-        {isPyannote && (
-          <div className={cn("absolute z-10 group/icon", needsToken ? "top-11 right-3" : "top-3 right-3")}>
-            <div className="relative">
-              <div className="w-6 h-6 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center cursor-help transition-colors duration-150 hover:bg-blue-500/20">
-                <svg
-                  className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-              {/* Tooltip - shows on icon hover */}
-              <div className="absolute top-full right-0 mt-2 w-56 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/90 border border-blue-200 dark:border-blue-700 shadow-lg opacity-0 invisible group-hover/icon:opacity-100 group-hover/icon:visible transition-all duration-200 z-50">
-                <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
-                  Комплект моделей
-                </p>
-                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                  Вместе с этой моделью автоматически скачается segmentation модель (68 MB)
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Sherpa info badge */}
-        {isSherpa && (
-          <div className="absolute top-3 right-3 z-10 group/icon">
-            <div className="relative">
-              <div className="w-6 h-6 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center cursor-help transition-colors duration-150 hover:bg-blue-500/20">
-                <svg
-                  className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-              </div>
-              {/* Tooltip - shows on icon hover */}
-              <div className="absolute top-full right-0 mt-2 w-56 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/90 border border-blue-200 dark:border-blue-700 shadow-lg opacity-0 invisible group-hover/icon:opacity-100 group-hover/icon:visible transition-all duration-200 z-50">
-                <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
-                  Комплект моделей
-                </p>
-                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                  Вместе с этой моделью автоматически скачается segmentation модель (35 MB)
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
         <div className="p-4 sm:p-5">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto] xl:items-center">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_auto] xl:items-start">
             <div className="min-w-0">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 text-2xl">{MODEL_ICONS[model.modelType]}</span>
+              <div className="flex items-start">
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-semibold leading-tight sm:text-base">
                     {model.name}
@@ -258,15 +170,44 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                         )}
                       </span>
                     )}
+
+                    {/* Token warning badge */}
+                    {needsToken && (
+                      <div className="relative group/icon">
+                        <div className="w-5 h-5 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center cursor-help transition-colors duration-150 hover:bg-amber-500/20">
+                          <svg
+                            className="w-3 h-3 text-amber-600 dark:text-amber-400"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                            />
+                          </svg>
+                        </div>
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full right-0 mb-2 w-56 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/90 border border-amber-200 dark:border-amber-700 shadow-lg opacity-0 invisible group-hover/icon:opacity-100 group-hover/icon:visible transition-all duration-200 z-50">
+                          <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                            Требуется HuggingFace токен
+                          </p>
+                          <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                            Добавьте токен в настройках приложения
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="min-w-0">
-              <div className="space-y-3 rounded-lg border border-border/60 bg-background/30 p-3 sm:p-4">
               {isDownloading && download && (
-                <div className="space-y-3">
+                <div className="mt-4 space-y-3 rounded-lg border border-border/60 bg-background/30 p-3 sm:p-4">
                   {/* Show current stage info for multi-stage downloads */}
                   {download.currentStage && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -280,6 +221,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">
                       {formatSize(download.currentMb)} / {formatSize(download.totalMb)}
+                      {download.totalEstimated ? " (оценочно)" : ""}
                     </span>
                     <span className="font-medium">{download.progress.toFixed(0)}%</span>
                   </div>
@@ -312,37 +254,25 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                     </div>
                   )}
 
-                  {download.speedMbS && download.speedMbS !== "0" && (
+                  <div className="flex items-center justify-between gap-4">
                     <p className="text-xs text-muted-foreground">
-                      {download.speedMbS} MB/s
+                      {download.speedMbS && download.speedMbS !== "0" ? `${download.speedMbS} MB/s` : "Считаем скорость..."}
+                      {formatEta(download.etaS) ? ` • осталось ~${formatEta(download.etaS)}` : ""}
                     </p>
-                  )}
-                  {onDownloadCancel && (
-                    <button
-                      onClick={onDownloadCancel}
-                      className="w-full rounded-lg bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-all duration-150 hover:bg-destructive/20"
-                    >
-                      Отмена
-                    </button>
-                  )}
+                    {onDownloadCancel && (
+                      <button
+                        onClick={onDownloadCancel}
+                        className="ml-auto rounded-lg bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-all duration-150 hover:bg-destructive/20"
+                      >
+                        Отмена
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
-
-              {isError && download && (
-                <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
-                  Ошибка: {download.error || "Неизвестная ошибка"}
-                </div>
-              )}
-
-              {!isDownloading && !isError && (
-                <p className="text-xs text-muted-foreground">
-                  Нажмите на "Скачать" для начала загрузки модели.
-                </p>
-              )}
-              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+            <div className="flex flex-wrap items-center gap-2 self-center xl:justify-end">
             {isInstalled ? (
               <>
                 {onSelect && (

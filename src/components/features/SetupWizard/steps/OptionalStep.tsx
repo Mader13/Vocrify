@@ -23,7 +23,7 @@ export function OptionalStep() {
       {/* HuggingFace Token Section */}
       <div className="rounded-lg border border-muted bg-muted/30 p-4 space-y-4">
         <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 p-2 rounded-lg bg-primary/10 text-primary">
+          <div className="shrink-0 p-2 rounded-lg bg-primary/10 text-primary">
             <Key className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="flex-1">

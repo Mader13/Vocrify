@@ -108,7 +108,7 @@ export function NotificationListItem({
       }}
     >
       {/* Icon */}
-      <div className={cn("flex-shrink-0 mt-0.5", colorClass)}>
+      <div className={cn("shrink-0 mt-0.5", colorClass)}>
         <Icon className="h-5 w-5" />
       </div>
 
@@ -151,7 +151,7 @@ export function NotificationListItem({
         onClick={handleDelete}
         disabled={isOperating}
         className={cn(
-          "flex-shrink-0 opacity-0 group-hover:opacity-100",
+          "shrink-0 opacity-0 group-hover:opacity-100",
           "p-1 rounded-md transition-all",
           "hover:bg-destructive/10 hover:text-destructive",
           "focus-visible:opacity-100 focus-visible:outline-none",

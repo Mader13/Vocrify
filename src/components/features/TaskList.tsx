@@ -114,7 +114,7 @@ function TaskItem({ task, compact }: TaskItemProps) {
       <CardContent className="p-3 sm:p-4">
         {/* Верхняя строка: иконка, название, статус */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <FileVideo className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground flex-shrink-0" />
+          <FileVideo className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground shrink-0" />
 
           <div className="flex-1 min-w-0">
             <p className="font-medium truncate text-sm">{task.fileName}</p>
@@ -123,7 +123,7 @@ function TaskItem({ task, compact }: TaskItemProps) {
             </p>
           </div>
 
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <div className={cn("flex items-center gap-1", config.color)} title={config.label}>
               <StatusIcon
                 className={cn(

@@ -80,7 +80,7 @@ const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" |
   view: "transcription",
   options: {
     model: "whisper-base",
-    device: "cpu",
+    device: "auto",
     language: "auto",
     enableDiarization: false,
     diarizationProvider: "none",
@@ -95,7 +95,7 @@ const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" |
     maxConcurrentTasks: 3,
     enableDiarization: false,
     defaultModel: "whisper-base",
-    defaultDevice: "cpu",
+    defaultDevice: "auto",
     defaultLanguage: "auto",
     huggingFaceToken: "",
     diarizationProvider: "none",
@@ -133,6 +133,36 @@ function ensureTaskResult(task: TranscriptionTask): TranscriptionTask {
 export const useTasks = create<TasksState>()(
   persist(
     (set, get) => {
+      // Validate and migrate settings on store creation
+      const validateSettings = (state: TasksState) => {
+        const { settings } = state;
+        const validEnginePrefs: EnginePreference[] = ["auto", "rust", "python"];
+        const validDevices: DeviceType[] = ["auto", "cpu", "cuda", "mps", "vulkan"];
+
+        // Reset invalid enginePreference to default
+        if (settings.enginePreference && !validEnginePrefs.includes(settings.enginePreference)) {
+          logger.warn("Invalid enginePreference in localStorage, resetting to default", {
+            invalid: settings.enginePreference
+          });
+          set((state) => ({
+            settings: { ...state.settings, enginePreference: "auto" }
+          }));
+        }
+
+        // Reset invalid defaultDevice to default
+        if (settings.defaultDevice && !validDevices.includes(settings.defaultDevice)) {
+          logger.warn("Invalid defaultDevice in localStorage, resetting to default", {
+            invalid: settings.defaultDevice
+          });
+          set((state) => ({
+            settings: { ...state.settings, defaultDevice: "auto" }
+          }));
+        }
+      };
+
+      // Run validation on mount
+      validateSettings(get());
+
       // Load HuggingFace token from backend on store creation
       (async () => {
         try {

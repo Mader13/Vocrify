@@ -273,7 +273,7 @@ export const NotificationItem = React.memo(
         tabIndex={0}
       >
         {/* Icon */}
-        <div className="flex-shrink-0 mt-0.5">
+        <div className="shrink-0 mt-0.5">
           <IconComponent
             className={cn(
               "w-5 h-5",
@@ -339,7 +339,7 @@ export const NotificationItem = React.memo(
           type="button"
           onClick={() => onDismiss(id)}
           className={cn(
-            "flex-shrink-0 rounded-md p-1",
+            "shrink-0 rounded-md p-1",
             "text-muted-foreground hover:text-foreground",
             "hover:bg-accent/50",
             "transition-colors focus-visible:outline-none focus-visible:ring-2",

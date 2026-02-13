@@ -63,7 +63,7 @@ export function ModelDisplayCard({
       <div className="relative flex items-start gap-4">
         <div
           className={cn(
-            "relative flex-shrink-0 flex items-center justify-center rounded-xl transition-all duration-500",
+            "relative shrink-0 flex items-center justify-center rounded-xl transition-all duration-500",
             isEmpty
               ? "bg-muted/30 text-muted-foreground"
               : `bg-gradient-to-br from-${gradient === 'rose' ? 'rose' : gradient === 'emerald' ? 'emerald' : gradient === 'purple' ? 'purple' : 'blue'}-500/10 to-${gradient === 'rose' ? 'rose' : gradient === 'emerald' ? 'emerald' : gradient === 'purple' ? 'purple' : 'blue'}-500/5 text-foreground shadow-lg`,
@@ -109,7 +109,7 @@ export function ModelDisplayCard({
         </div>
 
         {switchControl && (
-          <div className="flex-shrink-0 flex items-center self-center">
+          <div className="shrink-0 flex items-center self-center">
             {switchControl}
           </div>
         )}
@@ -130,7 +130,7 @@ export function TranscriptionModelDisplay({
   size?: "default" | "large";
 }) {
   const modelName = model ? MODEL_NAMES[model as keyof typeof MODEL_NAMES] || model : null;
-  const sizeText = model?.includes("tiny") ? "40MB" : model?.includes("base") ? "80MB" : model?.includes("small") ? "250MB" : model?.includes("medium") ? "760MB" : model?.includes("large") ? "1.5GB" : model?.includes("parakeet") ? "640MB+" : "";
+  const sizeText = model?.includes("tiny") ? "74MB" : model?.includes("base") ? "139MB" : model?.includes("small") ? "466MB" : model?.includes("medium") ? "1505MB (1.5GB)" : model?.includes("large") ? "2960MB (2.9GB)" : model?.includes("parakeet") ? "640MB - 2490MB" : "";
 
   return (
     <ModelDisplayCard

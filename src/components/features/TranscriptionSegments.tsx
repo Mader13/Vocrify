@@ -95,7 +95,7 @@ function SegmentItem({ segment, isActive, onClick, searchQuery, isHighlighted, m
         ]
       )}
     >
-      <div className="flex-shrink-0 flex flex-col items-start gap-1">
+      <div className="shrink-0 flex flex-col items-start gap-1">
         <div className={cn(
           "font-mono min-w-[50px] sm:min-w-[60px] transition-all duration-300 ease-out",
           isActive

@@ -3,7 +3,7 @@ import { Box } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckCard } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
-import type { LocalModel } from "@/types";
+import { AVAILABLE_MODELS, type LocalModel } from "@/types";
 
 /**
  * Format model size for display
@@ -17,6 +17,12 @@ function formatModelSize(bytes: number): string {
   return `${mb.toFixed(0)} MB`;
 }
 
+function getModelSizeLabel(modelName: string): string {
+  const model = AVAILABLE_MODELS.find((m) => m.name === modelName);
+  if (!model) return "~?";
+  return formatModelSize(model.sizeMb * 1024 * 1024);
+}
+
 /**
  * Model card component
  */
@@ -27,7 +33,7 @@ interface ModelCardProps {
 function ModelCard({ model }: ModelCardProps) {
   return (
     <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-muted/50">
-      <div className="flex-shrink-0 p-2 rounded-lg bg-primary/10 text-primary">
+      <div className="shrink-0 p-2 rounded-lg bg-primary/10 text-primary">
         <Box className="h-4 w-4" aria-hidden="true" />
       </div>
       <div className="flex-1 min-w-0">
@@ -101,16 +107,16 @@ export function ModelStep() {
             <p className="font-medium text-foreground">Рекомендуемые модели:</p>
             <ul className="list-disc list-inside space-y-1 ml-2 text-muted-foreground">
               <li>
-                <span className="font-medium">whisper-base</span> — быстрая, для простых задач (~74 MB)
+                <span className="font-medium">whisper-base</span> — быстрая, для простых задач (~{getModelSizeLabel("whisper-base")})
               </li>
               <li>
-                <span className="font-medium">whisper-small</span> — сбалансированная (~244 MB)
+                <span className="font-medium">whisper-small</span> — сбалансированная (~{getModelSizeLabel("whisper-small")})
               </li>
               <li>
-                <span className="font-medium">whisper-medium</span> — качественная (~769 MB)
+                <span className="font-medium">whisper-medium</span> — качественная (~{getModelSizeLabel("whisper-medium")})
               </li>
               <li>
-                <span className="font-medium">whisper-large-v3</span> — лучшее качество (~1.5 GB)
+                <span className="font-medium">whisper-large-v3</span> — лучшее качество (~{getModelSizeLabel("whisper-large-v3")})
               </li>
             </ul>
           </div>
