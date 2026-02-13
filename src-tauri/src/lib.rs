@@ -11,7 +11,10 @@ use serde::{de::Error as DeError, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tauri::{AppHandle, Emitter, Manager, State};
 use std::env;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -23,7 +26,6 @@ use scopeguard;
 pub mod ffmpeg_manager;
 pub mod whisper_engine;
 pub mod sherpa_diarizer;
-pub mod model_manager;
 pub mod python_bridge;
 pub mod engine_router;
 pub mod transcription_manager;
@@ -48,9 +50,6 @@ pub use transcription_manager::{
 
 // Re-export Diarization types for frontend
 pub use sherpa_diarizer::{SherpaDiarizer, DiarizationProvider, SpeakerSegment};
-
-// Re-export ModelManager types for frontend
-pub use model_manager::{ModelManager, ModelType, ModelInfo};
 
 // Re-export PythonBridge types for frontend
 pub use python_bridge::{PythonBridge, PythonTranscriptionResult, SpeakerSegment as PythonSpeakerSegment};
@@ -210,6 +209,7 @@ pub struct SpeakerTurn {
 
 /// Transcription result
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TranscriptionResult {
     pub segments: Vec<TranscriptionSegment>,
     pub language: String,
@@ -444,6 +444,9 @@ pub struct ModelDownloadProgress {
     pub percent: f64,
     pub speed_mb_s: f64,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eta_s: Option<f64>,
+    pub total_estimated: bool,
 }
 
 type TaskManagerState = Arc<Mutex<TaskManager>>;
@@ -602,14 +605,90 @@ fn validate_file_path(file_path: &str) -> Result<PathBuf, AppError> {
     Ok(canonical)
 }
 
+/// Check whether a Python executable has torch installed.
+fn python_has_torch(python_exe: &Path) -> bool {
+    let output = std::process::Command::new(python_exe)
+        .arg("-c")
+        .arg("import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('torch') else 1)")
+        .output();
+
+    match output {
+        Ok(o) => o.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Pick the best Python executable from candidates.
+/// Prefer interpreters with torch installed for ML workloads.
+fn pick_best_python_executable(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    let existing: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|p| p.exists())
+        .collect();
+
+    // Prefer environments with torch available
+    for exe in &existing {
+        if python_has_torch(exe) {
+            eprintln!("[INFO] Selected Python with torch: {:?}", exe);
+            return Some(dunce::simplified(exe).to_path_buf());
+        }
+    }
+
+    // Fallback to first existing interpreter
+    if let Some(first) = existing.first() {
+        eprintln!(
+            "[WARN] Found Python interpreter without torch: {:?}. Falling back; ML features may fail.",
+            first
+        );
+        return Some(dunce::simplified(first).to_path_buf());
+    }
+
+    None
+}
+
+/// Discover additional virtualenv python executables in project root.
+/// Looks for directories that contain `pyvenv.cfg` and a Python executable.
+fn discover_project_venv_pythons(project_root: &Path) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+
+    let entries = match std::fs::read_dir(project_root) {
+        Ok(entries) => entries,
+        Err(_) => return result,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        if !path.join("pyvenv.cfg").exists() {
+            continue;
+        }
+
+        #[cfg(target_os = "windows")]
+        let python_exe = path.join("Scripts").join("python.exe");
+
+        #[cfg(not(target_os = "windows"))]
+        let python_exe = path.join("bin").join("python");
+
+        if python_exe.exists() {
+            result.push(python_exe);
+        }
+    }
+
+    result
+}
+
 /// Get the Python executable path (venv or system)
 fn get_python_executable(app: &AppHandle) -> PathBuf {
     let engine_path = get_python_engine_path(app);
     let fallback = PathBuf::from(".");
     let engine_dir = engine_path.parent().unwrap_or(&fallback);
 
-    // Try multiple venv locations in order of preference
-    let venv_paths = {
+    // Try multiple venv locations in order of preference.
+    // Includes legacy project-level env names used in this repository.
+    let mut venv_paths = {
         #[cfg(target_os = "windows")]
         {
             vec![
@@ -629,17 +708,9 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
         }
     };
 
-    // Try each venv path
-    for venv_python in venv_paths {
-        if venv_python.exists() {
-            eprintln!("[INFO] Found Python venv at: {:?}", venv_python);
-            return dunce::simplified(&venv_python).to_path_buf();
-        }
-    }
-
     // Try common virtual environment locations in parent directories
     if let Some(parent_dir) = engine_dir.parent() {
-        let parent_venv_paths = {
+        let mut parent_venv_paths = {
             #[cfg(target_os = "windows")]
             {
                 vec![
@@ -657,12 +728,25 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
             }
         };
 
-        for venv_python in parent_venv_paths {
-            if venv_python.exists() {
-                eprintln!("[INFO] Found Python venv in parent directory: {:?}", venv_python);
-                return dunce::simplified(&venv_python).to_path_buf();
-            }
+        // Add any discovered project-level venvs (e.g. custom names).
+        parent_venv_paths.extend(discover_project_venv_pythons(parent_dir));
+
+        venv_paths.append(&mut parent_venv_paths);
+
+        if let Some(best) = pick_best_python_executable(venv_paths) {
+            eprintln!("[INFO] Found Python venv in project hierarchy: {:?}", best);
+            return best;
         }
+
+        // Try system python and keep it if torch is present
+        let system_python = PathBuf::from("python");
+        if python_has_torch(&system_python) {
+            eprintln!("[INFO] Selected system Python with torch installed");
+            return system_python;
+        }
+
+        eprintln!("[WARN] No Python with torch detected in known environments; using system Python as last resort.");
+        return system_python;
     }
 
     // Fall back to system Python
@@ -843,6 +927,7 @@ async fn spawn_transcription(
     let mut speaker_turns: Option<Vec<SpeakerTurn>> = None;
     let mut speaker_segments: Option<Vec<TranscriptionSegment>> = None;
     let mut result_language: String = "en".to_string();
+    let mut received_result = false;
 
     eprintln!("[DEBUG] Starting to read Python stdout...");
 
@@ -892,6 +977,7 @@ async fn spawn_transcription(
                     result_language = language;
                     speaker_turns = st_turns;
                     speaker_segments = st_segs;
+                    received_result = true;
                     // Use duration from Python result if available, otherwise calculate from segments
                 }
                 PythonMessage::Error { error } => {
@@ -914,11 +1000,16 @@ async fn spawn_transcription(
 
     // Check for critical errors from stderr
     let stderr_errors = stderr_handle.await.unwrap_or(0);
-    if stderr_errors > 0 {
+    if stderr_errors > 0 && !received_result {
         return Err(AppError::PythonError(format!(
             "{} critical error(s) detected in stderr. Check the application logs for details.",
             stderr_errors
         )));
+    } else if stderr_errors > 0 {
+        eprintln!(
+            "[WARN] Python emitted {} critical stderr line(s), but a final result was received. Continuing as successful completion.",
+            stderr_errors
+        );
     }
 
     // CRITICAL FIX: Release the guard after successful read and wait for process
@@ -928,6 +1019,15 @@ async fn spawn_transcription(
 
     if !status.success() {
         let exit_code = status.code().unwrap_or(-1);
+
+        // Windows native extensions (e.g. torch/onnx runtime) may crash during Python shutdown
+        // AFTER final result is already emitted. In that case, prefer completed result over late exit code.
+        if received_result && !segments.is_empty() {
+            eprintln!(
+                "[WARN] Python exited with code {} after final result was received. Treating task as successful.",
+                exit_code
+            );
+        } else {
         let error_msg = format!(
             "Python process exited with code: {}. \
             Ensure Python 3.8-3.12 is installed with all required dependencies. \
@@ -941,6 +1041,7 @@ async fn spawn_transcription(
         }));
 
         return Err(AppError::PythonError(error_msg));
+        }
     }
 
     if segments.is_empty() {
@@ -1684,63 +1785,9 @@ async fn spawn_model_download(
     cache_dir: PathBuf,
     token_file: Option<PathBuf>,
 ) -> Result<(), AppError> {
-    use crate::model_manager::{download_parakeet_model, download_sensevoice_model};
+    let download_completed = Arc::new(AtomicBool::new(false));
 
-    // Use Rust streaming downloads for models managed in Rust
-    if model_type == "parakeet" {
-        let app_clone = app.clone();
-        let model_name_clone = model_name.clone();
-
-        let progress_callback = Box::new(move |current: u64, total: u64, percent: f64| {
-            let progress = ModelDownloadProgress {
-                model_name: model_name_clone.clone(),
-                current_mb: current / (1024 * 1024),
-                total_mb: total / (1024 * 1024),
-                percent,
-                speed_mb_s: 0.0,
-                status: "downloading".to_string(),
-            };
-            let _ = app_clone.emit("model-download-progress", progress);
-        });
-
-        download_parakeet_model(&model_name, &cache_dir, Some(progress_callback))
-            .await
-            .map_err(|e| AppError::ModelError(e.to_string()))?;
-
-        let _ = app.emit("model-download-complete", serde_json::json!({
-            "modelName": model_name,
-        }));
-
-        return Ok(());
-    }
-
-    if model_type == "sensevoice" {
-        let app_clone = app.clone();
-        let model_name_clone = model_name.clone();
-
-        let progress_callback = Box::new(move |current: u64, total: u64, percent: f64| {
-            let progress = ModelDownloadProgress {
-                model_name: model_name_clone.clone(),
-                current_mb: current / (1024 * 1024),
-                total_mb: total / (1024 * 1024),
-                percent,
-                speed_mb_s: 0.0,
-                status: "downloading".to_string(),
-            };
-            let _ = app_clone.emit("model-download-progress", progress);
-        });
-
-        download_sensevoice_model(&model_name, &cache_dir, Some(progress_callback))
-            .await
-            .map_err(|e| AppError::ModelError(e.to_string()))?;
-
-        let _ = app.emit("model-download-complete", serde_json::json!({
-            "modelName": model_name,
-        }));
-
-        return Ok(());
-    }
-
+    // All model downloads are handled by Python engine
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
     
@@ -1805,6 +1852,7 @@ async fn spawn_model_download(
     // Read stderr in background and emit errors to frontend
     let app_clone = app.clone();
     let model_name_clone = model_name.clone();
+    let download_completed_for_stderr = download_completed.clone();
     let _stderr_handle = tokio::spawn(async move {
         let mut line_count = 0;
         let mut error_buffer = String::new();
@@ -1825,11 +1873,32 @@ async fn spawn_model_download(
                 || line_lower.contains("traceback")
                 || line_lower.contains("exception:");
 
+            // Detect retryable network errors (temporary issues that tenacity will retry)
+            let is_retryable_error = line_lower.contains("connectionerror")
+                || line_lower.contains("connection error")
+                || line_lower.contains("timeout")
+                || line_lower.contains("connectionreset")
+                || line_lower.contains("connection aborted")
+                || line_lower.contains("retry");
+
             if is_actual_error {
-                let _ = app_clone.emit("model-download-error", serde_json::json!({
-                    "modelName": &model_name_clone,
-                    "error": line.clone(),
-                }));
+                if is_retryable_error {
+                    // Retryable error: emit retrying event instead of fatal error
+                    // UI should keep showing "downloading" status
+                    let _ = app_clone.emit("model-download-retrying", serde_json::json!({
+                        "modelName": &model_name_clone,
+                        "message": format!("Retrying due to network error..."),
+                    }));
+                    eprintln!("[INFO] Retryable error detected for {}, emitting retrying event", model_name_clone);
+                } else if !download_completed_for_stderr.load(Ordering::Relaxed) {
+                    // Avoid hard-failing from stderr heuristics; authoritative errors are
+                    // structured JSON "error" messages from Python stdout or non-zero exit.
+                    eprintln!(
+                        "[WARN] Potential stderr error for {}: {}",
+                        model_name_clone,
+                        line
+                    );
+                }
             }
         }
         
@@ -1858,23 +1927,65 @@ async fn spawn_model_download(
                     println!("[DEBUG] Debug message: {:?}", msg.get("message"));
                     continue;
                 }
-                
-                if let Some(progress_data) = msg.get("data") {
-                    let progress = ModelDownloadProgress {
-                        model_name: model_name.clone(),
-                        current_mb: progress_data.get("current").and_then(|v| v.as_f64()).unwrap_or(0.0) as u64,
-                        total_mb: progress_data.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0) as u64,
-                        percent: progress_data.get("percent").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        speed_mb_s: progress_data.get("speed_mb_s").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        status: "downloading".to_string(),
-                    };
-                    
-                    println!("[DEBUG] Emitting progress: {}% for {}", progress.percent, model_name);
-                    let _ = app.emit("model-download-progress", progress);
+
+                let msg_type = msg
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default();
+
+                if msg_type == "progress" {
+                    if let Some(progress_data) = msg.get("data") {
+                        let current_mb_f = progress_data
+                            .get("current")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+                        let total_mb_f = progress_data
+                            .get("total")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+                        let mut percent = progress_data
+                            .get("percent")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+
+                        // Fallback: compute percent from current/total when available
+                        if percent <= 0.0 && total_mb_f > 0.0 && current_mb_f > 0.0 {
+                            percent = (current_mb_f / total_mb_f * 100.0).clamp(0.0, 100.0);
+                        }
+
+                        let progress = ModelDownloadProgress {
+                            model_name: model_name.clone(),
+                            current_mb: current_mb_f.max(0.0).round() as u64,
+                            total_mb: total_mb_f.max(0.0).round() as u64,
+                            percent,
+                            speed_mb_s: progress_data.get("speed_mb_s").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            status: "downloading".to_string(),
+                            eta_s: progress_data.get("eta_s").and_then(|v| v.as_f64()),
+                            total_estimated: progress_data.get("total_estimated").and_then(|v| v.as_bool()).unwrap_or(false),
+                        };
+
+                        println!("[DEBUG] Emitting progress: {}% for {}", progress.percent, model_name);
+                        let _ = app.emit("model-download-progress", progress);
+                    }
                 }
-                
-                if msg.get("type") == Some(&serde_json::json!("DownloadComplete")) {
+
+                if msg_type == "download_stage" {
+                    if let Some(stage_data) = msg.get("data") {
+                        let _ = app.emit("model-download-stage", serde_json::json!({
+                            "modelName": model_name,
+                            "stage": stage_data.get("stage").and_then(|v| v.as_str()).unwrap_or(""),
+                            "submodelName": stage_data.get("submodel_name").and_then(|v| v.as_str()).unwrap_or(""),
+                            "currentMb": stage_data.get("current").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            "totalMb": stage_data.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            "percent": stage_data.get("percent").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            "speedMbS": stage_data.get("speed_mb_s").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        }));
+                    }
+                }
+
+                if msg_type == "DownloadComplete" {
                     println!("[DEBUG] Download complete emitted for {}", model_name);
+                    download_completed.store(true, Ordering::Relaxed);
                     // Extract data from DownloadComplete message
                     let size_mb = msg.get("data")
                         .and_then(|d| d.get("size_mb"))
@@ -1893,8 +2004,8 @@ async fn spawn_model_download(
                         "path": path,
                     }));
                 }
-                
-                if msg.get("type") == Some(&serde_json::json!("error")) {
+
+                if msg_type == "error" {
                     let error_msg = msg.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error");
                     println!("[DEBUG] Error emitted from Python: {}", error_msg);
                     let _ = app.emit("model-download-error", serde_json::json!({
@@ -1916,6 +2027,14 @@ async fn spawn_model_download(
     let status = child.wait().await?;
     if !status.success() {
         let exit_code = status.code().unwrap_or(-1);
+        if download_completed.load(Ordering::Relaxed) {
+            eprintln!(
+                "[WARN] Python exited with code {} after DownloadComplete for {}. Treating as success.",
+                exit_code,
+                model_name
+            );
+            return Ok(());
+        }
         let error_msg = format!(
             "Model download failed with exit code: {}. \
             Check your internet connection and HuggingFace token. \
@@ -1966,25 +2085,33 @@ async fn download_model(
     drop(manager);
 
     let handle = tokio::spawn(async move {
-        if let Err(e) = spawn_model_download(
+        let download_result = spawn_model_download(
             app_clone,
             model_name_clone.clone(),
             model_type_clone,
             cache_dir,
             token_file_clone,
-        ).await {
-            eprintln!("Model download error: {}", e);
-        }
+        ).await;
 
-        // Clean up token file after download
+        // Clean up token file after download (regardless of result)
         if let Some(path) = token_file_for_cleanup {
             let _ = std::fs::remove_file(path);
         }
 
-        // CRITICAL: Remove model from downloading_models after completion
-        let mut manager = task_manager_clone.lock().await;
-        manager.downloading_models.remove(&model_name_clone);
-        eprintln!("[INFO] Removed {} from downloading_models", model_name_clone);
+        // CRITICAL: Only remove from downloading_models if download succeeded
+        // This prevents premature removal before .completed file is created
+        match download_result {
+            Ok(_) => {
+                let mut manager = task_manager_clone.lock().await;
+                manager.downloading_models.remove(&model_name_clone);
+                eprintln!("[INFO] Removed {} from downloading_models (successful)", model_name_clone);
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Model download failed for {}: {}", model_name_clone, e);
+                // Do NOT remove from downloading_models on error - this allows UI to show it as stuck/failed
+                // The user will need to manually cancel/delete the failed download
+            }
+        }
     });
 
     // Re-acquire mutex to insert the handle
@@ -2941,6 +3068,92 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         });
     }
     
+    // Check for Parakeet models in nemo/ directory
+    // Parakeet models are stored as .nemo files in nemo/{org_name}/
+    let nemo_dir = models_dir.join("nemo");
+    if nemo_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&nemo_dir) {
+            for entry_result in entries {
+                let entry = match entry_result {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let path = entry.path();
+
+                // Skip non-directory entries
+                if !path.is_dir() {
+                    continue;
+                }
+
+                let org_name = entry.file_name().to_string_lossy().to_string();
+
+                // Check if this is a Parakeet model directory (nvidia_parakeet-tdt-*)
+                if org_name.contains("parakeet") || org_name.contains("nvidia") {
+                    // Recursively find .nemo files (some repos place them in nested folders).
+                    let mut stack = vec![path.clone()];
+                    while let Some(current_dir) = stack.pop() {
+                        let entries = match std::fs::read_dir(&current_dir) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
+
+                        for child in entries.flatten() {
+                            let child_path = child.path();
+                            if child_path.is_dir() {
+                                stack.push(child_path);
+                                continue;
+                            }
+
+                            let nemo_filename = child.file_name().to_string_lossy().to_string();
+                            if !nemo_filename.ends_with(".nemo") {
+                                continue;
+                            }
+
+                            // Extract canonical frontend model name.
+                            let lower_filename = nemo_filename.to_lowercase();
+                            let lower_org = org_name.to_lowercase();
+                            let model_name = if lower_filename.contains("parakeet-tdt-0.6b")
+                                || lower_org.contains("parakeet-tdt-0.6b")
+                            {
+                                "parakeet-tdt-0.6b-v3".to_string()
+                            } else if lower_filename.contains("parakeet-tdt-1.1b")
+                                || lower_org.contains("parakeet-tdt-1.1b")
+                            {
+                                "parakeet-tdt-1.1b".to_string()
+                            } else if lower_filename.contains("parakeet") {
+                                nemo_filename.replace(".nemo", "")
+                            } else {
+                                continue;
+                            };
+
+                            let size_mb = if let Ok(metadata) = child.metadata() {
+                                metadata.len() / (1024 * 1024)
+                            } else {
+                                0
+                            };
+
+                            // Avoid duplicate entries for the same model name.
+                            if models.iter().any(|m| m.name == model_name) {
+                                continue;
+                            }
+
+                            eprintln!("[DEBUG] Found Parakeet model: {} in nemo cache", model_name);
+
+                            models.push(LocalModel {
+                                name: model_name,
+                                size_mb,
+                                model_type: "parakeet".to_string(),
+                                installed: true,
+                                path: Some(path.to_string_lossy().to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Check for diarization models (flat structure: segmentation + embedding in cache root)
     // PyAnnote diarization
     let seg_path = models_dir.join("pyannote-segmentation-3.0");

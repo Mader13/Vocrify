@@ -53,6 +53,7 @@ pub struct TranscriptionSegment {
 
 /// Transcription result
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TranscriptionResult {
     pub segments: Vec<TranscriptionSegment>,
     pub language: String,
