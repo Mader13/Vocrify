@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+import numpy as np
 from pydub import AudioSegment
 
 from .base import BaseDiarizer, SpeakerTurn
@@ -22,6 +23,10 @@ class SherpaDiarizer(BaseDiarizer):
     Uses offline ONNX models:
     - Segmentation: PyAnnote segmentation-3.0 (ONNX, ~1.5MB)
     - Embedding: 3D-Speaker ResNet34 (ONNX, ~26MB)
+
+    Note: Default threshold is 0.8 (not 0.5) for better speaker separation.
+    Higher threshold = fewer clusters (more conservative).
+    Lower threshold = more clusters (more aggressive).
     """
 
     def __init__(
@@ -29,7 +34,8 @@ class SherpaDiarizer(BaseDiarizer):
         device: str = "cpu",
         download_root: Optional[str] = None,
         num_clusters: int = -1,
-        threshold: float = 0.5,
+        threshold: float = 0.8,  # Increased from 0.5 to 0.8 for better clustering
+        num_speakers: Optional[int] = None,
     ):
         """
         Initialize Sherpa-ONNX diarizer.
@@ -38,12 +44,17 @@ class SherpaDiarizer(BaseDiarizer):
             device: Device ('cpu' or 'cuda')
             download_root: Model cache directory
             num_clusters: Number of speakers (-1 for auto-detection)
-            threshold: Clustering threshold
+            threshold: Clustering threshold (default 0.8 for better speaker separation)
+            num_speakers: Number of speakers (alias for num_clusters)
         """
         super().__init__(device=device)
 
         self.download_root = download_root or "./models_cache"
-        self.num_clusters = num_clusters
+        # Support both num_clusters and num_speakers parameters
+        if num_speakers is not None:
+            self.num_clusters = num_speakers
+        else:
+            self.num_clusters = num_clusters
         self.threshold = threshold
 
         # Initialize model registry
@@ -134,20 +145,30 @@ class SherpaDiarizer(BaseDiarizer):
             # Convert to WAV for Sherpa-ONNX
             temp_wav = self._convert_to_wav(file_path)
 
-            # Run diarization
-            result = self.diarizer_impl.process(temp_wav)
+            # Load audio samples (sherpa-onnx expects float samples, not file path)
+            audio = AudioSegment.from_wav(temp_wav)
+            samples = np.array(audio.get_array_of_samples(), dtype=np.float32) / 32768.0
 
-            if not result or not result.segments:
+            # Run diarization with samples
+            result = self.diarizer_impl.process(samples)
+
+            # Sherpa-ONNX: result must be sorted before iteration
+            sorted_result = result.sort_by_start_time()
+
+            # Convert to list for easier access
+            speaker_segments = list(sorted_result)
+
+            if not speaker_segments:
                 print("Warning: Sherpa-ONNX returned no speaker segments")
                 return segments, []
 
             # Build speaker turns from Sherpa segments
             speaker_turns = []
-            for spk_seg in result.segments:
+            for spk_seg in speaker_segments:
                 turn = SpeakerTurn(
                     speaker=f"SPEAKER_{spk_seg.speaker:02d}",
-                    start=spk_seg.start / 1000.0,  # Convert ms to seconds
-                    end=spk_seg.end / 1000.0,
+                    start=spk_seg.start,  # Sherpa-ONNX returns seconds
+                    end=spk_seg.end,
                 )
                 speaker_turns.append(turn)
 
@@ -157,7 +178,7 @@ class SherpaDiarizer(BaseDiarizer):
                 end = seg["end"]
 
                 # Find overlapping speaker segment
-                speaker = self._find_speaker_at_time(result.segments, start, end)
+                speaker = self._find_speaker_at_time(speaker_segments, start, end)
                 seg["speaker"] = speaker if speaker else None
 
             return segments, speaker_turns
@@ -177,9 +198,9 @@ class SherpaDiarizer(BaseDiarizer):
         Find the speaker with maximum overlap in the time range.
 
         Args:
-            speaker_segments: List of speaker segments from Sherpa
-            start: Start time
-            end: End time
+            speaker_segments: List of speaker segments from Sherpa (timestamps in seconds)
+            start: Start time in seconds
+            end: End time in seconds
 
         Returns:
             Speaker label or None
@@ -188,8 +209,8 @@ class SherpaDiarizer(BaseDiarizer):
         best_speaker = None
 
         for spk_seg in speaker_segments:
-            seg_start = spk_seg.start / 1000.0  # Convert ms to seconds
-            seg_end = spk_seg.end / 1000.0
+            seg_start = spk_seg.start  # Sherpa-ONNX returns seconds
+            seg_end = spk_seg.end
 
             # Calculate overlap
             overlap_start = max(start, seg_start)

@@ -47,13 +47,15 @@ class ModelRegistry:
     }
 
     DISTIL_WHISPER_REPOS = {
+        "small": "Systran/faster-distil-whisper-small.en",
+        "small.en": "Systran/faster-distil-whisper-small.en",
+        "medium-en": "distil-whisper/distil-medium.en",
         "large-v2": "distil-whisper/distil-large-v2",
         "large-v3": "distil-whisper/distil-large-v3",
-        "medium-en": "distil-whisper/distil-medium.en",
     }
 
     PARAKEET_MODELS = {
-        "0.6b": "nvidia/parakeet-tdt-0.6b",
+        "0.6b": "nvidia/parakeet-tdt-0.6b-v3",
         "1.1b": "nvidia/parakeet-tdt-1.1b",
     }
 
@@ -102,17 +104,33 @@ class ModelRegistry:
         if not repo_id:
             raise ValueError(f"Unknown Whisper model size: {model_size}")
 
+        # Method 1: Try HuggingFace cache structure first
         try:
             from huggingface_hub import snapshot_download
 
-            # Try to find locally
             local_path = snapshot_download(
                 repo_id=repo_id, cache_dir=str(self.hf_cache), local_files_only=True
             )
             return Path(local_path), repo_id
         except Exception:
-            # Not cached locally
-            return None, repo_id
+            pass  # Not found in HF cache, try direct directory
+
+        # Method 2: Check direct model directory (e.g., models_cache/whisper-base/)
+        # This handles models downloaded to simple directories with model.bin files
+        model_dir = self.cache_dir / f"whisper-{model_size}"
+        if model_dir.exists():
+            # Check if required files exist
+            required_files = [
+                "model.bin",
+                "config.json",
+                "tokenizer.json",
+                "vocabulary.txt",
+            ]
+            if all((model_dir / f).exists() for f in required_files):
+                return model_dir, repo_id
+
+        # Not found locally
+        return None, repo_id
 
     def get_distil_whisper_path(self, model_size: str) -> Tuple[Optional[Path], str]:
         """

@@ -21,24 +21,22 @@ Based on research from:
 - Production-ready patterns
 """
 
-import asyncio
 import hashlib
-import io
 import json
 import logging
 import os
 import shutil
 import tarfile
 import time
+import fnmatch
 from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Any
-from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, List, Optional
 from threading import Event, Thread
 
-import requests
-from tenacity import (
+import requests  # type: ignore[reportMissingModuleSource]
+from tenacity import (  # type: ignore[reportMissingImports]
     retry,
     stop_after_attempt,
     wait_exponential,
@@ -47,13 +45,59 @@ from tenacity import (
 )
 
 try:
-    from huggingface_hub import snapshot_download, HfApi, utils
+    from huggingface_hub import snapshot_download, HfApi  # type: ignore[reportMissingImports]
 except ImportError:
     snapshot_download = None
     HfApi = None
 
+from ipc_events import emit_download_complete, emit_error
+
 # Configure logging
 logger = logging.getLogger(__name__)
+
+
+# Fallback size estimates (in bytes) used when upstream does not provide Content-Length.
+# Values are intentionally approximate and are used only for progress estimation.
+MODEL_SIZE_ESTIMATES_MB = {
+    "whisper-tiny": 74,
+    "whisper-base": 139,
+    "whisper-small": 466,
+    "whisper-medium": 1505,
+    "whisper-large-v3": 2960,
+    "distil-small": 378,
+    "distil-medium": 756,
+    "distil-large-v2": 1400,
+    "distil-large-v3": 1480,
+    "parakeet-tdt-0.6b-v3": 640,
+    "parakeet-tdt-1.1b": 2490,
+    "sherpa-onnx-diarization": 45,
+}
+
+ASSET_SIZE_ESTIMATES_MB = {
+    "sherpa-onnx-segmentation.tar.bz2": 7,
+    "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx": 38,
+}
+
+
+def estimate_model_size_bytes(model_name: str) -> int:
+    """Return best-effort total size estimate for a model in bytes."""
+    exact = MODEL_SIZE_ESTIMATES_MB.get(model_name)
+    if exact is not None:
+        return int(exact * 1024 * 1024)
+
+    # Fallback: support namespaced/internal folder names like
+    # "nemo/nvidia_parakeet-tdt-0.6b-v3" by matching known model IDs.
+    normalized = model_name.lower().replace("_", "-")
+    for known_model, size_mb in MODEL_SIZE_ESTIMATES_MB.items():
+        if known_model in normalized:
+            return int(size_mb * 1024 * 1024)
+
+    return 0
+
+
+def estimate_asset_size_bytes(asset_name: str) -> int:
+    """Return best-effort size estimate for a downloadable asset in bytes."""
+    return int(ASSET_SIZE_ESTIMATES_MB.get(asset_name, 0) * 1024 * 1024)
 
 
 class DownloadSource(Enum):
@@ -90,6 +134,7 @@ class DownloadProgress:
     speed_bytes_per_sec: float
     eta_seconds: float
     message: str
+    total_is_estimate: bool = False
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
@@ -240,7 +285,7 @@ class ImprovedDownloader:
         before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def download_url_with_retry(
-        self, url: str, output_path: Path, headers: dict = None
+        self, url: str, output_path: Path, headers: dict[str, str] | None = None
     ) -> Path:
         """
         Download file from URL with retry logic.
@@ -271,22 +316,24 @@ class ImprovedDownloader:
         self,
         repo_id: str,
         model_name: str,
-        allow_patterns: List[str] = None,
-        ignore_patterns: List[str] = None,
+        local_dir_name: Optional[str] = None,
+        allow_patterns: Optional[List[str]] = None,
+        ignore_patterns: Optional[List[str]] = None,
     ) -> Path:
         """
         Download model from HuggingFace Hub with accurate progress tracking.
 
         Args:
             repo_id: HuggingFace repository ID
-            model_name: Name for the model
+            model_name: Canonical model name for logs/progress/size estimation
+            local_dir_name: Optional directory name under cache for local files
             allow_patterns: Optional list of glob patterns to include
             ignore_patterns: Optional list of glob patterns to exclude
 
         Returns:
             Path to downloaded model
         """
-        if snapshot_download is None:
+        if snapshot_download is None or HfApi is None:
             raise ImportError("huggingface_hub is not installed")
 
         try:
@@ -307,11 +354,54 @@ class ImprovedDownloader:
 
             # Get download info using HfApi
             api = HfApi(token=self.huggingface_token)
-            model_info = api.model_info(repo_id)
+            try:
+                model_info = api.model_info(repo_id, files_metadata=True)
+            except TypeError:
+                # Backward compatibility with older huggingface_hub versions.
+                model_info = api.model_info(repo_id)
 
-            # Estimate total size from siblings
-            total_bytes = sum(getattr(s, "size", 0) or 0 for s in model_info.siblings)
-            total_files = len(model_info.siblings)
+            # Estimate total size from siblings, respecting allow/ignore patterns.
+            siblings = model_info.siblings or []
+
+            def _sibling_name(sibling: object) -> str:
+                return (
+                    str(getattr(sibling, "rfilename", "") or "")
+                    or str(getattr(sibling, "path", "") or "")
+                    or str(getattr(sibling, "filename", "") or "")
+                )
+
+            def _matches_any(name: str, patterns: Optional[List[str]]) -> bool:
+                if not patterns:
+                    return True
+                return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+            def _is_ignored(name: str, patterns: Optional[List[str]]) -> bool:
+                if not patterns:
+                    return False
+                return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
+
+            filtered_siblings = [
+                s
+                for s in siblings
+                if _matches_any(_sibling_name(s), allow_patterns)
+                and not _is_ignored(_sibling_name(s), ignore_patterns)
+            ]
+            if filtered_siblings:
+                siblings = filtered_siblings
+
+            total_bytes = sum(getattr(s, "size", 0) or 0 for s in siblings)
+            total_is_estimate = False
+            if total_bytes <= 0:
+                estimated = estimate_model_size_bytes(model_name)
+                if estimated > 0:
+                    logger.info(
+                        "Using fallback size estimate for %s: %.1f MB",
+                        model_name,
+                        estimated / (1024 * 1024),
+                    )
+                    total_bytes = estimated
+                    total_is_estimate = True
+            total_files = len(siblings)
 
             self.emit_progress(
                 DownloadProgress(
@@ -325,6 +415,7 @@ class ImprovedDownloader:
                     speed_bytes_per_sec=0,
                     eta_seconds=0,
                     message=f"Checking disk space for {total_bytes / (1024**3):.2f}GB...",
+                    total_is_estimate=total_is_estimate,
                 )
             )
 
@@ -332,7 +423,7 @@ class ImprovedDownloader:
             self.check_disk_space(total_bytes)
 
             # Create target directory
-            target_dir = self.cache_dir / model_name
+            target_dir = self.cache_dir / (local_dir_name or model_name)
             target_dir.mkdir(parents=True, exist_ok=True)
 
             # Start progress monitoring thread
@@ -370,7 +461,8 @@ class ImprovedDownloader:
                         if elapsed > 0 and current_size > 0:
                             speed = current_size / elapsed
                             if speed > 0:
-                                eta = (total_bytes - current_size) / speed
+                                remaining_bytes = max(total_bytes - current_size, 0)
+                                eta = remaining_bytes / speed if total_bytes > 0 else 0
                             else:
                                 eta = 0
                         else:
@@ -397,6 +489,7 @@ class ImprovedDownloader:
                                 speed_bytes_per_sec=speed,
                                 eta_seconds=eta,
                                 message=f"Downloading {model_name}: {progress_percent:.1f}%",
+                                total_is_estimate=total_is_estimate,
                             )
                         )
 
@@ -426,6 +519,7 @@ class ImprovedDownloader:
                         speed_bytes_per_sec=0,
                         eta_seconds=0,
                         message=f"Starting download from HuggingFace...",
+                        total_is_estimate=total_is_estimate,
                     )
                 )
 
@@ -444,10 +538,6 @@ class ImprovedDownloader:
                         token=self.huggingface_token,
                         allow_patterns=allow_patterns,
                         ignore_patterns=ignore_patterns,
-                        # Copy files instead of symlinks to avoid issues
-                        local_dir_use_symlinks=False,
-                        # Don't use symlinks in cache either
-                        symlinks=False,
                     )
                 finally:
                     # Restore original HF_HUB_CACHE
@@ -475,6 +565,7 @@ class ImprovedDownloader:
                     speed_bytes_per_sec=0,
                     eta_seconds=0,
                     message=f"Download complete: {model_name}",
+                    total_is_estimate=total_is_estimate,
                 )
             )
 
@@ -530,6 +621,7 @@ class ImprovedDownloader:
             headers = {}
             max_retries = 5
             last_error = None
+            response = None
             for attempt in range(max_retries):
                 try:
                     response = requests.head(url, headers=headers, timeout=30)
@@ -553,7 +645,11 @@ class ImprovedDownloader:
                             f"Failed to get file info after {max_retries} attempts: {last_error}"
                         )
 
+            if response is None:
+                raise DownloadError("Failed to get file info: no response")
+
             total_size = int(response.headers.get("content-length", 0))
+            total_is_estimate = False
 
             # Check disk space
             self.emit_progress(
@@ -568,6 +664,7 @@ class ImprovedDownloader:
                     speed_bytes_per_sec=0,
                     eta_seconds=0,
                     message=f"Checking disk space for {total_size / (1024**3):.2f}GB...",
+                    total_is_estimate=total_is_estimate,
                 )
             )
 
@@ -595,12 +692,14 @@ class ImprovedDownloader:
                     speed_bytes_per_sec=0,
                     eta_seconds=0,
                     message=f"Downloading {asset_name}...",
+                    total_is_estimate=total_is_estimate,
                 )
             )
 
             # Download with retry logic
             max_retries = 5
             last_error = None
+            response = None
             for attempt in range(max_retries):
                 try:
                     response = requests.get(
@@ -625,6 +724,26 @@ class ImprovedDownloader:
                         raise DownloadError(
                             f"Failed to download after {max_retries} attempts: {last_error}"
                         )
+
+            if response is None:
+                raise DownloadError("Failed to download: no response")
+
+            # Some sources don't provide Content-Length on HEAD,
+            # but do provide it on the actual GET response.
+            if total_size <= 0:
+                total_size = int(response.headers.get("content-length", 0) or 0)
+
+            # Final fallback for progress tracking when server omits Content-Length.
+            if total_size <= 0:
+                estimated = estimate_asset_size_bytes(asset_name)
+                if estimated > 0:
+                    logger.info(
+                        "Using fallback asset size estimate for %s: %.1f MB",
+                        asset_name,
+                        estimated / (1024 * 1024),
+                    )
+                    total_size = estimated
+                    total_is_estimate = True
 
             downloaded = 0
             last_update_time = start_time
@@ -670,6 +789,7 @@ class ImprovedDownloader:
                                     speed_bytes_per_sec=speed,
                                     eta_seconds=eta,
                                     message=f"Downloading {asset_name}: {progress_percent:.1f}%",
+                                    total_is_estimate=total_is_estimate,
                                 )
                             )
 
@@ -692,6 +812,7 @@ class ImprovedDownloader:
                         speed_bytes_per_sec=0,
                         eta_seconds=0,
                         message=f"Extracting {asset_name}...",
+                        total_is_estimate=total_is_estimate,
                     )
                 )
 
@@ -751,6 +872,7 @@ class ImprovedDownloader:
                         speed_bytes_per_sec=0,
                         eta_seconds=0,
                         message=f"Extraction complete: {asset_name}",
+                        total_is_estimate=total_is_estimate,
                     )
                 )
 
@@ -771,6 +893,7 @@ class ImprovedDownloader:
                         speed_bytes_per_sec=0,
                         eta_seconds=0,
                         message=f"Download complete: {asset_name}",
+                        total_is_estimate=total_is_estimate,
                     )
                 )
 
@@ -861,6 +984,10 @@ def download_model(
         "whisper-small": "Systran/faster-whisper-small",
         "whisper-medium": "Systran/faster-whisper-medium",
         "whisper-large-v3": "Systran/faster-whisper-large-v3",
+        "distil-small": "Systran/faster-distil-whisper-small.en",
+        "distil-medium": "distil-whisper/distil-medium.en",
+        "distil-large-v2": "distil-whisper/distil-large-v2",
+        "distil-large-v3": "distil-whisper/distil-large-v3",
         "parakeet-tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
         "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
     }
@@ -896,6 +1023,59 @@ def download_model(
             # Emit completion event
             size_mb = get_model_size_mb(str(result_path))
             emit_download_complete(model_name, size_mb, str(result_path))
+
+        elif model_type == "parakeet":
+            # Handle Parakeet models (NeMo .nemo files)
+            # Extract size from model name (e.g., "parakeet-tdt-0.6b-v3" -> "0.6b", "parakeet-tdt-1.1b" -> "1.1b")
+            import re
+            match = re.search(r'parakeet-tdt-([\d.]+)[bB]', model_name)
+            if not match:
+                emit_error(f"Invalid Parakeet model name: {model_name}")
+                return
+            repo_id = MODEL_REPOSITORIES.get(model_name)
+            if not repo_id:
+                emit_error(f"Unknown Parakeet model: {model_name}")
+                return
+
+            # Download .nemo file to nemo cache directory.
+            # Keep structure compatible with ModelRegistry.get_parakeet_path():
+            #   {cache_dir}/nemo/{repo_id with slash replaced}/<repo_last_part>.nemo
+            if snapshot_download is None:
+                emit_error("huggingface_hub is not installed")
+                return
+
+            safe_repo_name = repo_id.replace("/", "_")
+            repo_basename = repo_id.split("/")[-1]
+            nemo_dir = downloader.cache_dir / "nemo" / safe_repo_name
+            nemo_dir.mkdir(parents=True, exist_ok=True)
+
+            logger.info(f"Downloading Parakeet model from {repo_id} to {nemo_dir}")
+
+            # Download only .nemo artifacts into deterministic local directory
+            # using shared HF download logic (with live progress reporting).
+            downloader.download_from_huggingface(
+                repo_id=repo_id,
+                model_name=model_name,
+                local_dir_name=f"nemo/{safe_repo_name}",
+                allow_patterns=["*.nemo"],
+            )
+
+            # Prefer canonical filename expected by registry, fallback to any .nemo in folder.
+            preferred_nemo_path = nemo_dir / f"{repo_basename}.nemo"
+            if preferred_nemo_path.exists():
+                nemo_path = preferred_nemo_path
+            else:
+                nemo_files = list(nemo_dir.rglob("*.nemo"))
+                if not nemo_files:
+                    emit_error(
+                        f"Parakeet .nemo file not found after download in: {nemo_dir}"
+                    )
+                    return
+                nemo_path = nemo_files[0]
+
+            size_mb = max(1, int(nemo_path.stat().st_size / (1024 * 1024)))
+            logger.info(f"Parakeet model ready: {nemo_path} ({size_mb} MB)")
+            emit_download_complete(model_name, size_mb, str(nemo_path))
 
         elif model_type == "diarization":
             # Handle diarization models
@@ -954,6 +1134,7 @@ def emit_progress_wrapper(progress: DownloadProgress):
         "checking_disk": "download",
         "downloading": "download",
         "verifying": "download",
+        "extract": "download",
         "complete": "download",  # Will send 100% progress
     }
 
@@ -977,31 +1158,8 @@ def emit_progress_wrapper(progress: DownloadProgress):
             "total": total_mb,  # MB value for Rust backend
             "percent": int(progress.progress_percent),
             "speed_mb_s": speed_mb_s,  # Speed in MB/s
-        },
-    }
-    print(json.dumps(data), flush=True)
-
-
-# Keep existing helper functions for compatibility
-
-
-def emit_error(error: str):
-    """Emit an error to stdout as JSON."""
-    data = {
-        "type": "error",
-        "error": error,
-    }
-    print(json.dumps(data), flush=True)
-
-
-def emit_download_complete(model_name: str, size_mb: int, path: str):
-    """Emit download complete event."""
-    data = {
-        "type": "DownloadComplete",  # Capital C to match Rust backend expectation
-        "data": {
-            "model_name": model_name,
-            "size_mb": size_mb,
-            "path": path,
+            "eta_s": progress.eta_seconds,
+            "total_estimated": progress.total_is_estimate,
         },
     }
     print(json.dumps(data), flush=True)

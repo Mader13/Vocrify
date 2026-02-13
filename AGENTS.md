@@ -275,6 +275,17 @@ We are build this together. When you learn something non-obvious, add it here so
 - Verify MPS: `python -c "import torch; print(torch.backends.mps.is_available())"`
 - Current stable version: torch 2.5.1+cu121 (compatible with RTX 4060)
 
+**Runtime Routing Gotchas (Feb 2026)**
+
+- UI task start path must use `src/services/transcription.ts::transcribeWithFallback()` (not direct `startTranscription`) or Rust `transcribe-rs` path is bypassed entirely.
+- `transcribe_rust` requires model preloading via `load_model_rust` before transcription; otherwise it fails with engine/model-not-initialized and falls back.
+- Python backend CLI currently accepts only `--device cpu|cuda`; when UI exposes `auto/mps/vulkan`, map to Python-compatible device on fallback.
+
+**Python Env Gotcha (Windows)**
+
+- Tauri `get_python_executable()` prefers `ai-engine/venv`, then `ai-engine/.venv`, then parent `.venv`.
+- If project root `.venv` is selected but has no `torch`, transcription fails despite GPU/driver being present.
+
 **Phase 3: Migration to transcribe-rs (COMPLETED)**
 
 - Transcription is now handled by Rust transcribe-rs (not Python faster-whisper)

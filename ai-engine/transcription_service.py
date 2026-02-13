@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from device_utils import normalize_inference_device
 from ipc_events import emit_error, emit_progress, emit_result
 
 
@@ -26,7 +27,8 @@ def handle_transcribe_command(
     """Handle server-mode `transcribe` command while preserving IPC payloads."""
     file_path = command.get("file")
     model_name = command.get("model", "whisper-base")
-    device = command.get("device", "cpu")
+    requested_device = command.get("device", "auto")
+    device = normalize_inference_device(requested_device)
     language = command.get("language", "auto")
     enable_diarization = command.get("diarization", False)
     task_id = command.get("taskId")
@@ -48,7 +50,11 @@ def handle_transcribe_command(
         json.dumps(
             {
                 "type": "debug",
-                "message": f"Diarization settings: enable={enable_diarization}, provider={diarization_provider}",
+                "message": (
+                    f"Diarization settings: enable={enable_diarization}, "
+                    f"provider={diarization_provider}, "
+                    f"device_requested={requested_device}, device_effective={device}"
+                ),
             }
         ),
         flush=True,

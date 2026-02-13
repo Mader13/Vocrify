@@ -80,6 +80,9 @@ transformers>=4.40.0
 # HTTP requests for GitHub model downloads
 requests==2.31.0
 
+# Retry/backoff for resilient downloads
+tenacity==8.5.0
+
 # Progress bars for downloads
 tqdm==4.66.4
 

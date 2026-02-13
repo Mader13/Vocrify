@@ -46,6 +46,7 @@ class DiarizationMixin:
         super().__init__(*args, **kwargs)
         self._diarizer: Optional["BaseDiarizer"] = None
         self._diarization_provider: str = "none"
+        self.download_root: Optional[str] = None
 
     def _init_diarizer(self, provider: str, device: str = "cpu"):
         """
@@ -65,7 +66,11 @@ class DiarizationMixin:
 
         try:
             print(f"[INFO] Initializing diarization provider: {provider}")
-            self._diarizer = get_diarizer(provider, device=device)
+            # Pass download_root to diarizer if available
+            diarizer_kwargs = {"device": device}
+            if self.download_root:
+                diarizer_kwargs["download_root"] = self.download_root
+            self._diarizer = get_diarizer(provider, **diarizer_kwargs)
             self._diarization_provider = provider
             print(f"[INFO] Diarization provider '{provider}' initialized successfully")
         except Exception as e:
@@ -123,16 +128,18 @@ class BaseModel(ABC, DiarizationMixin):
     Diarization support is provided via DiarizationMixin.
     """
 
-    def __init__(self, device: str = "cpu", diarization_provider: str = "none"):
+    def __init__(self, device: str = "cpu", diarization_provider: str = "none", download_root: Optional[str] = None):
         """
         Initialize the model.
 
         Args:
             device: Device to run inference on ('cpu' or 'cuda')
             diarization_provider: Diarization provider ('sherpa', 'pyannote', 'none')
+            download_root: Directory for model downloads (for diarization models)
         """
         super().__init__()
         self.device = device
+        self.download_root = download_root
         self._init_diarizer(diarization_provider, device)
 
     @abstractmethod

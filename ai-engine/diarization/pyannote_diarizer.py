@@ -62,9 +62,10 @@ class PyAnnoteDiarizer(BaseDiarizer):
             # Get model paths from registry
             model_paths = self.registry.get_pyannote_diarization_paths()
 
-            pipeline_path, pipeline_repo_id = model_paths.get(
-                "speaker-diarization", (None, None)
-            )
+            # get_pyannote_diarization_paths() returns dict with model_type -> (path, repo_id)
+            # Extract the speaker-diarization path tuple
+            path_tuple = model_paths.get("speaker-diarization", (None, None))
+            pipeline_path, pipeline_repo_id = path_tuple
 
             # Check if models are cached locally
             if pipeline_path:
