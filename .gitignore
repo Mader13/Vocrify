@@ -155,3 +155,4 @@ agent-mail.db
 .serena/
 .mcp.json
 claude_desktop_config.json
+test_models.js
