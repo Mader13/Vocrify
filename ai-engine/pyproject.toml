@@ -32,7 +32,6 @@ classifiers = [
 #   pip install -e .
 
 dependencies = [
-    "faster-whisper==1.2.1",
     "torch==2.5.1",
     "pyannote.audio==3.3.2",
     "numpy==1.26.4",
