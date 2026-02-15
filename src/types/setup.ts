@@ -83,8 +83,8 @@ export interface DeviceCheckResult {
   status: CheckStatus;
   /** List of available compute devices */
   devices: DeviceInfo[];
-  /** Recommended device for transcription */
-  recommended: DeviceInfo | null;
+  /** Recommended device type for transcription (e.g., "cuda", "cpu") */
+  recommended: string | null;
   /** Human-readable message about the check result */
   message: string;
 }

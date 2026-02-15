@@ -207,7 +207,17 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   const generateRegions = useCallback(() => {
     const ws = wavesurferRef.current;
     const regions = regionsRef.current;
-    if (!ws || !regions) return;
+    if (!ws || !regions) {
+      console.warn("[VideoPlayer DEBUG] Cannot generate regions: WaveSurfer or RegionsPlugin not ready");
+      return;
+    }
+
+    // Clear any existing regions before adding new ones
+    try {
+      regions.clearRegions();
+    } catch (e) {
+      console.warn("[VideoPlayer DEBUG] Failed to clear regions:", e);
+    }
 
     const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
     const sanitizedSegments = sanitizeSegments(task.result?.segments);
@@ -242,14 +252,18 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     if (colorMode === "segments") {
       // Use rainbow palette for segments
       segmentsToUse.forEach((segment, index) => {
-        const color = RAINBOW_PALETTE[index % RAINBOW_PALETTE.length];
-        regions.addRegion({
-          start: segment.start,
-          end: segment.end,
-          color: withOpacity(color, 25),
-          drag: false,
-          resize: false,
-        });
+        try {
+          const color = RAINBOW_PALETTE[index % RAINBOW_PALETTE.length];
+          regions.addRegion({
+            start: segment.start,
+            end: segment.end,
+            color: withOpacity(color, 25),
+            drag: false,
+            resize: false,
+          });
+        } catch (e) {
+          console.error("[VideoPlayer] Error adding segment region:", e);
+        }
       });
     } else if (colorMode === "speakers") {
       // Prefer raw diarization speaker turns for waveform regions.
@@ -330,15 +344,19 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
           color: regionColor,
         });
 
-        const region = regions.addRegion({
-          start: segment.start,
-          end: segment.end,
-          color: regionColor,
-          drag: false,
-          resize: false,
-        });
-        addedRegions.push(region);
-        regionCount++;
+        try {
+          const region = regions.addRegion({
+            start: segment.start,
+            end: segment.end,
+            color: regionColor,
+            drag: false,
+            resize: false,
+          });
+          addedRegions.push(region);
+          regionCount++;
+        } catch (e) {
+          console.error("[VideoPlayer] Error adding speaker region:", e);
+        }
       });
 
       console.log("[VideoPlayer] Total regions created:", regionCount);
@@ -512,8 +530,11 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
             }
           }
 
-          // Generate regions
-          generateRegions();
+          // Generate regions - ensure WaveSurfer is fully ready
+          // Use setTimeout to ensure RegionsPlugin is fully initialized
+          setTimeout(() => {
+            generateRegions();
+          }, 50);
 
           // Sync waveform cursor with current video position once waveform is ready
           const videoEl = internalVideoRef.current;
@@ -602,7 +623,10 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   useEffect(() => {
     if (isWaveformReady) {
       console.log("[VideoPlayer] useEffect triggered: colorMode=", colorMode, "isWaveformReady=", isWaveformReady);
-      generateRegions();
+      // Add small delay to ensure RegionsPlugin is fully initialized
+      setTimeout(() => {
+        generateRegions();
+      }, 50);
     }
   }, [colorMode, task.result, isWaveformReady, generateRegions]);
 

@@ -58,7 +58,7 @@ export function SummaryStep() {
             "Devices",
             deviceStatus,
             deviceCheck?.recommended
-              ? `Рекомендуется: ${deviceCheck.recommended.name}`
+              ? `Рекомендуется: ${deviceCheck.recommended.toUpperCase()}`
               : "Fallback: CPU",
           ],
           ["Models", modelStatus],

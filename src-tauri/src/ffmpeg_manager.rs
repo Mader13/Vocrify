@@ -63,7 +63,25 @@ pub async fn get_ffmpeg_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::er
     if ffmpeg_path.exists() {
         Ok(ffmpeg_path)
     } else {
-        Err(format!("FFmpeg not found at {:?}", ffmpeg_path).into())
+        // Fallback: check system PATH
+        if let Some(system_ffmpeg) = std::env::var_os("PATH")
+            .and_then(|p| {
+                std::env::split_paths(&p)
+                    .filter_map(|p| {
+                        let full_path = p.join(platform_suffix);
+                        if full_path.exists() {
+                            Some(full_path)
+                        } else {
+                            None
+                        }
+                    })
+                    .next()
+            })
+        {
+            return Ok(system_ffmpeg);
+        }
+        
+        Err(format!("FFmpeg not found at {:?} or in system PATH", ffmpeg_path).into())
     }
 }
 

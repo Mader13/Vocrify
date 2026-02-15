@@ -626,9 +626,13 @@ fn pick_best_python_executable(candidates: Vec<PathBuf>) -> Option<PathBuf> {
         .filter(|p| p.exists())
         .collect();
 
+    eprintln!("[DEBUG] pick_best_python_executable: candidates = {:?}", existing);
+
     // Prefer environments with torch available
     for exe in &existing {
-        if python_has_torch(exe) {
+        let has_torch = python_has_torch(exe);
+        eprintln!("[DEBUG] Checking python: {:?}, has_torch = {}", exe, has_torch);
+        if has_torch {
             eprintln!("[INFO] Selected Python with torch: {:?}", exe);
             return Some(dunce::simplified(exe).to_path_buf());
         }
@@ -683,8 +687,10 @@ fn discover_project_venv_pythons(project_root: &Path) -> Vec<PathBuf> {
 /// Get the Python executable path (venv or system)
 fn get_python_executable(app: &AppHandle) -> PathBuf {
     let engine_path = get_python_engine_path(app);
+    eprintln!("[DEBUG] get_python_executable: engine_path = {:?}", engine_path);
     let fallback = PathBuf::from(".");
     let engine_dir = engine_path.parent().unwrap_or(&fallback);
+    eprintln!("[DEBUG] get_python_executable: engine_dir = {:?}", engine_dir);
 
     // Try multiple venv locations in order of preference.
     // Includes legacy project-level env names used in this repository.
@@ -752,6 +758,26 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
     // Fall back to system Python
     eprintln!("[WARN] No Python venv found, using system Python. This may cause issues if dependencies are not installed.");
     PathBuf::from("python")
+}
+
+/// Build TranscriptionManager with Python bridge configured for diarization.
+fn build_transcription_manager(app: &AppHandle) -> Result<TranscriptionManager, String> {
+    let models_dir = get_models_dir(app).map_err(|e| e.to_string())?;
+    let python_exe = get_python_executable(app);
+    let engine_path = get_python_engine_path(app);
+
+    eprintln!("[INFO] Initializing TranscriptionManager");
+    eprintln!("[DEBUG]   models_dir: {:?}", models_dir);
+    eprintln!("[DEBUG]   python_exe: {:?}", python_exe);
+    eprintln!("[DEBUG]   engine_path: {:?}", engine_path);
+
+    TranscriptionManager::new(
+        &models_dir,
+        Some(&python_exe),
+        Some(&engine_path),
+        Some(&models_dir),
+    )
+    .map_err(|e| format!("Failed to create TranscriptionManager: {}", e))
 }
 
 /// Spawn a Python transcription process
@@ -1354,6 +1380,7 @@ async fn check_cuda_available(app: AppHandle) -> Result<bool, AppError> {
 #[tauri::command]
 async fn get_available_devices(app: AppHandle) -> Result<DevicesResponse, AppError> {
     let python_exe = get_python_executable(&app);
+    eprintln!("[DEBUG] get_available_devices: python_exe = {:?}", python_exe);
     
     // Run Python script to detect devices
     let script = r#"
@@ -2683,20 +2710,22 @@ async fn reset_setup(app: AppHandle) -> Result<(), String> {
 /// Initialize the transcription manager (call at app startup)
 #[tauri::command]
 async fn init_transcription_manager(
-    _app: AppHandle,
+    app: AppHandle,
     state: State<'_, TranscriptionManagerState>,
 ) -> Result<(), String> {
-    let manager_guard = state.lock().await;
-    match manager_guard.as_ref() {
-        Some(_) => {
-            eprintln!("[INFO] TranscriptionManager already initialized");
-            Ok(())
-        }
-        None => {
-            eprintln!("[INFO] TranscriptionManager not initialized, this is unexpected");
-            Err("TranscriptionManager not found in state".to_string())
-        }
+    let mut manager_guard = state.lock().await;
+
+    if manager_guard.is_some() {
+        eprintln!("[INFO] TranscriptionManager already initialized");
+        return Ok(());
     }
+
+    eprintln!("[INFO] TranscriptionManager missing in state, rebuilding...");
+    let manager = build_transcription_manager(&app)?;
+    *manager_guard = Some(manager);
+    eprintln!("[INFO] TranscriptionManager initialized successfully");
+
+    Ok(())
 }
 
 /// Load a model for Rust transcription
@@ -3058,17 +3087,14 @@ pub fn run() {
         .manage(transcription_manager_state)
         .setup(|app| {
             let app_handle = app.app_handle();
-            let models_dir = get_models_dir(&app_handle)
-                .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
 
             let manager_state = app.state::<TranscriptionManagerState>();
             let mut manager_guard = tauri::async_runtime::block_on(manager_state.lock());
 
-            let tm_result = TranscriptionManager::new(&models_dir, None, None, None);
-            *manager_guard = match tm_result {
+            *manager_guard = match build_transcription_manager(&app_handle) {
                 Ok(manager) => Some(manager),
                 Err(e) => {
-                    eprintln!("[WARN] Failed to create TranscriptionManager: {}", e);
+                    eprintln!("[WARN] {}", e);
                     None
                 }
             };
@@ -3627,5 +3653,16 @@ mod tests {
             assert!(model.path.is_some());
             assert!(model.path.as_ref().unwrap().contains("ggml-"));
         }
+    }
+}
+
+#[cfg(test)]
+mod test_python {
+    use super::*;
+    
+    #[test]
+    fn test_python_executable_path() {
+        // This test just prints the path - not a real test
+        eprintln!("Test requires Tauri AppHandle - skipping");
     }
 }

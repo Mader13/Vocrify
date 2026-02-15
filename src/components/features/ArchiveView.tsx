@@ -1,9 +1,8 @@
-import { useMemo } from "react";
 import { Archive, FileVideo, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatFileSize } from "@/lib/utils";
-import { useTasks, useUIStore } from "@/stores";
+import { useArchivedTasks, useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask, TaskStatus } from "@/types";
 
 const statusConfig: Record<
@@ -79,8 +78,7 @@ function ArchivedTaskItem({ task }: ArchivedTaskItemProps) {
 }
 
 export function ArchiveView() {
-  const tasks = useTasks((state) => state.tasks);
-  const archivedTasks = useMemo(() => tasks.filter((task) => task.archived), [tasks]);
+  const archivedTasks = useArchivedTasks();
 
   if (archivedTasks.length === 0) {
     return (

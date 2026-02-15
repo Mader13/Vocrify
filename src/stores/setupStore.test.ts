@@ -79,18 +79,13 @@ describe("setupStore", () => {
         type: "devices",
         devices: [
           {
-            type: "cpu",
+            deviceType: "cpu",
             name: "CPU",
             available: true,
             isRecommended: true,
           },
         ],
-        recommended: {
-          type: "cpu",
-          name: "CPU",
-          available: true,
-          isRecommended: true,
-        },
+        recommended: "cpu",
       },
     });
     mockedCheckModelsStatus.mockResolvedValue({

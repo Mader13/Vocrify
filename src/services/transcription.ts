@@ -163,6 +163,18 @@ export async function transcribeWithFallback(
         }>;
         language: string;
         duration: number;
+        speakerTurns?: Array<{
+          start: number;
+          end: number;
+          speaker: string;
+        }>;
+        speakerSegments?: Array<{
+          start: number;
+          end: number;
+          text: string;
+          speaker?: string;
+          confidence: number;
+        }>;
       }>("transcribe_rust", {
         taskId,
         filePath,
@@ -197,6 +209,8 @@ export async function transcribeWithFallback(
             })),
             language: result.language,
             duration: result.duration,
+            speakerTurns: result.speakerTurns,
+            speakerSegments: result.speakerSegments,
           },
         },
       });

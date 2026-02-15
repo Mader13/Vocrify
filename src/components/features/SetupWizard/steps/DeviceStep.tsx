@@ -77,11 +77,11 @@ function DeviceCard({ device, isRecommended }: DeviceCardProps) {
             isRecommended ? "bg-green-500/10 text-green-600" : "bg-muted text-muted-foreground"
           )}
         >
-          {getDeviceIcon(device.type)}
+          {getDeviceIcon(device.deviceType)}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h4 className="font-medium">{device.name || getDeviceTypeName(device.type)}</h4>
+            <h4 className="font-medium">{device.name || getDeviceTypeName(device.deviceType)}</h4>
             {isRecommended && (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
                 <CheckCircle2 className="h-3 w-3" />
@@ -90,7 +90,7 @@ function DeviceCard({ device, isRecommended }: DeviceCardProps) {
             )}
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {getPerformanceLabel(device.type)}
+            {getPerformanceLabel(device.deviceType)}
           </p>
           {device.memoryMb && (
             <p className="text-xs text-muted-foreground mt-1">
@@ -145,9 +145,9 @@ export function DeviceStep() {
               .filter(device => device.available)
               .map((device, index) => (
                 <DeviceCard
-                  key={`${device.type}-${index}`}
+                  key={`${device.deviceType}-${index}`}
                   device={device}
-                  isRecommended={deviceCheck.recommended?.type === device.type}
+                  isRecommended={deviceCheck.recommended === device.deviceType}
                 />
               ))}
           </div>

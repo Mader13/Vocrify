@@ -41,11 +41,12 @@ interface DialogProps extends React.HTMLAttributes<HTMLDivElement>,
 }
 
 const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
-  ({ className, open, onOpenChange, children, ...props }, ref) => {
+  ({ className, open, onOpenChange, children, onClick, ...props }, ref) => {
     if (!open) return null;
 
-    const handleBackdropClick = (e: React.MouseEvent) => {
-      if (e.target === e.currentTarget) {
+    const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+      onClick?.(e);
+      if (e.target === e.currentTarget && !e.defaultPrevented) {
         onOpenChange(false);
       }
     };

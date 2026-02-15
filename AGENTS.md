@@ -520,7 +520,9 @@ cargo build --features rust-transcribe
 
 - UI task start path MUST use `src/services/transcription.ts::transcribeWithFallback()` (not direct `startTranscription`) or Rust transcribe-rs path is bypassed entirely.
 - `transcribe_rust` requires model preloading via `load_model_rust` before transcription; otherwise it fails with engine/model-not-initialized and falls back.
+- `TranscriptionManager` must be initialized with Python bridge paths (`python_exe`, `ai-engine/main.py`, `models_dir` as cache). If created with `None` bridge args, diarization silently degrades (transcription succeeds, speaker turns/segments are omitted).
 - Python backend CLI accepts only `--device cpu|cuda|mps|vulkan`; when UI exposes `auto`, map to Python-compatible device on fallback.
+- `python_bridge.rs` invokes Python diarization via compatibility flags (`--diarize-only`, `--audio`, `--provider`, `--num-speakers`, `--cache-dir`). If `ai-engine/main.py` no longer supports this contract, diarization fails at process startup and Rust currently returns transcription without speaker fields.
 - Rust audio decode currently fails on several media containers (`.mp4`, `.m4a`, `.mov`, `.mkv`, `.avi`, `.webm`) with "no supported format was detected"; in `auto` mode `transcribeWithFallback()` should bypass Rust for these extensions and call Python directly.
 - **Critical:** Never call `invoke("transcribe_rust")` directly from components. Always use `transcribeWithFallback()`.
 

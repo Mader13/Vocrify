@@ -674,8 +674,8 @@ export async function getAvailableDevices(): Promise<CommandResult<DevicesRespon
   try {
     const response = await invoke<DevicesResponse>("get_available_devices");
     logger.info("Detected compute devices", { 
-      devices: response.devices.map(d => `${d.name} (${d.type})`).join(", "),
-      recommended: response.recommended?.name 
+      devices: response.devices.map(d => `${d.name} (${d.deviceType})`).join(", "),
+      recommended: response.recommended 
     });
     return { success: true, data: response };
   } catch (error) {

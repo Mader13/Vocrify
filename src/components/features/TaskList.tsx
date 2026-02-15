@@ -15,7 +15,7 @@ import { ProgressMetricsDisplay } from "@/components/features/ProgressMetrics";
 import { StageBadges } from "@/components/features/StageBadges";
 import { ProgressEnhanced } from "@/components/ui/progress-enhanced";
 import { cn, formatFileSize } from "@/lib/utils";
-import { useTasks, useUIStore } from "@/stores";
+import { useTasks, useTasksByView, useUIStore } from "@/stores";
 import type { TranscriptionTask, TaskStatus } from "@/types";
 
 const statusConfig: Record<
@@ -197,7 +197,7 @@ interface TaskListProps {
 }
 
 export function TaskList({ compact }: TaskListProps) {
-  const tasks = useTasks((s) => s.tasks);
+  const tasks = useTasksByView("transcription");
 
   if (tasks.length === 0) {
     return null;

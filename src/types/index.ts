@@ -39,7 +39,7 @@ export type DeviceType = "auto" | "cpu" | "cuda" | "mps" | "vulkan";
  * Information about a compute device
  */
 export interface DeviceInfo {
-  type: DeviceType;
+  deviceType: DeviceType;
   name: string;
   available: boolean;
   memoryMb?: number;
@@ -53,7 +53,7 @@ export interface DeviceInfo {
 export interface DevicesResponse {
   type: "devices";
   devices: DeviceInfo[];
-  recommended: DeviceInfo;
+  recommended: string;
 }
 
 /**
@@ -229,7 +229,7 @@ export interface AppSettings {
   enableDiarization: boolean;
   diarizationProvider: DiarizationProvider;
   maxConcurrentTasks: number;
-  outputDirectory: string | null;
+  outputDirectory: string;
   lastDiarizationProvider: DiarizationProvider;
   enginePreference: EnginePreference;
 }
@@ -244,7 +244,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enableDiarization: true,
   diarizationProvider: "none",
   maxConcurrentTasks: 2,
-  outputDirectory: null,
+  outputDirectory: "",
   lastDiarizationProvider: "none",
   enginePreference: "auto",
 };
