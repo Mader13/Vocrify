@@ -20,13 +20,26 @@ function statusLabel(state: string) {
 }
 
 export function SummaryStep() {
-  const { stepStates, pythonCheck, deviceCheck, goToStep, runStepWithRetry } = useSetupStore();
+  const { pythonCheck, ffmpegCheck, deviceCheck, modelCheck, goToStep } = useSetupStore();
   const huggingFaceToken = useTasks((s) => s.settings.huggingFaceToken);
 
   const handleInstallPythonNow = async () => {
     goToStep("python");
-    await runStepWithRetry("python", 3);
   };
+
+  // Map check results to status strings
+  const getStepStatus = (check: { status: string } | null): string => {
+    if (!check) return "idle";
+    if (check.status === "ok" || check.status === "completed") return "completed";
+    if (check.status === "error") return "error";
+    if (check.status === "running") return "running";
+    return "idle";
+  };
+
+  const pythonStatus = pythonCheck ? getStepStatus(pythonCheck) : "idle";
+  const ffmpegStatus = ffmpegCheck ? getStepStatus(ffmpegCheck) : "idle";
+  const deviceStatus = deviceCheck ? getStepStatus(deviceCheck) : "idle";
+  const modelStatus = modelCheck ? getStepStatus(modelCheck) : "idle";
 
   return (
     <div className="space-y-6">
@@ -39,16 +52,16 @@ export function SummaryStep() {
 
       <div className="space-y-3 rounded-lg border p-4">
         {([
-          ["Python", stepStates.python],
-          ["FFmpeg", stepStates.ffmpeg],
+          ["Python", pythonStatus],
+          ["FFmpeg", ffmpegStatus],
           [
             "Devices",
-            stepStates.device,
+            deviceStatus,
             deviceCheck?.recommended
               ? `Рекомендуется: ${deviceCheck.recommended.name}`
               : "Fallback: CPU",
           ],
-          ["Optional", stepStates.optional],
+          ["Models", modelStatus],
           ["HuggingFace token", huggingFaceToken ? "completed" : "skipped", huggingFaceToken ? "Установлен" : "Отсутствует"],
         ] as const).map(([name, state, hint]) => (
           <div key={name} className="flex items-center justify-between border-b last:border-b-0 py-2">
@@ -66,17 +79,17 @@ export function SummaryStep() {
         ))}
       </div>
 
-      {stepStates.python === "skipped" && (
+      {pythonStatus === "idle" && (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 mt-0.5 text-yellow-600" />
             <div>
-              <p className="text-sm font-medium">Диаризация недоступна без Python</p>
+              <p className="text-sm font-medium">Python не проверен</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Базовая транскрибация будет работать, но разделение спикеров потребует установки Python runtime.
+                Нажмите "Далее" для запуска проверки.
               </p>
               <Button size="sm" variant="outline" className="mt-3" onClick={handleInstallPythonNow}>
-                Установить сейчас
+                Проверить
               </Button>
             </div>
           </div>
@@ -88,7 +101,7 @@ export function SummaryStep() {
           <div className="space-y-2">
             <p>{pythonCheck.message}</p>
             <Button size="sm" variant="outline" onClick={handleInstallPythonNow}>
-              Установить сейчас
+              Попробовать снова
             </Button>
           </div>
         </div>
