@@ -37,13 +37,15 @@ class ModelRegistry:
     """
 
     # Model repository IDs
+    # IMPORTANT: Use GGML models for Rust whisper.cpp engine
+    # These are compatible with the Rust implementation
     WHISPER_REPOS = {
-        "tiny": "Systran/faster-whisper-tiny",
-        "base": "Systran/faster-whisper-base",
-        "small": "Systran/faster-whisper-small",
-        "medium": "Systran/faster-whisper-medium",
-        "large-v2": "Systran/faster-whisper-large-v2",
-        "large-v3": "Systran/faster-whisper-large-v3",
+        "tiny": "ggerganov/whisper.cpp",
+        "base": "ggerganov/whisper.cpp",
+        "small": "ggerganov/whisper.cpp",
+        "medium": "ggerganov/whisper.cpp",
+        "large-v2": "ggerganov/whisper.cpp",
+        "large-v3": "ggerganov/whisper.cpp",
     }
 
     DISTIL_WHISPER_REPOS = {
@@ -92,7 +94,7 @@ class ModelRegistry:
 
     def get_whisper_path(self, model_size: str) -> Tuple[Optional[Path], str]:
         """
-        Get path to cached Whisper model or repo ID for download.
+        Get path to cached GGML Whisper model or repo ID for download.
 
         Args:
             model_size: Model size ('tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3')
@@ -104,7 +106,25 @@ class ModelRegistry:
         if not repo_id:
             raise ValueError(f"Unknown Whisper model size: {model_size}")
 
-        # Method 1: Try HuggingFace cache structure first
+        # Method 1: Check for GGML .bin file directly (for Rust whisper.cpp)
+        ggml_filename = {
+            "tiny": "ggml-tiny.bin",
+            "base": "ggml-base.bin",
+            "small": "ggml-small.bin",
+            "medium": "ggml-medium.bin",
+            "large": "ggml-large-v1.bin",
+            "large-v1": "ggml-large-v1.bin",
+            "large-v2": "ggml-large-v2.bin",
+            "large-v3": "ggml-large-v3.bin",
+        }.get(model_size)
+
+        if ggml_filename:
+            # Check in models_cache root (direct download location)
+            ggml_path = self.cache_dir / ggml_filename
+            if ggml_path.exists():
+                return ggml_path, repo_id
+
+        # Method 2: Try HuggingFace cache structure first
         try:
             from huggingface_hub import snapshot_download
 
@@ -115,7 +135,7 @@ class ModelRegistry:
         except Exception:
             pass  # Not found in HF cache, try direct directory
 
-        # Method 2: Check direct model directory (e.g., models_cache/whisper-base/)
+        # Method 3: Check direct model directory (e.g., models_cache/whisper-base/)
         # This handles models downloaded to simple directories with model.bin files
         model_dir = self.cache_dir / f"whisper-{model_size}"
         if model_dir.exists():
@@ -191,11 +211,11 @@ class ModelRegistry:
         # Models are downloaded to sherpa-onnx-diarization/ by downloader.py
         sherpa_dir = self.cache_dir / "sherpa-onnx-diarization"
 
-        # Segmentation model: sherpa-onnx-diarization/sherpa-onnx-segmentation/sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx
+        # Segmentation model: sherpa-onnx-diarization/sherpa-onnx-segmentation/model.int8.onnx
+        # Note: The archive extracts directly to sherpa-onnx-segmentation/ without the nested folder
         seg_path = (
             sherpa_dir
             / "sherpa-onnx-segmentation"
-            / "sherpa-onnx-pyannote-segmentation-3-0"
             / "model.int8.onnx"
         )
 
@@ -350,8 +370,34 @@ class ModelRegistry:
 
         # Determine model type from name
         if model_name.startswith("whisper-"):
-            # Whisper models are downloaded to {cache_dir}/{model_name} directly
-            # First check the direct model directory (primary download location)
+            # Whisper GGML models are downloaded as .bin files to {cache_dir}/
+            # First check for GGML .bin file (primary location for Rust whisper.cpp)
+            size = model_name.replace("whisper-", "")
+            ggml_filename = {
+                "tiny": "ggml-tiny.bin",
+                "base": "ggml-base.bin",
+                "small": "ggml-small.bin",
+                "medium": "ggml-medium.bin",
+                "large": "ggml-large-v1.bin",
+                "large-v1": "ggml-large-v1.bin",
+                "large-v2": "ggml-large-v2.bin",
+                "large-v3": "ggml-large-v3.bin",
+            }.get(size)
+
+            if ggml_filename:
+                ggml_path = self.cache_dir / ggml_filename
+                if ggml_path.exists():
+                    try:
+                        ggml_path.unlink()
+                        deleted_paths.append(str(ggml_path))
+                    except Exception as e:
+                        return {
+                            "success": False,
+                            "message": f"Failed to delete {model_name}: {str(e)}",
+                            "deleted_paths": deleted_paths,
+                        }
+
+            # Second: Check the direct model directory (legacy location)
             target_dir = self.cache_dir / model_name
             if target_dir.exists():
                 try:
@@ -363,36 +409,30 @@ class ModelRegistry:
                         "message": f"Failed to delete {model_name}: {str(e)}",
                         "deleted_paths": deleted_paths,
                     }
-            else:
-                # Fallback: Check HF cache structure (for legacy downloads)
-                size = model_name.replace("whisper-", "")
-                repo_id = self.WHISPER_REPOS.get(size)
-                if repo_id:
-                    org, name = repo_id.split("/")
-                    hf_cache_name = f"models--{org}--{name}"
-                    target_dir = self.hf_cache / "hub" / hf_cache_name
-                    if target_dir.exists():
-                        try:
-                            shutil.rmtree(target_dir)
-                            deleted_paths.append(str(target_dir))
-                        except Exception as e:
-                            return {
-                                "success": False,
-                                "message": f"Failed to delete {model_name}: {str(e)}",
-                                "deleted_paths": deleted_paths,
-                            }
-                    else:
+
+            # Third: Fallback to HF cache structure (for legacy downloads)
+            repo_id = self.WHISPER_REPOS.get(size)
+            if repo_id:
+                org, name = repo_id.split("/")
+                hf_cache_name = f"models--{org}--{name}"
+                target_dir = self.hf_cache / "hub" / hf_cache_name
+                if target_dir.exists():
+                    try:
+                        shutil.rmtree(target_dir)
+                        deleted_paths.append(str(target_dir))
+                    except Exception as e:
                         return {
                             "success": False,
-                            "message": f"Model not found: {model_name}",
+                            "message": f"Failed to delete {model_name}: {str(e)}",
                             "deleted_paths": deleted_paths,
                         }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Model not found: {model_name}",
-                        "deleted_paths": deleted_paths,
-                    }
+
+            if not deleted_paths:
+                return {
+                    "success": False,
+                    "message": f"Model not found: {model_name}",
+                    "deleted_paths": deleted_paths,
+                }
 
         elif model_name.startswith("distil-"):
             # Distil-Whisper models - check direct directory first

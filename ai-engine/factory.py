@@ -106,6 +106,22 @@ class ModelFactory:
 
             size = model_name.replace("whisper-", "") or "base"
 
+            # Validate size is a valid Whisper model size
+            valid_sizes = {
+                "tiny",
+                "base",
+                "small",
+                "medium",
+                "large",
+                "large-v2",
+                "large-v3",
+            }
+            if size not in valid_sizes:
+                raise ValueError(
+                    f"Invalid model size '{size}'. Valid sizes: {', '.join(sorted(valid_sizes))}. "
+                    f"Model name was: {model_name}"
+                )
+
             # Validate diarization provider availability before instantiation
             diarization_provider = cls._validate_diarization_provider(
                 kwargs.get("diarization_provider", "pyannote"),
@@ -128,6 +144,22 @@ class ModelFactory:
             size = model_name.replace("distil-", "").replace("whisper-", "")
             if not size or size == "whisper":
                 size = "large-v3"
+
+            # Validate size is a valid Distil-Whisper model size
+            valid_sizes = {
+                "small",
+                "small.en",
+                "medium",
+                "medium-en",
+                "large",
+                "large-v2",
+                "large-v3",
+            }
+            if size not in valid_sizes:
+                raise ValueError(
+                    f"Invalid Distil-Whisper model size '{size}'. Valid sizes: {', '.join(sorted(valid_sizes))}. "
+                    f"Model name was: {model_name}"
+                )
 
             # Validate diarization provider availability before instantiation
             diarization_provider = cls._validate_diarization_provider(

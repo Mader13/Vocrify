@@ -671,10 +671,19 @@ class ImprovedDownloader:
             self.check_disk_space(total_size)
 
             # Create target directory
-            target_dir = self.cache_dir / model_name
-            target_dir.mkdir(parents=True, exist_ok=True)
-
-            output_path = target_dir / asset_name
+            # For GGML Whisper models, save directly to cache_dir root as .bin file
+            # For other models, save to subdirectory
+            if asset_name.startswith("ggml-") and asset_name.endswith(".bin"):
+                # GGML Whisper model - save directly to cache_dir root
+                # Note: model_name may be "small", "base", etc. (without "whisper-" prefix)
+                output_path = self.cache_dir / asset_name
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                target_dir = output_path.parent
+            else:
+                # Other models - save to subdirectory
+                target_dir = self.cache_dir / model_name
+                target_dir.mkdir(parents=True, exist_ok=True)
+                output_path = target_dir / asset_name
             temp_path = output_path.with_suffix(output_path.suffix + ".tmp")
 
             # Download with progress and retry
@@ -978,12 +987,13 @@ def download_model(
     )
 
     # Model repositories mapping
+    # IMPORTANT: Use GGML models for Rust whisper.cpp engine
     MODEL_REPOSITORIES = {
-        "whisper-tiny": "Systran/faster-whisper-tiny",
-        "whisper-base": "Systran/faster-whisper-base",
-        "whisper-small": "Systran/faster-whisper-small",
-        "whisper-medium": "Systran/faster-whisper-medium",
-        "whisper-large-v3": "Systran/faster-whisper-large-v3",
+        "whisper-tiny": "ggerganov/whisper.cpp",
+        "whisper-base": "ggerganov/whisper.cpp",
+        "whisper-small": "ggerganov/whisper.cpp",
+        "whisper-medium": "ggerganov/whisper.cpp",
+        "whisper-large-v3": "ggerganov/whisper.cpp",
         "distil-small": "Systran/faster-distil-whisper-small.en",
         "distil-medium": "distil-whisper/distil-medium.en",
         "distil-large-v2": "distil-whisper/distil-large-v2",
@@ -1011,13 +1021,30 @@ def download_model(
 
     try:
         if model_type == "whisper":
-            repo_id = MODEL_REPOSITORIES.get(model_name)
-            if not repo_id:
-                emit_error(f"Unknown model: {model_name}")
+            # Use direct download from GitHub for GGML models
+            # Map model names to GGML filenames
+            model_filename = {
+                "tiny": "ggml-tiny.bin",
+                "base": "ggml-base.bin",
+                "small": "ggml-small.bin",
+                "medium": "ggml-medium.bin",
+                "large": "ggml-large-v1.bin",
+                "large-v1": "ggml-large-v1.bin",
+                "large-v2": "ggml-large-v2.bin",
+                "large-v3": "ggml-large-v3.bin",
+            }.get(model_name)
+
+            if not model_filename:
+                emit_error(f"Unknown Whisper model: {model_name}")
                 return
 
-            result_path = downloader.download_from_huggingface(
-                repo_id=repo_id, model_name=model_name
+            # Construct URL for GGML model
+            url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{model_filename}"
+
+            result_path = downloader.download_from_github(
+                url=url,
+                asset_name=model_filename,
+                model_name=model_name
             )
 
             # Emit completion event

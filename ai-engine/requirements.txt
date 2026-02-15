@@ -39,7 +39,7 @@ onnxruntime==1.18.0
 # ============================================================================
 # DEEP LEARNING FRAMEWORK
 # ============================================================================
-# PyTorch (required by PyAnnote)
+# PyTorch (required by PyAnnote and faster-whisper)
 # For GPU (CUDA 12.1) - Recommended for RTX series:
 torch==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121
 torchaudio==2.5.1 --extra-index-url https://download.pytorch.org/whl/cu121
@@ -125,7 +125,7 @@ hnswlib==0.8.0
 #   pip install -r requirements-parakeet.txt
 #
 # WARNING: nemo_toolkit has complex dependencies and may conflict with
-# pyannote.audio. Use separate virtual environment if needed.
+# faster-whisper and pyannote.audio. Use separate virtual environment if needed.
 #
 # Key conflicts:
 # - nemo_toolkit[asr] requires numpy<2.0.0 (already satisfied)
@@ -153,9 +153,10 @@ hnswlib==0.8.0
 # VERSION COMPATIBILITY NOTES
 # ============================================================================
 # - Python 3.8-3.12: All packages compatible
-# - Python 3.13+: NOT supported (pyannote.audio incompatible)
+# - Python 3.13+: NOT supported (faster-whisper, pyannote.audio incompatible)
 # - NumPy 1.x vs 2.x: Use 1.x for compatibility (nemo_toolkit requires <2.0.0)
 # - PyTorch 2.2.x: Stable version with Python 3.8-3.12 support
+# - faster-whisper 1.0.3: Stable, well-tested version
 # - nemo_toolkit: Optional, heavy dependencies, see requirements-parakeet.txt
 #
 # Last updated: 2025-02-06
