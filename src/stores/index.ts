@@ -17,7 +17,7 @@ import type {
 } from "@/types";
 import { logger } from "@/lib/logger";
 
-export type ViewType = "transcription" | "models" | "settings";
+export type ViewType = "transcription" | "models" | "settings" | "archive";
 
 /**
  * UI-specific AppSettings extending base types with additional fields
@@ -67,6 +67,8 @@ interface TasksState {
   resetSettings: () => void;
   deleteTask: (taskId: string) => void;
   removeTask: (taskId: string) => void;
+  archiveTask: (taskId: string) => void;
+  unarchiveTask: (taskId: string) => void;
   setHuggingFaceToken: (token: string | null) => void;
   updateSettings: (settings: Partial<AppSettings>) => void;
   updateLastDiarizationProvider: (provider: DiarizationProvider) => void;
@@ -107,10 +109,15 @@ const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" |
 };
 
 function filterTasksByView(tasks: TranscriptionTask[], view: ViewType): TranscriptionTask[] {
-  if (view === "models" || view === "settings") {
+  if (view === "models" || view === "settings" || view === "archive") {
     return [];
   }
-  return tasks;
+  // For transcription view, show only non-archived tasks
+  return tasks.filter((task) => !task.archived);
+}
+
+function getArchivedTasks(tasks: TranscriptionTask[]): TranscriptionTask[] {
+  return tasks.filter((task) => task.archived);
 }
 
 /**
@@ -133,8 +140,8 @@ function ensureTaskResult(task: TranscriptionTask): TranscriptionTask {
 export const useTasks = create<TasksState>()(
   persist(
     (set, get) => {
-      // Validate and migrate settings on store creation
       const validateSettings = (state: TasksState) => {
+        if (!state.settings) return;
         const { settings } = state;
         const validEnginePrefs: EnginePreference[] = ["auto", "rust", "python"];
         const validDevices: DeviceType[] = ["auto", "cpu", "cuda", "mps", "vulkan"];
@@ -160,8 +167,11 @@ export const useTasks = create<TasksState>()(
         }
       };
 
-      // Run validation on mount
-      validateSettings(get());
+      // Run validation after rehydration
+      const state = get();
+      if (state?.settings) {
+        validateSettings(state);
+      }
 
       // Load HuggingFace token from backend on store creation
       (async () => {
@@ -369,6 +379,24 @@ export const useTasks = create<TasksState>()(
         get().removeTask(taskId);
       },
 
+      archiveTask: (taskId) => {
+        logger.transcriptionInfo("Task archived", { taskId });
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === taskId ? { ...task, archived: true } : task
+          ),
+        }));
+      },
+
+      unarchiveTask: (taskId) => {
+        logger.transcriptionInfo("Task unarchived", { taskId });
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === taskId ? { ...task, archived: false } : task
+          ),
+        }));
+      },
+
       addTask: async (path, name, size, options) => {
         logger.uploadInfo("Adding file", { fileName: name, filePath: path });
 
@@ -429,6 +457,10 @@ export const useTasks = create<TasksState>()(
     },
     {
       name: "vocrify-tasks",
+      version: 1,
+      migrate: (persistedState: unknown, _version: number) => {
+        return persistedState as TasksState;
+      },
       partialize: (state) => ({
         tasks: state.tasks,
         options: state.options,
@@ -442,6 +474,10 @@ export const useTasks = create<TasksState>()(
 
 export function useTasksByView(view: ViewType): TranscriptionTask[] {
   return useTasks((state) => filterTasksByView(state.tasks, view));
+}
+
+export function useArchivedTasks(): TranscriptionTask[] {
+  return useTasks((state) => getArchivedTasks(state.tasks));
 }
 
 export const useSettingsStore = useTasks;

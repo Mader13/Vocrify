@@ -1,24 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/tauri", () => ({
-  autoInstallPython: vi.fn(),
-  cancelSetupStep: vi.fn(),
-  checkAndRetryStep: vi.fn(),
   checkFFmpegStatus: vi.fn(),
   checkModelsStatus: vi.fn(),
   checkPythonEnvironment: vi.fn(),
   getAvailableDevices: vi.fn(),
   isSetupComplete: vi.fn(),
   markSetupComplete: vi.fn(),
-  onFFmpegInstallProgress: vi.fn().mockResolvedValue(() => {}),
-  onPythonInstallProgress: vi.fn().mockResolvedValue(() => {}),
   resetSetup: vi.fn(),
 }));
 
 import {
-  autoInstallPython,
-  cancelSetupStep,
-  checkAndRetryStep,
   checkFFmpegStatus,
   checkModelsStatus,
   checkPythonEnvironment,
@@ -29,9 +21,6 @@ import {
 } from "@/services/tauri";
 import { useSetupStore } from "@/stores/setupStore";
 
-const mockedAutoInstallPython = vi.mocked(autoInstallPython);
-const mockedCancelSetupStep = vi.mocked(cancelSetupStep);
-const mockedCheckAndRetryStep = vi.mocked(checkAndRetryStep);
 const mockedCheckFFmpegStatus = vi.mocked(checkFFmpegStatus);
 const mockedCheckModelsStatus = vi.mocked(checkModelsStatus);
 const mockedCheckPythonEnvironment = vi.mocked(checkPythonEnvironment);
@@ -45,23 +34,6 @@ function resetStore() {
     currentStep: "python",
     isComplete: false,
     isChecking: false,
-    stepStates: {
-      python: "idle",
-      ffmpeg: "idle",
-      device: "idle",
-      optional: "idle",
-      summary: "idle",
-    },
-    isAutoMode: true,
-    currentAttempt: 0,
-    stepStartTime: 0,
-    stepTimeoutMs: 0,
-    isPaused: false,
-    installProgress: {
-      stage: "idle",
-      percent: 0,
-      message: "Ожидание",
-    },
     pythonCheck: null,
     ffmpegCheck: null,
     deviceCheck: null,
@@ -132,31 +104,6 @@ describe("setupStore", () => {
     });
     mockedMarkSetupComplete.mockResolvedValue({ success: true });
     mockedResetSetup.mockResolvedValue({ success: true });
-    mockedAutoInstallPython.mockResolvedValue({
-      success: true,
-      data: {
-        status: "ok",
-        version: "3.11.9",
-        executable: "python",
-        inVenv: true,
-        pytorchInstalled: true,
-        pytorchVersion: "2.5.1",
-        cudaAvailable: false,
-        mpsAvailable: false,
-        message: "installed",
-      },
-    });
-    mockedCheckAndRetryStep.mockResolvedValue({
-      success: true,
-      data: {
-        status: "ok",
-        installed: true,
-        path: "ffmpeg",
-        version: "7.1",
-        message: "ok",
-      },
-    });
-    mockedCancelSetupStep.mockResolvedValue({ success: true });
   });
 
   afterEach(() => {
@@ -172,46 +119,36 @@ describe("setupStore", () => {
     expect(useSetupStore.getState().isComplete).toBe(true);
   });
 
-  it("runStepWithRetry completes python step and auto-advances", async () => {
-    const promise = useSetupStore.getState().runStepWithRetry("python", 3);
-    await promise;
+  it("checkPython populates pythonCheck", async () => {
+    await useSetupStore.getState().checkPython();
 
-    expect(useSetupStore.getState().stepStates.python).toBe("completed");
-    expect(useSetupStore.getState().pythonCheck?.status).toBe("ok");
-
-    vi.advanceTimersByTime(1300);
-    expect(useSetupStore.getState().currentStep).toBe("ffmpeg");
+    const state = useSetupStore.getState();
+    expect(state.pythonCheck?.status).toBe("ok");
+    expect(state.pythonCheck?.version).toBe("3.11.9");
   });
 
-  it("runStepWithRetry sets error after failed attempts", async () => {
-    mockedCheckAndRetryStep.mockResolvedValue({ success: false, error: "ffmpeg failed" });
+  it("checkFFmpeg populates ffmpegCheck", async () => {
+    await useSetupStore.getState().checkFFmpeg();
 
-    const promise = useSetupStore.getState().runStepWithRetry("ffmpeg", 3);
-    await vi.advanceTimersByTimeAsync(7000);
-    await promise;
-
-    expect(useSetupStore.getState().stepStates.ffmpeg).toBe("error");
-    expect(useSetupStore.getState().error).toContain("ffmpeg failed");
-    expect(mockedCheckAndRetryStep).toHaveBeenCalledTimes(3);
+    const state = useSetupStore.getState();
+    expect(state.ffmpegCheck?.status).toBe("ok");
+    expect(state.ffmpegCheck?.installed).toBe(true);
   });
 
-  it("skipCurrentStep marks skipped and moves next", () => {
-    useSetupStore.getState().skipCurrentStep();
+  it("checkDevice populates deviceCheck", async () => {
+    await useSetupStore.getState().checkDevice();
 
-    expect(useSetupStore.getState().stepStates.python).toBe("skipped");
-    expect(useSetupStore.getState().currentStep).toBe("ffmpeg");
+    const state = useSetupStore.getState();
+    expect(state.deviceCheck?.status).toBe("ok");
+    expect(state.deviceCheck?.devices).toHaveLength(1);
   });
 
-  it("cancelCurrentStep cancels running step and resets to idle", async () => {
-    useSetupStore.setState((prev) => ({
-      stepStates: { ...prev.stepStates, python: "running" },
-    }));
+  it("checkModel populates modelCheck", async () => {
+    await useSetupStore.getState().checkModel();
 
-    await useSetupStore.getState().cancelCurrentStep();
-
-    expect(mockedCancelSetupStep).toHaveBeenCalledWith("python");
-    expect(useSetupStore.getState().stepStates.python).toBe("idle");
-    expect(useSetupStore.getState().installProgress.stage).toBe("cancelled");
+    const state = useSetupStore.getState();
+    expect(state.modelCheck?.status).toBe("ok");
+    expect(state.modelCheck?.hasRequiredModel).toBe(true);
   });
 
   it("checkAll populates all checks", async () => {
@@ -224,14 +161,36 @@ describe("setupStore", () => {
     expect(state.modelCheck?.status).toBe("ok");
   });
 
+  it("goToStep changes current step", () => {
+    useSetupStore.getState().goToStep("ffmpeg");
+    expect(useSetupStore.getState().currentStep).toBe("ffmpeg");
+  });
+
+  it("nextStep advances to next step in order", () => {
+    useSetupStore.getState().goToStep("python");
+    useSetupStore.getState().nextStep();
+    expect(useSetupStore.getState().currentStep).toBe("ffmpeg");
+  });
+
+  it("prevStep goes back to previous step", () => {
+    useSetupStore.getState().goToStep("ffmpeg");
+    useSetupStore.getState().prevStep();
+    expect(useSetupStore.getState().currentStep).toBe("python");
+  });
+
   it("completeSetup marks store complete", async () => {
     await useSetupStore.getState().completeSetup();
     expect(useSetupStore.getState().isComplete).toBe(true);
   });
 
+  it("skipSetup marks store complete", () => {
+    useSetupStore.getState().skipSetup();
+    expect(useSetupStore.getState().isComplete).toBe(true);
+  });
+
   it("resetSetupState resets state when backend reset succeeds", async () => {
     useSetupStore.setState({
-      currentStep: "summary",
+      currentStep: "device",
       isComplete: true,
       error: "boom",
     });
@@ -242,6 +201,18 @@ describe("setupStore", () => {
     expect(state.currentStep).toBe("python");
     expect(state.isComplete).toBe(false);
     expect(state.error).toBe(null);
-    expect(state.stepStates.python).toBe("idle");
+  });
+
+  it("checkPython handles error gracefully", async () => {
+    mockedCheckPythonEnvironment.mockResolvedValueOnce({
+      success: false,
+      error: "Python not found",
+    });
+
+    await useSetupStore.getState().checkPython();
+
+    const state = useSetupStore.getState();
+    expect(state.pythonCheck?.status).toBe("error");
+    expect(state.pythonCheck?.message).toBe("Python not found");
   });
 });

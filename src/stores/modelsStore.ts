@@ -1,12 +1,14 @@
 import { create } from "zustand";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AIModel,
   AvailableModel,
   DiskUsage,
   ModelDownloadProgress,
   ModelDownloadState,
   ModelType,
 } from "@/types";
+import { MODEL_NAMES } from "@/types";
 import {
   getLocalModels,
   downloadModel,
@@ -49,6 +51,23 @@ interface ModelsState {
   updateDownloadStage: (modelName: string, stage: string, submodelName: string, progress: number, currentMb: number, totalMb: number) => void;
   setStageCompleted: (modelName: string, stage: string) => void;
   getInstalledModels: () => AvailableModel[];
+}
+
+// Valid model names - used for validation
+const VALID_MODELS = Object.keys(MODEL_NAMES) as AIModel[];
+
+/**
+ * Validate that a model name is a valid AIModel
+ * Returns true if valid, false otherwise
+ */
+function isValidModel(model: string | null): model is AIModel {
+  if (!model) return false;
+  // Check if it's a valid model name (not corrupted with paths or commas)
+  if (model.includes(',') || model.includes('\\') || model.includes('/')) {
+    console.error('[MODEL_VALIDATION] Invalid model name detected:', model);
+    return false;
+  }
+  return VALID_MODELS.includes(model as AIModel);
 }
 
 const getModelSizeMb = (modelName: string): number => {
@@ -350,6 +369,12 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
   },
 
   setSelectedTranscriptionModel: async (model: string | null) => {
+    // Validate the model before saving
+    if (model && !isValidModel(model)) {
+      console.error('[MODEL_VALIDATION] Invalid model selected:', model);
+      logger.modelError("Invalid model selected", { model });
+      return;
+    }
     set({ selectedTranscriptionModel: model });
     if (model) {
       await saveSelectedModel(`transcription:${model}`);
@@ -696,14 +721,31 @@ export async function initializeModelsStore() {
 
   const result = await loadSelectedModel();
   if (result.success && result.data) {
+    let modelName: string | null = null;
+    
     // Parse stored value to determine if it's transcription or diarization model
     if (result.data.startsWith('transcription:')) {
-      store.setSelectedTranscriptionModel(result.data.replace('transcription:', ''));
+      modelName = result.data.replace('transcription:', '');
     } else if (result.data.startsWith('diarization:')) {
-      store.setSelectedDiarizationModel(result.data.replace('diarization:', ''));
+      modelName = result.data.replace('diarization:', '');
     } else {
       // Legacy format - assume it's a transcription model
-      store.setSelectedTranscriptionModel(result.data);
+      modelName = result.data;
+    }
+    
+    // Validate the loaded model name - discard if corrupted
+    if (isValidModel(modelName)) {
+      if (modelName!.startsWith('transcription:')) {
+        store.setSelectedTranscriptionModel(modelName!.replace('transcription:', ''));
+      } else if (modelName!.startsWith('diarization:')) {
+        store.setSelectedDiarizationModel(modelName!.replace('diarization:', ''));
+      } else {
+        store.setSelectedTranscriptionModel(modelName);
+      }
+    } else {
+      console.warn('[MODEL_VALIDATION] Discarding corrupted model selection:', modelName);
+      // Clear the corrupted value from storage
+      await saveSelectedModel('');
     }
   }
 }

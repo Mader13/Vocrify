@@ -163,6 +163,7 @@ export interface TranscriptionTask {
   completedAt: Date | null;
   metrics?: ProgressMetrics;
   streamingSegments?: TranscriptionSegment[];
+  archived?: boolean;
 }
 
 /**
