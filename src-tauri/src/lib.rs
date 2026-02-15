@@ -2690,7 +2690,16 @@ async fn transcribe_rust(
         // Convert RustTranscriptionOptions to transcription_manager::TranscriptionOptions
         let tm_options = transcription_manager::TranscriptionOptions::from(options.clone());
 
-        let result = manager.transcribe_file(&validated_path, &tm_options).await
+        // Get HuggingFace token for diarization
+        let hf_token = match get_huggingface_token(&app).await {
+            Ok(token) => token,
+            Err(e) => {
+                eprintln!("[WARN] Failed to get HuggingFace token: {}", e);
+                None
+            }
+        };
+
+        let result = manager.transcribe_file(&validated_path, &tm_options, hf_token.as_deref()).await
             .map_err(|e| {
                 eprintln!("[ERROR] Rust transcription failed: {}", e);
 
@@ -2937,12 +2946,16 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(task_manager)
         .manage(TranscriptionManagerState::new(Mutex::new(
-            Some(TranscriptionManager::new(&models_dir)
-                .unwrap_or_else(|e| {
-                    eprintln!("[WARN] Failed to create TranscriptionManager: {}", e);
-                    // Continue with fallback models_dir
-                    TranscriptionManager::new(&models_dir).unwrap()
-                }))
+            {
+                let tm_result = TranscriptionManager::new(&models_dir, None, None, None);
+                match tm_result {
+                    Ok(manager) => Some(manager),
+                    Err(e) => {
+                        eprintln!("[WARN] Failed to create TranscriptionManager: {}", e);
+                        None
+                    }
+                }
+            }
         )))
         .invoke_handler(tauri::generate_handler![
             start_transcription,

@@ -152,18 +152,40 @@ pub struct TranscriptionManager {
     #[allow(dead_code)]
     models_dir: PathBuf,
     current_model: Arc<Mutex<Option<String>>>,
+    python_bridge: Option<crate::python_bridge::PythonBridge>,
 }
 
 impl TranscriptionManager {
-    /// Create a new TranscriptionManager
-    pub fn new(models_dir: &Path) -> Result<Self, TranscriptionError> {
+    /// Create a new TranscriptionManager with Python bridge support
+    pub fn new(
+        models_dir: &Path,
+        python_path: Option<&Path>,
+        engine_path: Option<&Path>,
+        cache_dir: Option<&Path>,
+    ) -> Result<Self, TranscriptionError> {
         std::fs::create_dir_all(models_dir)?;
 
         eprintln!("[INFO] TranscriptionManager initialized with directory: {:?}", models_dir);
 
+        let python_bridge = match (python_path, engine_path, cache_dir) {
+            (Some(py_path), Some(eng_path), Some(cache)) => {
+                eprintln!("[INFO] Python bridge configured: {:?}", py_path);
+                Some(crate::python_bridge::PythonBridge::new(
+                    py_path,
+                    eng_path,
+                    cache,
+                ))
+            }
+            _ => {
+                eprintln!("[WARN] Python bridge not configured - diarization disabled");
+                None
+            }
+        };
+
         Ok(Self {
             models_dir: models_dir.to_path_buf(),
             current_model: Arc::new(Mutex::new(None)),
+            python_bridge,
         })
     }
 
@@ -205,6 +227,7 @@ impl TranscriptionManager {
         &self,
         audio_path: &Path,
         options: &TranscriptionOptions,
+        hf_token: Option<&str>,
     ) -> Result<TranscriptionResult, TranscriptionError> {
         // Get model name with minimal lock duration
         let model_name = {
@@ -223,7 +246,8 @@ impl TranscriptionManager {
         eprintln!("[INFO] Starting transcription of {:?} using {:?} engine",
             audio_path, engine_type);
 
-        match engine_type {
+        // Perform transcription
+        let mut result = match engine_type {
             EngineType::Whisper => {
                 self.transcribe_with_whisper(audio_path, &model_path, options).await
             }
@@ -236,7 +260,33 @@ impl TranscriptionManager {
             EngineType::SenseVoice => {
                 self.transcribe_with_sensevoice(audio_path, &model_path, options).await
             }
+        }?;
+
+        // Run diarization if enabled
+        if options.enable_diarization {
+            eprintln!("[INFO] Diarization enabled, running...");
+
+            match self.run_diarization(audio_path, options, hf_token).await {
+                Ok((_speaker_turns, speaker_segments)) => {
+                    eprintln!("[INFO] Diarization complete, merging results");
+
+                    // Merge transcription with speaker info
+                    let (merged_turns, merged_segments) = self.merge_diarization(
+                        &result.segments,
+                        &speaker_segments,
+                    );
+
+                    result.speaker_turns = Some(merged_turns);
+                    result.speaker_segments = Some(merged_segments);
+                }
+                Err(e) => {
+                    eprintln!("[WARN] Diarization failed: {}, returning transcription without speakers", e);
+                    // Continue without speaker info
+                }
+            }
         }
+
+        Ok(result)
     }
 
     /// Stub implementation when rust-transcribe feature is disabled
@@ -553,6 +603,137 @@ impl TranscriptionManager {
     pub fn is_model_loaded(&self) -> bool {
         self.current_model.lock().unwrap().is_some()
     }
+
+    /// Run diarization using Python bridge
+    async fn run_diarization(
+        &self,
+        audio_path: &Path,
+        options: &TranscriptionOptions,
+        hf_token: Option<&str>,
+    ) -> Result<(Vec<SpeakerTurn>, Vec<TranscriptionSegment>), TranscriptionError> {
+        use crate::python_bridge::DiarizationProvider;
+
+        let provider = options.diarization_provider.as_ref()
+            .and_then(|p| match p.as_str() {
+                "pyannote" => Some(DiarizationProvider::PyAnnote),
+                "sherpa-onnx" => Some(DiarizationProvider::SherpaOnnx),
+                _ => None,
+            })
+            .unwrap_or(DiarizationProvider::SherpaOnnx);
+
+        let python_bridge = self.python_bridge.as_ref()
+            .ok_or(TranscriptionError::Transcription("Python bridge not initialized".to_string()))?;
+
+        eprintln!("[INFO] Running diarization with provider: {:?}", provider);
+
+        let speaker_segments = match provider {
+            DiarizationProvider::PyAnnote => {
+                python_bridge.diarize_pyannote(
+                    audio_path,
+                    hf_token,
+                    Some(options.num_speakers),
+                ).await.map_err(|e| TranscriptionError::Transcription(format!("Diarization failed: {}", e)))?
+            }
+            DiarizationProvider::SherpaOnnx => {
+                python_bridge.diarize_sherpa(
+                    audio_path,
+                    Some(options.num_speakers),
+                ).await.map_err(|e| TranscriptionError::Transcription(format!("Diarization failed: {}", e)))?
+            }
+        };
+
+        // Convert to SpeakerTurn format
+        let speaker_turns: Vec<SpeakerTurn> = speaker_segments.iter()
+            .map(|s| SpeakerTurn {
+                start: s.start,
+                end: s.end,
+                speaker: s.speaker.clone(),
+            })
+            .collect();
+
+        // Also return as TranscriptionSegment format for easier merging
+        let diarization_segments: Vec<TranscriptionSegment> = speaker_segments.into_iter()
+            .map(|s| TranscriptionSegment {
+                start: s.start,
+                end: s.end,
+                text: String::new(),
+                speaker: Some(s.speaker),
+                confidence: 1.0,
+            })
+            .collect();
+
+        Ok((speaker_turns, diarization_segments))
+    }
+
+    /// Merge transcription segments with speaker diarization
+    fn merge_diarization(
+        &self,
+        transcription_segments: &[TranscriptionSegment],
+        speaker_segments: &[TranscriptionSegment],
+    ) -> (Vec<SpeakerTurn>, Vec<TranscriptionSegment>) {
+        eprintln!("[INFO] Merging {} transcription segments with {} speaker segments",
+            transcription_segments.len(), speaker_segments.len());
+
+        let mut result_segments = Vec::with_capacity(transcription_segments.len());
+        let mut speaker_turns: Vec<SpeakerTurn> = Vec::new();
+
+        for trans_segment in transcription_segments {
+            // Find the speaker with most overlap (O(n+m) algorithm)
+            let mut best_speaker = None;
+            let mut max_overlap = 0.0f64;
+
+            for speaker_seg in speaker_segments {
+                // Calculate overlap
+                let overlap_start = trans_segment.start.max(speaker_seg.start);
+                let overlap_end = trans_segment.end.min(speaker_seg.end);
+                let overlap = (overlap_end - overlap_start).max(0.0);
+
+                if overlap > max_overlap {
+                    max_overlap = overlap;
+                    best_speaker = speaker_seg.speaker.clone();
+                }
+            }
+
+            // Create speaker turn if we found a speaker
+            if let Some(ref speaker) = best_speaker {
+                // Check if we can extend the last speaker turn
+                let can_extend = speaker_turns.last()
+                    .map(|last| last.speaker.as_str() == speaker.as_str() && trans_segment.start <= last.end + 0.5)
+                    .unwrap_or(false);
+
+                if can_extend {
+                    // Extend the last turn
+                    if let Some(last) = speaker_turns.last_mut() {
+                        last.end = last.end.max(trans_segment.end);
+                    }
+                } else {
+                    // Create new speaker turn
+                    speaker_turns.push(SpeakerTurn {
+                        start: trans_segment.start,
+                        end: trans_segment.end,
+                        speaker: speaker.clone(),
+                    });
+                }
+
+                // Create segment with speaker
+                result_segments.push(TranscriptionSegment {
+                    start: trans_segment.start,
+                    end: trans_segment.end,
+                    text: trans_segment.text.clone(),
+                    speaker: best_speaker,
+                    confidence: trans_segment.confidence,
+                });
+            } else {
+                // No speaker info, copy original segment
+                result_segments.push(trans_segment.clone());
+            }
+        }
+
+        eprintln!("[INFO] Merge complete: {} segments, {} speaker turns",
+            result_segments.len(), speaker_turns.len());
+
+        (speaker_turns, result_segments)
+    }
 }
 
 #[cfg(test)]
@@ -572,7 +753,12 @@ mod tests {
     #[test]
     fn test_transcription_manager_new() {
         let temp_dir = TempDir::new().unwrap();
-        let manager = TranscriptionManager::new(temp_dir.path()).unwrap();
+        let manager = TranscriptionManager::new(
+            temp_dir.path(),
+            None,
+            None,
+            None
+        ).unwrap();
         assert!(!manager.is_model_loaded());
     }
 
