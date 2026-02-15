@@ -2,7 +2,13 @@
 
 ## Project Overview
 
-Tauri desktop application for video/audio transcription using AI (Whisper/Parakeet). Built with React 19, TypeScript, Tailwind CSS 4, and Zustand for state management.
+Tauri desktop application for video/audio transcription using AI. Built with React 19, TypeScript, Tailwind CSS 4, and Zustand for state management.
+
+**Core Architecture (Phase 3+):**
+
+- **Primary Engine:** Rust transcribe-rs (Whisper GGML, Parakeet ONNX, Moonshine ONNX, SenseVoice ONNX)
+- **Secondary Engine:** Python (PyAnnote/Sherpa-ONNX) for speaker diarization only
+- **GPU Acceleration:** CUDA (NVIDIA), MPS (Apple Silicon), Vulkan (AMD/Intel), CPU (fallback)
 
 ## Commands
 
@@ -10,10 +16,10 @@ Tauri desktop application for video/audio transcription using AI (Whisper/Parake
 
 ### Development
 
-**Standard workflow - run backend and frontend in separate terminals:**
+**Standard workflow - Rust backend handles transcription:**
 
 ```bash
-# Terminal 1 - Start AI Engine (Python backend)
+# Terminal 1 - Start Python backend (for diarization only)
 bun run dev:ai
 
 # Terminal 2 - Start web dev server (Vite)
@@ -24,6 +30,8 @@ bun run dev
 bun run tauri:dev
 ```
 
+**Note:** The Rust backend (Tauri) now handles all transcription. Python backend is only started when diarization is needed.
+
 ### Build
 
 ```bash
@@ -32,6 +40,9 @@ bun run build
 
 # Build Tauri application
 bun run tauri:build
+
+# Build with Rust transcribe-rs enabled (requires Vulkan SDK on Windows/Linux)
+cargo build --features rust-transcribe
 ```
 
 ### Preview
@@ -49,6 +60,15 @@ bunx tsc --noEmit
 
 # Vite type checking included in build
 bun run build
+
+# ESLint check
+bun run lint
+
+# ESLint fix
+bun run lint:fix
+
+# Format code
+bun run format
 ```
 
 ### Installing Dependencies
@@ -64,18 +84,10 @@ bun add <package>
 bun add -d <package>
 ```
 
-### Python Dependencies (AI Engine)
+### Python Dependencies (AI Engine - Diarization Only)
 
-The AI backend (located in `ai-engine/`) uses PyTorch with support for multiple acceleration backends.
-
-**Supported Devices:**
-| Device | Description | Performance |
-|--------|-------------|-------------|
-| **CUDA** | NVIDIA GPU (RTX, GTX, etc.) | ⚡ Fastest |
-| **MPS** | Apple Silicon (M1/M2/M3/M4) | 🚀 Fast |
-| **CPU** | Any modern CPU | 🐢 Slowest (fallback) |
-
-**Installation by Platform:**
+The Python backend (located in `ai-engine/`) is **only** used for speaker diarization.
+**PyTorch Installation by Platform:**
 
 ```bash
 cd ai-engine
@@ -99,39 +111,103 @@ pip install -r requirements.txt
 - Verify MPS: `python -c "import torch; print(torch.backends.mps.is_available())"`
 
 **Device Detection:**
-The app automatically detects available devices at startup. Device priority: CUDA > MPS > CPU.
-See `ai-engine/device_detection.py` for implementation details.
+The app automatically detects available devices at startup. Device priority: CUDA > MPS > Vulkan > CPU.
+See Rust `engine_router.rs` for implementation details.
 
 ## Code Style
 
 ### Do
 
 - Use TypeScript strict mode for all types
-- Follow JSDoc comments for functions (see `src/lib/utils.ts:8-10`)
-- Use Zustand for state management (see `src/stores/index.ts:37-192`)
+- Follow JSDoc comments for functions (see `src/lib/utils.ts`)
+- Use Zustand for state management with persist middleware (see `src/stores/index.ts`)
 - Use `cn()` utility from `@/lib/utils` for class name merging
-- Use class-variance-authority for component variants (see `src/components/ui/button.tsx:5-29`)
+- Use class-variance-authority (CVA) for component variants (see `src/components/ui/button.tsx`)
 - Organize imports: React imports first, then library imports, then @/ imports
 - Use functional components with proper TypeScript generics
+- Follow factory pattern for UI components (CVA variants + composition)
 
 ### Don't
 
 - Never use inline styles (use Tailwind utility classes)
 - Don't mix client/server state in the same store
 - Never call Tauri APIs directly in components (use `src/services/tauri.ts` abstraction)
-- Avoid any() type - use proper TypeScript types
+- Avoid any() type - use proper TypeScript types from `@/types`
+- Don't bypass component variants - use CVA for variant styling
 
 ## Architecture
 
-| Layer              | Location                   | Pattern                                 |
-| ------------------ | -------------------------- | --------------------------------------- |
-| State Management   | `src/stores/`              | Zustand with persistence                |
-| Type Definitions   | `src/types/`               | Centralized TypeScript interfaces       |
-| Utilities          | `src/lib/`                 | Helper functions (cn, formatTime, etc.) |
-| UI Components      | `src/components/ui/`       | Reusable atoms with CVA variants        |
-| Feature Components | `src/components/features/` | Feature-specific composed components    |
-| Tauri Bridge       | `src/services/tauri.ts`    | Native API abstraction                  |
-| Layout             | `src/components/layout/`   | Shell and navigation components         |
+### Backend (Rust - Tauri)
+
+| Module                     | Location                                 | Purpose                                                   |
+| -------------------------- | ---------------------------------------- | --------------------------------------------------------- |
+| **Core**                   |                                          |                                                           |
+| `lib.rs`                   | `src-tauri/src/lib.rs`                   | Main entry point, module organization                     |
+| `main.rs`                  | `src-tauri/src/main.rs`                  | Tauri app configuration, command routing                  |
+| **Transcription**          |                                          |                                                           |
+| `transcription_manager.rs` | `src-tauri/src/transcription_manager.rs` | Phase 3: Main transcription interface using transcribe-rs |
+| `whisper_engine.rs`        | `src-tauri/src/whisper_engine.rs`        | Legacy whisper-rs module (kept for compatibility)         |
+| `engine_router.rs`         | `src-tauri/src/engine_router.rs`         | Routes requests between Rust and Python engines           |
+| **Model Management**       |                                          |                                                           |
+| `onnx_model_downloader.rs` | `src-tauri/src/onnx_model_downloader.rs` | Downloads ONNX models (Parakeet, SenseVoice)              |
+| `download_manager.rs`      | `src-tauri/src/download_manager.rs`      | Coordinates concurrent model downloads                    |
+| **Diarization**            |                                          |                                                           |
+| `sherpa_diarizer.rs`       | `src-tauri/src/sherpa_diarizer.rs`       | Sherpa-ONNX speaker diarization (lightweight)             |
+| `python_bridge.rs`         | `src-tauri/src/python_bridge.rs`         | Bridges to Python for PyAnnote diarization                |
+| **Infrastructure**         |                                          |                                                           |
+| `ffmpeg_manager.rs`        | `src-tauri/src/ffmpeg_manager.rs`        | FFmpeg download and management                            |
+| `storage.rs`               | `src-tauri/src/storage.rs`               | Persistent storage (Tauri Store)                          |
+
+### Frontend (React + TypeScript)
+
+| Layer              | Location                   | Pattern                                               |
+| ------------------ | -------------------------- | ----------------------------------------------------- |
+| State Management   | `src/stores/`              | Zustand with persist middleware                       |
+| Type Definitions   | `src/types/`               | Centralized TypeScript interfaces                     |
+| Utilities          | `src/lib/`                 | Helper functions (cn, logger, formatTime, date-utils) |
+| UI Components      | `src/components/ui/`       | Reusable atoms with CVA variants                      |
+| Feature Components | `src/components/features/` | Feature-specific composed components                  |
+| Services Layer     | `src/services/`            | Tauri API abstraction, transcription service          |
+| Layout             | `src/components/layout/`   | Shell and navigation components                       |
+
+**Key Frontend Services:**
+
+- `tauri.ts` - Complete Tauri API abstraction (transcription, models, devices, dialogs)
+- `transcription.ts` - Transcription service with engine routing (Rust → Python fallback)
+- `storage.ts` - Local storage management
+- `notifications.ts` - Notification system with desktop support
+- `store.ts` - Zustand store with task and settings management
+
+### Engine Routing (Phase 3+)
+
+```
+User Request (transcribe)
+    ↓
+Engine Router (engine_router.rs)
+    ↓
+┌─────────────────────────────────────┐
+│ Engine Preference Check              │
+│ - auto: Rust → Python fallback     │
+│ - rust: Rust only                  │
+│ - python: Python only              │
+└─────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────┐
+│ Rust transcribe-rs (Primary)        │
+│ - Whisper GGML                    │
+│ - Parakeet ONNX                   │
+│ - Moonshine ONNX                   │
+│ - SenseVoice ONNX                  │
+│ GPU: CUDA/MPS/Vulkan              │
+└─────────────────────────────────────┘
+    ↓ (fallback if Rust unavailable)
+┌─────────────────────────────────────┐
+│ Python Engine (Diarization Only)    │
+│ - PyAnnote (high accuracy)         │
+│ - Sherpa-ONNX (lightweight)       │
+│ GPU: CUDA/MPS                    │
+└─────────────────────────────────────┘
+```
 
 ### Key Patterns
 
@@ -142,24 +218,68 @@ import { cn } from "@/lib/utils";
 // Use: <div className={cn("base-class", condition && "conditional")} />
 ```
 
-**Component Variants:**
+**Component Variants (CVA):**
 
 ```tsx
-import { cva } from "class-variance-authority";
-const variants = cva("base classes", {
-  variants: { variant: { default: "...", primary: "..." } },
+import { cva, type VariantProps } from "class-variance-authority";
+
+const buttonVariants = cva("base classes", {
+  variants: {
+    variant: {
+      default: "...",
+      primary: "...",
+      destructive: "...",
+    },
+    size: {
+      sm: "...",
+      md: "...",
+      lg: "...",
+    },
+  },
 });
+
+type ButtonProps = VariantProps<typeof buttonVariants>;
 ```
 
-**Zustand Store:**
+**Zustand Store with Persist:**
 
 ```tsx
-export const useStore = create<State>()((set, get) => ({
-  // state
-  items: [],
-  // actions
-  addItem: (item) => set((state) => ({ items: [...state.items, item] })),
-}));
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
+
+export const useStore = create<State>()(
+  persist(
+    (set, get) => ({
+      // state
+      items: [],
+      // actions
+      addItem: (item) => set((state) => ({ items: [...state.items, item] })),
+    }),
+    {
+      name: "app-storage",
+      storage: createJSONStorage(() => localStorage),
+    }
+  )
+);
+```
+
+**Service Layer Pattern (Tauri API):**
+
+```tsx
+// src/services/tauri.ts
+export async function startTranscription(
+  taskId: string,
+  filePath: string,
+  options: TranscriptionOptions
+): Promise<CommandResult<void>> {
+  try {
+    await invoke("start_transcription", { taskId, filePath, options });
+    return { success: true };
+  } catch (error) {
+    logger.error("Failed to start transcription", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
 ```
 
 ## Import Conventions
@@ -167,55 +287,85 @@ export const useStore = create<State>()((set, get) => ({
 ```tsx
 // React imports
 import * as React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 // Library imports (alphabetical)
 import { clsx, type ClassValue } from "clsx";
 import { cva, type VariantProps } from "class-variance-authority";
 import { create } from "zustand";
+import { invoke, listen } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 // Component imports (relative paths)
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+// Service imports
+import { startTranscription, getAvailableDevices } from "@/services/tauri";
+import { transcribeWithFallback } from "@/services/transcription";
+
 // Type imports (use @ alias)
-import type { TranscriptionTask, TaskStatus } from "@/types";
+import type {
+  TranscriptionTask,
+  TaskStatus,
+  AIModel,
+  Language,
+  EnginePreference,
+} from "@/types";
 ```
 
 ## Types
 
-All types are defined in `src/types/index.ts` and exported. Use the exported constants:
+All types are defined in `src/types/index.ts` and exported. Use exported constants:
 
 ```tsx
-import type { TaskStatus, AIModel, Language } from "@/types";
-import { MODEL_NAMES, LANGUAGE_NAMES } from "@/types";
+import type { TaskStatus, AIModel, Language, EnginePreference } from "@/types";
+import { MODEL_NAMES, LANGUAGE_NAMES, ENGINE_PREFERENCES } from "@/types";
 
 // Type usage
 const status: TaskStatus = "processing";
 const model: AIModel = "whisper-base";
+const engine: EnginePreference = "auto";
 ```
+
+**Key Type Categories:**
+
+- **Task Management:** `TranscriptionTask`, `TaskStatus`, `ProgressStage`, `ProgressMetrics`
+- **Transcription:** `TranscriptionOptions`, `TranscriptionResult`, `TranscriptionSegment`, `SpeakerTurn`
+- **Models:** `AIModel`, `ModelConfig`, `AvailableModel`, `LocalModel`, `ModelType`
+- **Devices:** `DeviceType`, `DeviceInfo`, `DevicesResponse`
+- **Diarization:** `DiarizationProvider`, `SpeakerCount`
+- **Settings:** `AppSettings`, `EnginePreference`
+- **Notifications:** `Notification`, `NotificationSettings`, `NotificationVariant`
 
 ## Error Handling
 
-- UI state stores errors in the task object (`error: string | null`)
+- UI state stores errors in task object (`error: string | null`)
 - Use try/catch in async operations
-- Log errors appropriately (Tauri backend handles logging)
+- Log errors appropriately using `@/lib/logger`:
+  - `logger.error()` - General errors
+  - `logger.transcriptionError()` - Transcription-specific
+  - `logger.modelError()` - Model-related
 - Display user-friendly error messages in components
+- Rust backend returns `Result<T, AppError>` - handle gracefully
+- Services return `CommandResult<T>` pattern for consistent error handling
 
 ## Boundaries
 
 ### Allowed without asking
 
 - Edit components, stores, types, and utilities
-- Add new UI components following existing patterns
+- Add new UI components following CVA pattern
 - Modify feature components in `src/components/features/`
 - Run tests/linters/build commands
-- Add new Zustand stores following established patterns
+- Add new Zustand stores with persist middleware
+- Add new services in `src/services/`
 
 ### Ask first
 
 - New bun dependencies
 - Changes to Tauri API integration (`src/services/tauri.ts`)
+- Rust backend module changes
 - Database/schema changes (if added)
 - Environment variable changes
 - Changes to `tailwind.config.js` or Vite config
@@ -224,9 +374,10 @@ const model: AIModel = "whisper-base";
 
 - Commit API keys or secrets
 - Remove TypeScript strict mode
-- Bypass the `cn()` utility for class merging
+- Bypass `cn()` utility for class merging
 - Mix different state management solutions
 - Use inline styles instead of Tailwind classes
+- Call Tauri APIs directly in components (use `src/services/tauri.ts`)
 
 ## Anti-Patterns (THIS PROJECT)
 
@@ -234,7 +385,9 @@ const model: AIModel = "whisper-base";
 2. **Direct Tauri imports in components** - Use `src/services/tauri.ts` abstraction
 3. **any types** - Use proper TypeScript types from `@/types`
 4. **Class variance without CVA** - Use class-variance-authority for component variants
-5. **Non-persisted sensitive data in Zustand without middleware** - Use persist middleware
+5. **Non-persisted sensitive data in Zustand** - Use persist middleware
+6. **Service layer bypass** - Never call `invoke()` directly in components
+7. **Bypassing engine router** - Always use `transcribeWithFallback()` from `src/services/transcription.ts`
 
 ## Configuration
 
@@ -243,30 +396,60 @@ const model: AIModel = "whisper-base";
 - **Vite**: ^7.0.4
 - **Tailwind CSS**: ^4.1.18 with `@tailwindcss/vite`
 - **Zustand**: ^5.0.11 for state management
-- **Tauri**: v2 with `@tauri-apps/api` v2
+- **Tauri**: v2.10.2 with `@tauri-apps/api` v2
 - **Node**: >=18 required
+
+**Rust Dependencies (Phase 3+):**
+
+- `tauri` ^2.10.2
+- `transcribe-rs` ^0.2.2 (optional, requires Vulkan SDK on Windows/Linux)
+- `ort` ^2.0.0-rc.10 (ONNX Runtime)
+- `audrey` ^0.3 (audio processing)
+- `tokio` ^1.49.0 (async runtime)
+
+**Frontend Dependencies:**
+
+- `react-window` ^2.2.6 - Virtualized lists for performance
+- `wavesurfer.js` ^7.12.1 - Audio waveform visualization
+- `framer-motion` ^12.33.0 - Animations
+- `zod` ^3.0.0 - Schema validation
 
 ## Testing
 
-No test framework configured yet. When adding tests:
+**Test Framework:** Vitest for unit and component tests
 
-- Use Vitest for unit tests
+```bash
+# Run all tests
+bun run test
+
+# Run tests in watch mode
+bun run test:watch
+
+# Run tests with UI
+bun run test:ui
+
+# Generate coverage report
+bun run test:coverage
+```
+
+**Test Location:**
+
 - Place tests alongside source files: `*.test.tsx` or `*.spec.tsx`
-- Run tests with `npx vitest`
+- Example: `src/stores/index.test.ts`, `src/components/ui/button.test.tsx`
 
 ## A Note To The Agent
 
-We are build this together. When you learn something non-obvious, add it here so future changes go faster
+We are building this together. When you learn something non-obvious, add it here so future changes go faster.
 
-**Device Support (Multi-Platform Acceleration)**
+### Device Support (Multi-Platform Acceleration)
 
-- App supports 3 device types: CUDA (NVIDIA GPU), MPS (Apple Silicon), CPU (fallback)
-- Device detection module: `ai-engine/device_detection.py`
-- Device priority: CUDA > MPS > CPU
+- App supports 4 device types: CUDA (NVIDIA GPU), MPS (Apple Silicon), Vulkan (AMD/Intel), CPU (fallback)
+- Device detection: Rust `engine_router.rs` detects available devices
+- Device priority: CUDA > MPS > Vulkan > CPU
 - TypeScript types: `DeviceType`, `DeviceInfo`, `DevicesResponse` in `src/types/index.ts`
 - API: `getAvailableDevices()` in `src/services/tauri.ts`
 
-**Important: PyTorch Installation for GPU Support**
+### PyTorch Installation (for Diarization)
 
 - CUDA (NVIDIA): Use `--extra-index-url https://download.pytorch.org/whl/cu121` flag
 - MPS (Apple Silicon): Built into standard PyTorch, no extra flags needed
@@ -275,59 +458,106 @@ We are build this together. When you learn something non-obvious, add it here so
 - Verify MPS: `python -c "import torch; print(torch.backends.mps.is_available())"`
 - Current stable version: torch 2.5.1+cu121 (compatible with RTX 4060)
 
-**Runtime Routing Gotchas (Feb 2026)**
+### Phase 3: transcribe-rs Architecture (COMPLETED)
 
-- UI task start path must use `src/services/transcription.ts::transcribeWithFallback()` (not direct `startTranscription`) or Rust `transcribe-rs` path is bypassed entirely.
+**Primary Engine:** Rust transcribe-rs handles all transcription
+
+- Supported engines: Whisper (GGML), Parakeet (ONNX), Moonshine (ONNX), SenseVoice (ONNX)
+- GPU acceleration: CUDA (NVIDIA), MPS (macOS Metal), Vulkan (AMD/Intel)
+- **Rust module:** `src-tauri/src/transcription_manager.rs`
+
+**Secondary Engine:** Python for diarization only
+
+- PyAnnote (high accuracy, requires HuggingFace token)
+- Sherpa-ONNX (lightweight, CPU-friendly)
+- **Rust modules:** `src-tauri/src/python_bridge.rs`, `src-tauri/src/sherpa_diarizer.rs`
+
+**Build Requirements:**
+
+- macOS: No additional SDK needed (Metal is built-in) ✓
+- Linux: Vulkan SDK 1.3+ required
+- Windows: Vulkan SDK 1.3+ required + **long path support** (see below)
+
+**Enable transcribe-rs:**
+
+```bash
+# Windows: Set env var and build
+set VULKAN_SDK=E:\Programs\Vulkan SDK
+cargo build --features rust-transcribe
+
+# Linux/macOS
+cargo build --features rust-transcribe
+```
+
+**Windows Long Path Support:**
+
+1. Registry: `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem LongPathsEnabled = 1`
+2. Group Policy: Computer Configuration > Admin Templates > System > Filesystem > Enable Win32 long paths
+3. May need to move project to short path: `C:\project` instead of `E:\Dev\Transcribe-video`
+
+**Rust Transcription Commands (Phase 3):**
+
+- `init_transcription_manager` - Initialize transcribe-rs
+- `load_model_rust` - Load a model for transcription
+- `transcribe_rust` - Transcribe using transcribe-rs
+- `unload_model_rust` - Unload current model
+- `is_model_loaded_rust` - Check if a model is loaded
+
+**Model Download URLs:**
+
+- Whisper GGML: `https://huggingface.co/ggerganov/whisper.cpp`
+- Parakeet V3 int8: `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
+- SenseVoice int8: `https://blob.handy.computer/sense-voice-int8.tar.gz`
+
+**Updated Files (Phase 3):**
+
+- `src-tauri/Cargo.toml` - Added transcribe-rs dependency
+- `src/services/transcription.ts` - Engine routing with fallback
+- `src/types/index.ts` - Updated engine preference types
+- `ai-engine/requirements.txt` - Removed faster-whisper, kept diarization dependencies
+
+### Runtime Routing Gotchas (Updated Feb 2026)
+
+- UI task start path MUST use `src/services/transcription.ts::transcribeWithFallback()` (not direct `startTranscription`) or Rust transcribe-rs path is bypassed entirely.
 - `transcribe_rust` requires model preloading via `load_model_rust` before transcription; otherwise it fails with engine/model-not-initialized and falls back.
-- Python backend CLI currently accepts only `--device cpu|cuda`; when UI exposes `auto/mps/vulkan`, map to Python-compatible device on fallback.
+- Python backend CLI accepts only `--device cpu|cuda|mps|vulkan`; when UI exposes `auto`, map to Python-compatible device on fallback.
+- Rust audio decode currently fails on several media containers (`.mp4`, `.m4a`, `.mov`, `.mkv`, `.avi`, `.webm`) with "no supported format was detected"; in `auto` mode `transcribeWithFallback()` should bypass Rust for these extensions and call Python directly.
+- **Critical:** Never call `invoke("transcribe_rust")` directly from components. Always use `transcribeWithFallback()`.
 
-**Python Env Gotcha (Windows)**
+### Python Env Gotcha (Windows)
 
 - Tauri `get_python_executable()` prefers `ai-engine/venv`, then `ai-engine/.venv`, then parent `.venv`.
-- If project root `.venv` is selected but has no `torch`, transcription fails despite GPU/driver being present.
+- If project root `.venv` is selected but has no `torch`, diarization fails despite GPU/driver being present.
 
-**Phase 3: Migration to transcribe-rs (COMPLETED)**
+### Logging System
 
-- Transcription is now handled by Rust transcribe-rs (not Python faster-whisper)
-- Supported engines: Whisper (GGML), Parakeet (ONNX), Moonshine (ONNX), SenseVoice (ONNX)
-- Python is ONLY used for speaker diarization (PyAnnote/Sherpa-ONNX)
-- **Build requirements:**
-  - macOS: No additional SDK needed (Metal is built-in) ✓
-  - Linux: Vulkan SDK 1.3+ required
-  - Windows: Vulkan SDK 1.3+ required + **long path support** (see below)
-- **transcribe-rs DISABLED by default** (Windows path length limitation - whisper.cpp paths exceed 260 chars)
-- **Enable transcribe-rs:**
+- Structured logger in `src/lib/logger.ts` with categories:
+  - `transcription` - Transcription operations
+  - `upload` - File upload operations
+  - `model` - Model management
+  - `system` - General system events
+- Use category-specific methods: `logger.transcriptionInfo()`, `logger.modelError()`, etc.
 
-  ```bash
-  # Windows: Set env var and build
-  set VULKAN_SDK=E:\Programs\Vulkan SDK
-  cargo build --features rust-transcribe
+### Component Factory Pattern
 
-  # Linux/macOS
-  cargo build --features rust-transcribe
-  ```
+- All UI components use CVA for variants
+- Variants are exported as types: `type ButtonProps = VariantProps<typeof buttonVariants>`
+- Use composition for complex components (e.g., `ModelDisplayCard` uses `ModelCard` + `ModelWarning`)
 
-- **Windows long path support:**
-  1. Registry: `HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem LongPathsEnabled = 1`
-  2. Group Policy: Computer Configuration > Admin Templates > System > Filesystem > Enable Win32 long paths
-  3. May need to move project to short path: `C:\project` instead of `E:\Dev\Transcribe-video`
-- Rust modules:
-  - `src-tauri/src/transcription_manager.rs` - Main transcription interface using transcribe-rs
-  - `src-tauri/src/model_manager.rs` - Model download/management (supports ONNX format)
-  - `src-tauri/src/whisper_engine.rs` - Legacy whisper-rs module (kept for compatibility)
-- New Tauri commands:
-  - `init_transcription_manager` - Initialize the transcribe-rs manager
-  - `load_model_rust` - Load a model for transcription
-  - `transcribe_rust` - Transcribe using transcribe-rs
-  - `unload_model_rust` - Unload the current model
-  - `is_model_loaded_rust` - Check if a model is loaded
-- Model download URLs:
-  - Whisper GGML: `https://huggingface.co/ggerganov/whisper.cpp`
-  - Parakeet V3 int8: `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
-  - SenseVoice int8: `https://blob.handy.computer/sense-voice-int8.tar.gz`
-- Updated files:
-  - `src-tauri/Cargo.toml` - Added transcribe-rs dependency
-  - `src/services/transcription.ts` - Updated to use transcribe_rust command
-  - `src/types/index.ts` - Updated engine preference descriptions
-  - `ai-engine/requirements.txt` - Removed faster-whisper dependency
-- See full plan: `my-plans/transcription-system-v3.md`
+### Performance Optimization
+
+- Use `react-window` for virtualized lists (TaskList, ModelCards)
+- Lazy load heavy components (VideoPlayer, Waveform)
+- Memoize expensive computations using `useMemo`
+- Use `useCallback` for event handlers to prevent re-renders
+
+### Notification System
+
+- Centralized notification service in `src/services/notifications.ts`
+- Supports desktop notifications via Tauri
+- Categories: `download`, `transcription`, `error`, `info`
+- Configurable: position, duration, sound, categories
+
+### See Full Migration Plan
+
+- `my-plans/transcription-system-v3.md` - Phase 3: Migration to transcribe-rs
