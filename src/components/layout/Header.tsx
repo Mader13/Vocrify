@@ -1,4 +1,4 @@
-import { Settings, Mic, Database } from "lucide-react";
+import { Settings, Mic, Database, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUIStore } from "@/stores";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,16 @@ export function Header() {
           >
             <Mic className="h-4 w-4" />
             Транскрипция
+          </Button>
+
+          <Button
+            variant={currentView === "archive" ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setCurrentView("archive")}
+            className={cn("gap-2", currentView === "archive" && "font-medium")}
+          >
+            <Archive className="h-4 w-4" />
+            Архив
           </Button>
 
           <Button

@@ -3,6 +3,7 @@ export { TaskList } from "./TaskList";
 export { TranscriptionView } from "./TranscriptionView";
 export { SettingsPanel } from "./SettingsPanel";
 export { ModelsManagement } from "./ModelsManagement";
+export { ArchiveView } from "./ArchiveView";
 export { HuggingFaceTokenCard } from "./HuggingFaceTokenCard";
 export { VideoPlayer } from "./VideoPlayer";
 export { CustomVideoControls } from "./CustomVideoControls";

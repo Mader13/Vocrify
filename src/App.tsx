@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { PanelLeftClose, PanelLeftOpen, Plus, Upload, AlertCircle, Loader2 } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Plus, Upload, AlertCircle, Loader2, Archive } from "lucide-react";
 import { Header } from "@/components/layout";
-import { DropZone, TaskList, TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, ModelWarning, SetupWizardGuard } from "@/components/features";
+import { DropZone, TaskList, TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, ModelWarning, SetupWizardGuard, ArchiveView } from "@/components/features";
 import { useTasks, useUIStore, useSetupStore } from "@/stores";
 import {
   onProgressUpdate,
@@ -462,7 +462,7 @@ function MainApplication() {
     <div className="flex h-screen flex-col bg-background">
       <Header />
 
-      {currentView === "transcription" ? (
+      {currentView === "transcription" || currentView === "archive" ? (
         <main 
           ref={mainRef} 
           className={cn(
@@ -491,10 +491,10 @@ function MainApplication() {
           {/* Left panel - Task queue */}
           <div
             className={cn(
-              "hidden lg:flex flex-col border-r transition-all duration-200",
+              "hidden lg:flex flex-col border-r transition-all duration-200 h-full",
               isSidebarCollapsed
                 ? "w-12 p-2 items-center overflow-hidden"
-                : "p-4 gap-4 overflow-y-auto"
+                : "p-4 gap-4 overflow-hidden"
             )}
             style={{ width: isSidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
           >
@@ -550,10 +550,56 @@ function MainApplication() {
                   <Plus className="h-8 w-8" />
                 </Button>
 
+                {/* Archive button in compact mode */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="w-11 h-11"
+                  onClick={() => useUIStore.getState().setCurrentView("archive")}
+                  title="Архив"
+                >
+                  <Archive className="h-8 w-8" />
+                </Button>
+
                 {/* Compact TaskList */}
                 <TaskList compact />
               </>
             ) : (
+              <>
+                <div className="flex-1 flex flex-col gap-4 overflow-y-auto min-h-0">
+                  {!selectedModel && (
+                    <ModelWarning
+                      onGoToModels={() => useUIStore.getState().setCurrentView("models")}
+                    />
+                  )}
+                  {currentView === "transcription" && (
+                    <>
+                      <DropZone onFilesSelected={handleFilesFromDialog} />
+                      <TaskList />
+                    </>
+                  )}
+                  {currentView === "archive" && (
+                    <div className="text-sm text-muted-foreground text-center py-4">
+                      Выберите транскрипцию из архива
+                    </div>
+                  )}
+                </div>
+                {/* Archive button at bottom */}
+                <Button
+                  variant={currentView === "archive" ? "secondary" : "ghost"}
+                  className={cn("w-full gap-2 justify-start shrink-0", currentView === "archive" && "bg-secondary")}
+                  onClick={() => useUIStore.getState().setCurrentView("archive")}
+                >
+                  <Archive className="h-4 w-4" />
+                  Архив
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* Mobile view - no resize */}
+          <div className="flex lg:hidden flex-col gap-4 border-b p-4 overflow-y-auto w-full">
+            {currentView === "transcription" && (
               <>
                 {!selectedModel && (
                   <ModelWarning
@@ -564,17 +610,11 @@ function MainApplication() {
                 <TaskList />
               </>
             )}
-          </div>
-
-          {/* Mobile view - no resize */}
-          <div className="flex lg:hidden flex-col gap-4 border-b p-4 overflow-y-auto w-full">
-            {!selectedModel && (
-              <ModelWarning
-                onGoToModels={() => useUIStore.getState().setCurrentView("models")}
-              />
+            {currentView === "archive" && (
+              <div className="text-sm text-muted-foreground text-center py-4">
+                Выберите транскрипцию из архива
+              </div>
             )}
-            <DropZone onFilesSelected={handleFilesFromDialog} />
-            <TaskList />
           </div>
 
           {/* Resize handle - only on desktop and when not collapsed */}
@@ -586,9 +626,9 @@ function MainApplication() {
             />
           )}
 
-          {/* Right panel - Transcription view */}
+          {/* Right panel - Transcription view or Archive view */}
           <div className="flex-1 p-4 overflow-hidden min-h-0">
-            <TranscriptionView />
+            {currentView === "archive" ? <ArchiveView /> : <TranscriptionView />}
           </div>
         </main>
       ) : (

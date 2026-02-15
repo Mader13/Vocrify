@@ -7,6 +7,7 @@ import {
   Trash2,
   FileVideo,
   X,
+  Archive,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,7 @@ interface TaskItemProps {
 function TaskItem({ task, compact }: TaskItemProps) {
   const removeTask = useTasks((s) => s.removeTask);
   const cancelTask = useTasks((s) => s.cancelTask);
+  const archiveTask = useTasks((s) => s.archiveTask);
   const { selectedTaskId, setSelectedTask } = useUIStore();
 
   const config = statusConfig[task.status];
@@ -148,17 +150,31 @@ function TaskItem({ task, compact }: TaskItemProps) {
             )}
 
             {(task.status === "completed" || task.status === "failed" || task.status === "cancelled") && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 sm:h-8 sm:w-8"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTask(task.id);
-                }}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 sm:h-8 sm:w-8"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    archiveTask(task.id);
+                  }}
+                  title="В архив"
+                >
+                  <Archive className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 sm:h-8 sm:w-8"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeTask(task.id);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </>
             )}
           </div>
         </div>
