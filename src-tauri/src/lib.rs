@@ -34,7 +34,7 @@ pub mod transcription_manager;
 pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgress, get_ffmpeg_status, download_ffmpeg};
 
 // Re-export Whisper types for frontend
-pub use whisper_engine::{WhisperEngine, DeviceType as WhisperDeviceType, TranscriptionSegment as WhisperSegment};
+pub use whisper_engine::{WhisperEngine, DeviceType as WhisperDeviceType, TranscriptionSegment as WhisperSegment, download_ggml_model as download_ggml_model_impl};
 
 // Re-export TranscriptionManager types for frontend (Phase 3: transcribe-rs)
 #[allow(unused_imports)]
@@ -1787,6 +1787,14 @@ async fn spawn_model_download(
 ) -> Result<(), AppError> {
     let download_completed = Arc::new(AtomicBool::new(false));
 
+    // Transform model name: strip "whisper-" prefix for Python backend
+    // Frontend sends "whisper-small", Python expects "small"
+    let python_model_name = if model_type == "whisper" && model_name.starts_with("whisper-") {
+        model_name.strip_prefix("whisper-").unwrap_or(&model_name).to_string()
+    } else {
+        model_name.clone()
+    };
+
     // All model downloads are handled by Python engine
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
@@ -1796,7 +1804,7 @@ async fn spawn_model_download(
     let mut cmd = Command::new(&python_exe);
     cmd.arg(&engine_path)
         .arg("--download-model")
-        .arg(&model_name)
+        .arg(&python_model_name)
         .arg("--cache-dir")
         .arg(cache_dir.to_string_lossy().to_string())
         .arg("--model-type")
@@ -1808,7 +1816,7 @@ async fn spawn_model_download(
     eprintln!("[DEBUG] Spawning download command: {:?}", cmd);
     eprintln!("[DEBUG] Python exe: {:?}", python_exe);
     eprintln!("[DEBUG] Engine path: {:?}", engine_path);
-    eprintln!("[DEBUG] Model: {}, Type: {}, Cache: {:?}", model_name, model_type, cache_dir);
+    eprintln!("[DEBUG] Model: {} (transformed: {}), Type: {}, Cache: {:?}", model_name, python_model_name, model_type, cache_dir);
     
     // HIGH-7: Use token file instead of env var for security
     if let Some(token_path) = token_file {
@@ -2115,6 +2123,62 @@ async fn download_model(
     });
 
     // Re-acquire mutex to insert the handle
+    let mut manager = task_manager.lock().await;
+    manager.downloading_models.insert(model_name.clone(), handle);
+
+    Ok(model_name)
+}
+
+/// Download a GGML model directly (for Rust whisper.cpp engine)
+#[tauri::command]
+async fn download_ggml_model(
+    app: AppHandle,
+    task_manager: State<'_, TaskManagerState>,
+    model_name: String,
+) -> Result<String, AppError> {
+    let manager = task_manager.lock().await;
+
+    if manager.downloading_models.len() >= MAX_CONCURRENT_DOWNLOADS {
+        return Err(AppError::ModelError("Maximum concurrent downloads reached".to_string()));
+    }
+
+    let models_dir = get_models_dir(&app)?;
+
+    // Clone for spawned task
+    let task_manager_clone = (*task_manager).clone();
+    let app_clone = app.clone();
+    let model_name_clone = model_name.clone();
+    let models_dir_clone = models_dir.clone();
+
+    // Release mutex before spawning
+    drop(manager);
+
+    let handle = tokio::spawn(async move {
+        let result = download_ggml_model_impl(&model_name_clone, &models_dir_clone as &Path).await;
+
+        // Remove from downloading_models
+        let mut manager = task_manager_clone.lock().await;
+        manager.downloading_models.remove(&model_name_clone);
+
+        match result {
+            Ok(path) => {
+                eprintln!("[INFO] GGML model downloaded to: {:?}", path);
+                let _ = app_clone.emit("model-download-complete", serde_json::json!({
+                    "modelName": model_name_clone,
+                    "path": path.to_str().unwrap_or_default().to_string(),
+                }));
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Failed to download GGML model: {}", e);
+                let _ = app_clone.emit("model-download-error", serde_json::json!({
+                    "modelName": model_name_clone,
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    });
+
+    // Re-acquire mutex to insert handle
     let mut manager = task_manager.lock().await;
     manager.downloading_models.insert(model_name.clone(), handle);
 
@@ -2673,6 +2737,59 @@ async fn transcribe_rust(
     let validated_path = validate_file_path(&file_path)
         .map_err(|e| e.to_string())?;
 
+    // Check if file needs conversion to WAV for Rust transcription
+    // Rust's audrey library can't decode mp4, m4a, mov, mkv, avi, webm
+    let needs_conversion = {
+        let ext = std::path::Path::new(&validated_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        matches!(ext.as_str(), "mp4" | "m4a" | "mov" | "mkv" | "avi" | "webm" | "flac" | "aac" | "ogg")
+    };
+
+    let audio_path = if needs_conversion {
+        // Convert to WAV using FFmpeg
+        eprintln!("[INFO] Converting {} to WAV for Rust transcription", validated_path.display());
+        
+        let ffmpeg_path = match ffmpeg_manager::get_ffmpeg_path(&app).await {
+            Ok(p) => p,
+            Err(e) => {
+                return Err(format!(
+                    "FFmpeg not available for conversion: {}. Please install FFmpeg or convert the file to WAV manually.", 
+                    e
+                ));
+            }
+        };
+
+        // Create temp WAV file
+        let temp_dir = std::env::temp_dir();
+        let wav_path = temp_dir.join(format!("transcribe_video_{}.wav", task_id));
+        
+        let output = std::process::Command::new(&ffmpeg_path)
+            .args([
+                "-y",  // Overwrite output
+                "-i", validated_path.to_str().unwrap(),
+                "-vn", // No video
+                "-acodec", "pcm_s16le", // PCM codec
+                "-ar", "16000", // 16kHz sample rate
+                "-ac", "1", // Mono
+                wav_path.to_str().unwrap(),
+            ])
+            .output()
+            .map_err(|e| format!("Failed to run FFmpeg: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("FFmpeg conversion failed: {}", stderr));
+        }
+
+        eprintln!("[INFO] Conversion complete: {}", wav_path.display());
+        wav_path
+    } else {
+        validated_path.clone()
+    };
+
     let manager_guard = state.lock().await;
     let manager = manager_guard.as_ref()
         .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
@@ -2699,7 +2816,7 @@ async fn transcribe_rust(
             }
         };
 
-        let result = manager.transcribe_file(&validated_path, &tm_options, hf_token.as_deref()).await
+        let result = manager.transcribe_file(&audio_path, &tm_options, hf_token.as_deref()).await
             .map_err(|e| {
                 eprintln!("[ERROR] Rust transcription failed: {}", e);
 
@@ -2931,32 +3048,33 @@ async fn read_file_as_base64(file_path: String) -> Result<String, AppError> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let task_manager: TaskManagerState = Arc::new(Mutex::new(TaskManager::default()));
-
-    // Get models directory for TranscriptionManager
-    let models_dir = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("..")
-        .join("models_cache");
-
-    let _ = std::fs::create_dir_all(&models_dir);
+    let transcription_manager_state: TranscriptionManagerState = Arc::new(Mutex::new(None));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(task_manager)
-        .manage(TranscriptionManagerState::new(Mutex::new(
-            {
-                let tm_result = TranscriptionManager::new(&models_dir, None, None, None);
-                match tm_result {
-                    Ok(manager) => Some(manager),
-                    Err(e) => {
-                        eprintln!("[WARN] Failed to create TranscriptionManager: {}", e);
-                        None
-                    }
+        .manage(transcription_manager_state)
+        .setup(|app| {
+            let app_handle = app.app_handle();
+            let models_dir = get_models_dir(&app_handle)
+                .map_err(|e| -> Box<dyn std::error::Error> { Box::new(e) })?;
+
+            let manager_state = app.state::<TranscriptionManagerState>();
+            let mut manager_guard = tauri::async_runtime::block_on(manager_state.lock());
+
+            let tm_result = TranscriptionManager::new(&models_dir, None, None, None);
+            *manager_guard = match tm_result {
+                Ok(manager) => Some(manager),
+                Err(e) => {
+                    eprintln!("[WARN] Failed to create TranscriptionManager: {}", e);
+                    None
                 }
-            }
-        )))
+            };
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             start_transcription,
             cancel_transcription,
@@ -2969,6 +3087,7 @@ pub fn run() {
             get_models_dir_command,
             open_models_folder_command,
             download_model,
+            download_ggml_model,
             cancel_model_download,
             get_local_models,
             delete_model,
@@ -3021,14 +3140,47 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         "sherpa-onnx-embedding",
     ]);
     
+    // First, check for GGML .bin files in models/ root (Whisper models for Rust whisper.cpp)
+    // These are single files, not directories
     for entry in std::fs::read_dir(models_dir)? {
         let entry = entry?;
         let path = entry.path();
-        
+        let file_name = entry.file_name().to_string_lossy().to_string();
+
+        // Check if this is a GGML .bin file
+        if file_name.starts_with("ggml-") && file_name.ends_with(".bin") {
+            // Extract model size from filename (e.g., "ggml-small.bin" -> "small")
+            let model_size = file_name
+                .strip_prefix("ggml-")
+                .and_then(|s| s.strip_suffix(".bin"))
+                .unwrap_or("base");
+
+            // Get file size
+            let size_mb = if let Ok(metadata) = std::fs::metadata(&path) {
+                metadata.len() / (1024 * 1024)
+            } else {
+                0
+            };
+
+            models.push(LocalModel {
+                name: format!("whisper-{}", model_size),
+                size_mb,
+                model_type: "whisper".to_string(),
+                installed: true,
+                path: Some(path.to_string_lossy().to_string()),
+            });
+        }
+    }
+
+    // Then, process directories (for other model types)
+    for entry in std::fs::read_dir(models_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
         if !path.is_dir() {
             continue;
         }
-        
+
         let model_name = entry.file_name().to_string_lossy().to_string();
         
         // Skip individual diarization components - they're handled separately
@@ -3064,6 +3216,19 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         } else {
             continue;
         };
+        
+        // Check if required files exist for the model type
+        let is_valid_model = if model_type == "whisper" {
+            // Whisper models require model.bin file
+            path.join("model.bin").exists()
+        } else {
+            // Parakeet and other models - directory existence is enough
+            true
+        };
+        
+        if !is_valid_model {
+            continue;
+        }
         
         // Normalize model name for frontend - convert short names to full names
         // Note: distil-* models keep their original name (not whisper-distil-*)
@@ -3329,5 +3494,138 @@ mod tests {
     fn test_get_local_models_nonexistent_dir() {
         let models = get_local_models_internal(std::path::Path::new("/nonexistent/path")).unwrap();
         assert_eq!(models.len(), 0, "Nonexistent dir should return empty list");
+    }
+
+    #[test]
+    fn test_get_local_models_skips_incomplete_whisper_model() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let models_path = temp_dir.path();
+
+        // Create whisper-base directory WITHOUT model.bin file
+        let whisper_path = models_path.join("whisper-base");
+        std::fs::create_dir_all(&whisper_path).unwrap();
+        // Don't create model.bin - this should be detected as invalid
+
+        // Should not detect whisper model (incomplete - missing model.bin)
+        let models = get_local_models_internal(models_path).unwrap();
+        assert_eq!(models.len(), 0, "Should not detect incomplete whisper model (missing model.bin)");
+
+        // Now create model.bin - should be detected
+        std::fs::write(whisper_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap();
+        let models = get_local_models_internal(models_path).unwrap();
+        assert_eq!(models.len(), 1, "Should detect complete whisper model (has model.bin)");
+        let whisper = models.first().unwrap();
+        assert_eq!(whisper.name, "whisper-base");
+        assert_eq!(whisper.model_type, "whisper");
+        assert!(whisper.path.is_some());
+    }
+
+    #[test]
+    fn test_get_local_models_detects_complete_whisper_model() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let models_path = temp_dir.path();
+
+        // Create whisper-base directory WITH model.bin file
+        let whisper_path = models_path.join("whisper-base");
+        std::fs::create_dir_all(&whisper_path).unwrap();
+        std::fs::write(whisper_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
+
+        // Should detect whisper model
+        let models = get_local_models_internal(models_path).unwrap();
+        assert_eq!(models.len(), 1, "Should detect complete whisper model");
+        let whisper = models.first().unwrap();
+        assert_eq!(whisper.name, "whisper-base");
+        assert_eq!(whisper.model_type, "whisper");
+        assert!(whisper.path.is_some());
+    }
+
+    #[test]
+    fn test_get_local_models_detects_ggml_bin_files() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let models_path = temp_dir.path();
+
+        // Create GGML .bin file directly in models/ root (as downloaded by new downloader logic)
+        std::fs::write(models_path.join("ggml-small.bin"), vec![0u8; 100 * 1024 * 1024]).unwrap(); // 100MB
+
+        // Should detect whisper model from .bin file
+        let models = get_local_models_internal(models_path).unwrap();
+        assert_eq!(models.len(), 1, "Should detect GGML .bin file");
+        let whisper = models.first().unwrap();
+        assert_eq!(whisper.name, "whisper-small");
+        assert_eq!(whisper.model_type, "whisper");
+        assert_eq!(whisper.size_mb, 100, "Size should be 100MB");
+        assert!(whisper.path.is_some());
+        assert!(whisper.path.as_ref().unwrap().ends_with("ggml-small.bin"));
+    }
+
+    #[test]
+    fn test_get_local_models_detects_both_ggml_and_directory() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let models_path = temp_dir.path();
+
+        // Create GGML .bin file
+        std::fs::write(models_path.join("ggml-tiny.bin"), vec![0u8; 50 * 1024 * 1024]).unwrap(); // 50MB
+
+        // Create whisper-base directory
+        let whisper_path = models_path.join("whisper-base");
+        std::fs::create_dir_all(&whisper_path).unwrap();
+        std::fs::write(whisper_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
+
+        // Should detect both models
+        let models = get_local_models_internal(models_path).unwrap();
+        assert_eq!(models.len(), 2, "Should detect both GGML and directory models");
+
+        // Check GGML model
+        let ggml_model = models.iter().find(|m| m.name == "whisper-tiny").unwrap();
+        assert_eq!(ggml_model.model_type, "whisper");
+        assert_eq!(ggml_model.size_mb, 50);
+
+        // Check directory model
+        let dir_model = models.iter().find(|m| m.name == "whisper-base").unwrap();
+        assert_eq!(dir_model.model_type, "whisper");
+    }
+
+    #[test]
+    fn test_get_local_models_detects_all_ggml_variants() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let models_path = temp_dir.path();
+
+        // Create GGML files for all model size variants
+        let ggml_files = [
+            ("ggml-tiny.bin", 50 * 1024 * 1024),      // 50 MB
+            ("ggml-base.bin", 100 * 1024 * 1024),     // 100 MB
+            ("ggml-small.bin", 200 * 1024 * 1024),    // 200 MB
+            ("ggml-medium.bin", 500 * 1024 * 1024),   // 500 MB
+            ("ggml-large-v2.bin", 1000 * 1024 * 1024), // 1 GB
+            ("ggml-large-v3.bin", 1000 * 1024 * 1024), // 1 GB
+        ];
+
+        for (filename, size) in ggml_files {
+            std::fs::write(models_path.join(filename), vec![0u8; size]).unwrap();
+        }
+
+        // Should detect all 6 GGML models
+        let models = get_local_models_internal(models_path).unwrap();
+        assert_eq!(models.len(), 6, "Should detect all 6 GGML model variants");
+
+        // Verify each model
+        let expected_models = [
+            ("whisper-tiny", 50),
+            ("whisper-base", 100),
+            ("whisper-small", 200),
+            ("whisper-medium", 500),
+            ("whisper-large-v2", 1000),
+            ("whisper-large-v3", 1000),
+        ];
+
+        for (name, expected_size_mb) in expected_models {
+            let model = models.iter().find(|m| m.name == name).unwrap_or_else(|| {
+                panic!("Model {} not found. Available models: {:?}", name, models.iter().map(|m| &m.name).collect::<Vec<_>>());
+            });
+            assert_eq!(model.model_type, "whisper");
+            assert_eq!(model.size_mb, expected_size_mb);
+            assert!(model.path.is_some());
+            assert!(model.path.as_ref().unwrap().contains("ggml-"));
+        }
     }
 }
