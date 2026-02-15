@@ -19,6 +19,32 @@ import { startTranscription } from "./tauri";
 import { logger } from "@/lib/logger";
 import { invoke } from "@tauri-apps/api/core";
 
+const RUST_UNSUPPORTED_CONTAINER_EXTENSIONS = new Set([
+  "mp4",
+  "m4a",
+  "mov",
+  "mkv",
+  "avi",
+  "webm",
+]);
+
+function getFileExtension(filePath: string): string {
+  const normalizedPath = filePath.replace(/\\/g, "/");
+  const fileName = normalizedPath.split("/").pop() ?? normalizedPath;
+  const dotIndex = fileName.lastIndexOf(".");
+
+  if (dotIndex < 0 || dotIndex === fileName.length - 1) {
+    return "";
+  }
+
+  return fileName.slice(dotIndex + 1).toLowerCase();
+}
+
+function shouldBypassRustForFile(filePath: string): boolean {
+  const extension = getFileExtension(filePath);
+  return extension.length > 0 && RUST_UNSUPPORTED_CONTAINER_EXTENSIONS.has(extension);
+}
+
 /**
  * Check if a model should use Rust transcribe-rs
  * Phase 3: transcribe-rs supports Whisper, Parakeet, Moonshine, SenseVoice
@@ -82,11 +108,13 @@ export async function transcribeWithFallback(
   preference: EnginePreference = "auto"
 ): Promise<{ success: boolean; error?: string }> {
   const useRust = shouldUseRustEngine(options.model);
+  const bypassRustForContainer = shouldBypassRustForFile(filePath);
 
   logger.transcriptionInfo("Starting transcription with engine selection", {
     taskId,
     model: options.model,
     useRust,
+    bypassRustForContainer,
     preference,
   });
 
@@ -105,6 +133,9 @@ export async function transcribeWithFallback(
     return startTranscription(taskId, filePath, options);
   }
 
+  // Rust engine now handles all formats via automatic FFmpeg conversion
+  // (mp4, m4a, mov, mkv, avi, webm are converted to WAV internally)
+
   // Try Rust transcribe-rs first
   if (preference === "rust" || preference === "auto") {
     try {
@@ -115,6 +146,11 @@ export async function transcribeWithFallback(
 
       // Ensure model is loaded for transcribe-rs before transcription.
       await invoke("load_model_rust", { modelName: options.model });
+
+      // Match Rust command schema (`RustTranscriptionOptions`) for transcribe_rust.
+      const numSpeakersAsNumber = typeof options.numSpeakers === "string"
+        ? (options.numSpeakers === "auto" ? -1 : parseInt(options.numSpeakers, 10))
+        : options.numSpeakers;
 
       // Phase 3: Call Rust transcribe-rs engine
       const result = await invoke<{
@@ -134,9 +170,9 @@ export async function transcribeWithFallback(
           model: options.model,
           device: options.device,
           language: options.language,
-          enableDiarization: options.enableDiarization,
-          diarizationProvider: options.diarizationProvider,
-          numSpeakers: options.numSpeakers,
+          enable_diarization: options.enableDiarization,
+          diarization_provider: options.diarizationProvider,
+          num_speakers: numSpeakersAsNumber,
         },
       });
 
