@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 Transcribe Video is a cross-platform desktop application for video transcription with speaker diarization. It combines:
+
 - **Frontend**: React + TypeScript with Vite, styled with Tailwind CSS v4
 - **Backend**: Rust via Tauri framework
 - **AI Engine**: Python 3.8-3.12 (NOT 3.13+) using faster-whisper and pyannote.audio
@@ -14,6 +15,7 @@ Transcribe Video is a cross-platform desktop application for video transcription
 ## Development Commands
 
 ### Frontend (TypeScript/React)
+
 ```bash
 # Development (Vite dev server only, no Tauri)
 bun run dev
@@ -26,6 +28,7 @@ bun run preview
 ```
 
 ### Full App (Tauri + Rust + Frontend)
+
 ```bash
 # Start full app in development mode
 bun run tauri:dev
@@ -40,6 +43,7 @@ bun run tauri:build
 see `ai-engine/PYTHON_SETUP.md` for detailed setup instructions.
 
 **Quick Environment Fix (Windows)**:
+
 ```bash
 cd ai-engine
 
@@ -62,6 +66,7 @@ python main.py --test
 ```
 
 **Manual Setup Steps**:
+
 ```bash
 cd ai-engine
 
@@ -89,11 +94,13 @@ python main.py --file /path/to/video.mp4 --model whisper-base --device cpu
 ```
 
 **Troubleshooting**:
+
 - If you see "No module named 'faster_whisper'": Wrong Python version
 - If you see "PyAnnote requires token": See PYTHON_SETUP.md for HuggingFace setup
 - Run `python check_environment.py` for full diagnostics
 
 ### Testing
+
 ```bash
 # Python unit tests (from ai-engine directory)
 cd ai-engine
@@ -106,6 +113,7 @@ cargo test --manifest-path=src-tauri/Cargo.toml
 ## Project Architecture
 
 ### Frontend Structure
+
 ```
 src/
 ├── components/
@@ -122,18 +130,21 @@ src/
 ```
 
 ### Backend Structure (Rust)
+
 ```
 src-tauri/src/
 └── lib.rs               # Main Tauri commands + task queue management
 ```
 
 Key Tauri commands (all in `lib.rs`):
+
 - `start_transcription`, `cancel_transcription`
 - `get_local_models`, `get_disk_usage`, `delete_model`
 - `get_huggingface_token`, `save_huggingface_token`
 - Model download and management commands
 
 ### AI Engine Structure (Python)
+
 ```
 ai-engine/
 ├── main.py              # CLI entry point, JSON stdout protocol
@@ -148,10 +159,46 @@ ai-engine/
 
 ## Key Architecture Patterns
 
+## Key Architecture Patterns
+
+### Software Engineering Principles
+
+We follow these principles to maintain clean, maintainable, and scalable code:
+
+#### SOLID Principles
+
+| Principle                       | Description                                    | Application                                                                |
+| ------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| **SRP** (Single Responsibility) | Each module/class/function does one thing well | One reason to change; separate UI from business logic                      |
+| **OCP** (Open-Closed)           | Open for extension, closed for modification    | Use composition over inheritance; strategy pattern                         |
+| **LSP** (Liskov Substitution)   | Subtypes must be substitutable for base types  | Implement proper interfaces; don't weaken preconditions                    |
+| **ISP** (Interface Segregation) | Many small interfaces > one large interface    | Use focused interfaces (e.g., `ITranscriptionService`, `IModelDownloader`) |
+| **DIP** (Dependency Inversion)  | Depend on abstractions, not concretions        | Inject dependencies; use interfaces for services                           |
+
+#### Other Principles
+
+| Principle                                         | Description                                       | Application                                                  |
+| ------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------ |
+| **DRY** (Don't Repeat Yourself)                   | Each piece of knowledge has single representation | Extract common logic to utilities; reuse components          |
+| **KISS** (Keep It Simple, Stupid)                 | Simplicity over cleverness                        | Prefer readable code; avoid over-engineering                 |
+| **YAGNI** (You Aren't Gonna Need It)              | Don't implement until necessary                   | No speculative features; build when required                 |
+| **BOYSC** (Breathe Only When Strictly Convenient) | Keep entities small and focused                   | Small functions (<20 lines), small components, small modules |
+
+**Implementation Guidelines:**
+
+- **Functions**: Max 20 lines, single responsibility
+- **Components**: Max 300 lines, focused on one feature
+- **Files**: Max 500 lines, co-locate related code
+- **Interfaces**: Define contracts in `src/types/`, implement in services
+- **Services**: One service per domain (transcription, models, storage)
+- **State**: Separate client state from server state in stores
+
 ### 1. Communication Flow
+
 Frontend → Rust (Tauri commands) → Python subprocess → JSON stdout → Rust events → Frontend
 
 Python engine outputs JSON messages to stdout:
+
 ```json
 // Progress update
 {"type": "progress", "stage": "transcribing", "progress": 50, "message": "..."}
@@ -164,12 +211,15 @@ Python engine outputs JSON messages to stdout:
 ```
 
 ### 2. State Management
+
 - Zustand stores in `/src/stores`
 - All types defined in `/src/types/index.ts`
 - Tauri event listeners update frontend state via `listen()` from `@tauri-apps/api/event`
 
 ### 3. Model Management
+
 Models defined in `/src/types/index.ts`:
+
 - Whisper models (tiny/base/small/medium/large-v3)
 - Parakeet models (NVIDIA)
 - Diarization providers (pyannote, sherpa-onnx)
@@ -177,18 +227,22 @@ Models defined in `/src/types/index.ts`:
 Model state tracked in `modelsStore.ts` (installed status, downloads)
 
 ### 4. Task Queue
+
 Rust backend manages concurrent task queue (max 2 concurrent by default)
 Each task spawns a separate Python subprocess with cancellation support via token/cancellation token pattern
 
 ## Important Constraints
 
 ### Python Version
+
 **Python 3.13+ is NOT supported** - Key dependencies (faster-whisper, pyannote.audio) only support up to Python 3.12
 
 ### Path Aliases
+
 TypeScript uses `@/*` for src directory imports (configured in vite.config.ts and tsconfig.json)
 
 ### File Organization Rules
+
 - Source code in `/src`
 - Tests in `/tests` (organized by `unit/python`, `unit/rust`, `integration`, `e2e`)
 - Docs in `/docs`
@@ -196,6 +250,7 @@ TypeScript uses `@/*` for src directory imports (configured in vite.config.ts an
 - Root folder reserved for config files only
 
 ### Component Organization
+
 - UI components: reusable base components (`/src/components/ui`)
 - Feature components: domain-specific (`/src/components/features`)
 - Features include: DropZone, TaskList, VideoPlayer, TranscriptionView, ModelCard, etc.
@@ -203,17 +258,20 @@ TypeScript uses `@/*` for src directory imports (configured in vite.config.ts an
 ## Common Patterns
 
 ### Adding a New Tauri Command
+
 1. Add `#[tauri::command]` function in `src-tauri/src/lib.rs`
 2. Register in `tauri::Builder` with `.invoke_handler()`
 3. Create wrapper in `/src/services/tauri.ts` using `invoke()`
 4. Add types to `/src/types/index.ts` if needed
 
 ### Adding a Feature Component
+
 1. Create in `/src/components/features/YourComponent.tsx`
 2. Export from `/src/components/features/index.ts`
 3. Import and use in pages or other components
 
 ### Working with State
+
 - Use Zustand stores from `/src/stores`
 - Subscribe to Tauri events with `listen()` from `@tauri-apps/api/event`
 - Events: `progress:<taskId>`, `complete:<taskId>`, `error:<taskId>`, `log:*`
@@ -221,9 +279,11 @@ TypeScript uses `@/*` for src directory imports (configured in vite.config.ts an
 ## User Commands
 
 ### (cfs X) - Spawn Swarm
+
 When the user writes `(cfs X)` where X is a number, spawn a Claude Flow swarm with X agents.
 
 Example usage:
+
 - `(cfs 4)` - Spawn 4 agents for parallel work
 - `(cfs 8)` - Spawn 8 agents for larger tasks
 
@@ -236,6 +296,7 @@ This project uses Claude Flow V3 for advanced multi-agent orchestration. **Alway
 ### When to Use Claude Flow
 
 **Multi-agent swarm (cfs X):**
+
 - Complex refactoring across multiple files
 - Parallel feature implementation
 - Large-scale code reviews
@@ -243,11 +304,13 @@ This project uses Claude Flow V3 for advanced multi-agent orchestration. **Alway
 - Testing comprehensive scenarios
 
 **Memory system:**
+
 - Store patterns for reuse: `npx @claude-flow/cli@latest memory store --key "pattern-name" --value "description" --namespace patterns`
 - Search past solutions: `npx @claude-flow/cli@latest memory search --query "your query"`
 - Retrieve specific patterns: `npx @claude-flow/cli@latest memory retrieve --key "pattern-name"`
 
 **Task orchestration:**
+
 - Create tasks with dependencies
 - Track progress across sessions
 - Coordinate complex workflows
@@ -307,6 +370,7 @@ This project has Claude Flow V3 fully configured with advanced AI capabilities. 
 ### Daily Workflow Commands
 
 **Before starting work:**
+
 ```bash
 # Quick health check
 bunx @claude-flow/cli@latest doctor
@@ -316,6 +380,7 @@ bunx @claude-flow/cli@latest neural status
 ```
 
 **When analyzing code:**
+
 ```bash
 # Check complexity (find files > 15 complexity)
 bunx @claude-flow/cli@latest analyze complexity src/ --threshold 15
@@ -328,6 +393,7 @@ bunx @claude-flow/cli@latest security scan --target . --quick
 ```
 
 **When working on features:**
+
 ```bash
 # Route task to optimal agent automatically
 bunx @claude-flow/cli@latest route "Add video export feature"
@@ -340,6 +406,7 @@ bunx @claude-flow/cli@latest embeddings search -q "authentication error handling
 ```
 
 **When debugging:**
+
 ```bash
 # Search memory for past solutions
 bunx @claude-flow/cli@latest memory search --query "tauri command error"
@@ -354,6 +421,7 @@ bunx @claude-flow/cli@latest performance bottleneck
 ### Automatic Features (Already Configured)
 
 The following systems run automatically:
+
 - **Neural Networks**: 50+ patterns learned from codebase
 - **Hooks System**: Pretrained with 30+ patterns, 16+ strategies
 - **Q-Learning Router**: Routes tasks to optimal agent automatically
@@ -363,6 +431,7 @@ The following systems run automatically:
 ### When to Use Each Feature
 
 **1. Neural Networks** - Use for pattern recognition and predictions
+
 ```bash
 # Predict best approach for task
 bunx @claude-flow/cli@latest neural predict -t "Refactor Tauri command handler"
@@ -372,6 +441,7 @@ bunx @claude-flow/cli@latest neural patterns --action list
 ```
 
 **2. Security Scanning** - Use before commits and PRs
+
 ```bash
 # Full security scan
 bunx @claude-flow/cli@latest security scan --target . --depth advanced
@@ -384,6 +454,7 @@ bunx @claude-flow/cli@latest security cve --list
 ```
 
 **3. Hooks System** - Use for intelligent workflow automation
+
 ```bash
 # Get AI suggestions before editing
 bunx @claude-flow/cli@latest hooks pre-edit -f src/services/tauri.ts
@@ -396,6 +467,7 @@ bunx @claude-flow/cli@latest hooks metrics --v3-dashboard
 ```
 
 **4. Code Analysis** - Use for understanding codebase structure
+
 ```bash
 # Find high-complexity files (need refactoring)
 bunx @claude-flow/cli@latest analyze complexity src/ --threshold 15
@@ -411,6 +483,7 @@ bunx @claude-flow/cli@latest analyze dependencies src/ --format dot
 ```
 
 **5. Performance Monitoring** - Use when optimizing
+
 ```bash
 # Run benchmarks
 bunx @claude-flow/cli@latest performance benchmark
@@ -423,6 +496,7 @@ bunx @claude-flow/cli@latest performance bottleneck
 ```
 
 **6. Embeddings & Semantic Search** - Use for finding similar code
+
 ```bash
 # Semantic search (finds similar code, not just text match)
 bunx @claude-flow/cli@latest embeddings search -q "video player controls"
@@ -435,6 +509,7 @@ bunx @claude-flow/cli@latest embeddings generate -t "Tauri event listener patter
 ```
 
 **7. Guidance Control** - Use for checking rules and best practices
+
 ```bash
 # Get relevant rules for task
 bunx @claude-flow/cli@latest guidance retrieve -t "Add new Tauri command"
@@ -447,6 +522,7 @@ bunx @claude-flow/cli@latest guidance status
 ```
 
 **8. Q-Learning Routing** - Use for automatic agent selection
+
 ```bash
 # Route task to best agent (coder, tester, reviewer, etc.)
 bunx @claude-flow/cli@latest route "Write unit tests for transcription service"
@@ -459,6 +535,7 @@ bunx @claude-flow/cli@latest route list-agents
 ```
 
 **9. Memory System** - Use for storing and retrieving patterns
+
 ```bash
 # Store successful pattern for reuse
 bunx @claude-flow/cli@latest memory store --key "tauri-event-pattern" --value "Use listen() from @tauri-apps/api/event for Tauri events" --namespace patterns
@@ -474,6 +551,7 @@ bunx @claude-flow/cli@latest memory stats
 ```
 
 **10. Process Management** - Use for background automation
+
 ```bash
 # List all background workers
 bunx @claude-flow/cli@latest process workers --action list
@@ -488,6 +566,7 @@ bunx @claude-flow/cli@latest process monitor --watch
 ### Common Workflows
 
 **Workflow 1: Adding a New Feature**
+
 ```bash
 # 1. Get guidance
 bunx @claude-flow/cli@latest guidance retrieve -t "Add video export feature"
@@ -503,6 +582,7 @@ bunx @claude-flow/cli@latest analyze complexity src/components/features/
 ```
 
 **Workflow 2: Debugging an Issue**
+
 ```bash
 # 1. Search memory for similar issues
 bunx @claude-flow/cli@latest memory search --query "video player freeze"
@@ -518,6 +598,7 @@ bunx @claude-flow/cli@latest analyze circular src/
 ```
 
 **Workflow 3: Code Review**
+
 ```bash
 # 1. Security scan
 bunx @claude-flow/cli@latest security scan --target . --quick
@@ -533,6 +614,7 @@ bunx @claude-flow/cli@latest performance bottleneck
 ```
 
 **Workflow 4: Refactoring**
+
 ```bash
 # 1. Find complex files
 bunx @claude-flow/cli@latest analyze complexity src/ --threshold 15
@@ -550,6 +632,7 @@ bunx @claude-flow/cli@latest memory search --query "refactor large component"
 ### Quick Reference Card
 
 **Daily Commands:**
+
 ```bash
 bunx @claude-flow/cli@latest doctor                    # Health check
 bunx @claude-flow/cli@latest neural status             # Check neural
@@ -558,6 +641,7 @@ bunx @claude-flow/cli@latest security scan             # Security check
 ```
 
 **Development Commands:**
+
 ```bash
 bunx @claude-flow/cli@latest route "task"              # Route task
 bunx @claude-flow/cli@latest hooks route -t "task"     # Route with hooks
@@ -566,6 +650,7 @@ bunx @claude-flow/cli@latest embeddings search -q "x"  # Semantic search
 ```
 
 **Analysis Commands:**
+
 ```bash
 bunx @claude-flow/cli@latest analyze complexity src/   # Complexity
 bunx @claude-flow/cli@latest analyze circular src/     # Circular deps

@@ -116,6 +116,38 @@ See Rust `engine_router.rs` for implementation details.
 
 ## Code Style
 
+### Software Engineering Principles
+
+We follow these principles to maintain clean, maintainable, and scalable code:
+
+#### SOLID Principles
+
+| Principle                       | Description                                    | Application                                                                |
+| ------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| **SRP** (Single Responsibility) | Each module/class/function does one thing well | One reason to change; separate UI from business logic                      |
+| **OCP** (Open-Closed)           | Open for extension, closed for modification    | Use composition over inheritance; strategy pattern                         |
+| **LSP** (Liskov Substitution)   | Subtypes must be substitutable for base types  | Implement proper interfaces; don't weaken preconditions                    |
+| **ISP** (Interface Segregation) | Many small interfaces > one large interface    | Use focused interfaces (e.g., `ITranscriptionService`, `IModelDownloader`) |
+| **DIP** (Dependency Inversion)  | Depend on abstractions, not concretions        | Inject dependencies; use interfaces for services                           |
+
+#### Other Principles
+
+| Principle                                         | Description                                       | Application                                                  |
+| ------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------ |
+| **DRY** (Don't Repeat Yourself)                   | Each piece of knowledge has single representation | Extract common logic to utilities; reuse components          |
+| **KISS** (Keep It Simple, Stupid)                 | Simplicity over cleverness                        | Prefer readable code; avoid over-engineering                 |
+| **YAGNI** (You Aren't Gonna Need It)              | Don't implement until necessary                   | No speculative features; build when required                 |
+| **BOYSC** (Breathe Only When Strictly Convenient) | Keep entities small and focused                   | Small functions (<20 lines), small components, small modules |
+
+**Implementation Guidelines:**
+
+- **Functions**: Max 20 lines, single responsibility
+- **Components**: Max 300 lines, focused on one feature
+- **Files**: Max 500 lines, co-locate related code
+- **Interfaces**: Define contracts in `src/types/`, implement in services
+- **Services**: One service per domain (transcription, models, storage)
+- **State**: Separate client state from server state in stores
+
 ### Do
 
 - Use TypeScript strict mode for all types
