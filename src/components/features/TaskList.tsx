@@ -5,16 +5,15 @@ import {
   CheckCircle2,
   XCircle,
   Trash2,
-  FileVideo,
   X,
   Archive,
 } from "lucide-react";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ProgressMetricsDisplay } from "@/components/features/ProgressMetrics";
-import { StageBadges } from "@/components/features/StageBadges";
+
 import { ProgressEnhanced } from "@/components/ui/progress-enhanced";
-import { cn, formatFileSize } from "@/lib/utils";
+import { cn, formatFileSize, formatDateTime } from "@/lib/utils";
 import { useTasks, useTasksByView, useUIStore } from "@/stores";
 import type { TranscriptionTask, TaskStatus } from "@/types";
 
@@ -68,39 +67,61 @@ function TaskItem({ task, compact }: TaskItemProps) {
     return (
       <div
         className={cn(
-          "cursor-pointer rounded-lg border p-2.5 transition-all hover:bg-muted",
+          "cursor-pointer rounded-lg border p-2 transition-all hover:bg-muted group",
           isSelected && "border-primary bg-primary/10"
         )}
         onClick={() => setSelectedTask(task.id)}
         title={task.fileName}
       >
-        <div className="flex items-center justify-center gap-1">
-          <StatusIcon
-            className={cn(
-              "h-8 w-8",
-              config.color,
-              task.status === "processing" && "animate-spin"
-            )}
-          />
-          {task.status === "processing" && task.progress > 0 && (
-            <span className="text-xs font-medium">{Math.round(task.progress)}%</span>
+        {/* Status icon container */}
+        <div className="relative w-full aspect-square flex items-center justify-center">
+          {/* Status icon - centered */}
+          {task.status === "processing" ? (
+            <div className="relative">
+              {/* Circular progress background - transparent */}
+              <div className="w-10 h-10 rounded-full border-2 border-border/50 bg-transparent" />
+              {/* Progress ring */}
+              <svg 
+                className="absolute inset-0 w-10 h-10 -rotate-90" 
+                viewBox="0 0 40 40"
+              >
+                <circle
+                  cx="20"
+                  cy="20"
+                  r="17"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  className="text-primary"
+                  strokeDasharray={`${task.progress * 1.07} 107`}
+                  strokeLinecap="round"
+                />
+              </svg>
+              {/* Percentage */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-[9px] font-bold text-foreground">
+                  {Math.round(task.progress)}%
+                </span>
+              </div>
+            </div>
+          ) : task.status === "queued" ? (
+            <div className="w-9 h-9 rounded-full border border-amber-500/50 flex items-center justify-center">
+              <StatusIcon className="h-4 w-4 text-amber-500 animate-pulse" />
+            </div>
+          ) : task.status === "completed" ? (
+            <div className="w-9 h-9 rounded-full border border-emerald-500/50 flex items-center justify-center">
+              <StatusIcon className="h-4 w-4 text-emerald-500" />
+            </div>
+          ) : task.status === "failed" ? (
+            <div className="w-9 h-9 rounded-full border border-red-500/50 flex items-center justify-center">
+              <StatusIcon className="h-4 w-4 text-red-500" />
+            </div>
+          ) : (
+            <div className="w-9 h-9 rounded-full border border-muted-foreground/40 flex items-center justify-center">
+              <StatusIcon className={cn("h-4 w-4", config.color)} />
+            </div>
           )}
         </div>
-        {task.status === "processing" && (
-          <>
-            <StageBadges
-              currentStage={task.stage === "downloading" ? "loading" : task.stage || "transcribing"}
-              enableDiarization={task.options.enableDiarization}
-              compact
-            />
-            <ProgressEnhanced
-              value={task.progress}
-              stage={task.stage === "downloading" ? "loading" : task.stage || "transcribing"}
-              className="mt-1.5 h-1"
-            />
-            {task.metrics && <ProgressMetricsDisplay metrics={task.metrics} compact />}
-          </>
-        )}
       </div>
     );
   }
@@ -115,25 +136,25 @@ function TaskItem({ task, compact }: TaskItemProps) {
     >
       <CardContent className="p-3 sm:p-4">
         {/* Верхняя строка: иконка, название, статус */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          <FileVideo className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground shrink-0" />
-
-          <div className="flex-1 min-w-0">
-            <p className="font-medium truncate text-sm">{task.fileName}</p>
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <p className="font-medium truncate text-sm" title={task.fileName}>{task.fileName}</p>
             <p className="text-xs text-muted-foreground">
-              {formatFileSize(task.fileSize)}
+              {formatFileSize(task.fileSize)} · {formatDateTime(task.createdAt)}
             </p>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            <div className={cn("flex items-center gap-1", config.color)} title={config.label}>
-              <StatusIcon
-                className={cn(
-                  "h-4 w-4 sm:h-5 sm:w-5",
-                  task.status === "processing" && "animate-spin"
-                )}
-              />
-            </div>
+            {task.status !== "completed" && (
+              <div className={cn("flex items-center gap-1", config.color)} title={config.label}>
+                <StatusIcon
+                  className={cn(
+                    "h-4 w-4 sm:h-5 sm:w-5",
+                    task.status === "processing" && "animate-spin"
+                  )}
+                />
+              </div>
+            )}
 
             {task.status === "processing" && (
               <Button

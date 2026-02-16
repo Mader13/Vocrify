@@ -107,7 +107,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
         {/* Header */}
         <DialogHeader className="px-7 pt-6 pb-5 border-b border-border/40">
           <DialogTitle className="text-lg font-semibold text-foreground">
-            Настройки транскрибации
+            Диаризация
           </DialogTitle>
         </DialogHeader>
 

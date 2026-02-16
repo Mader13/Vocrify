@@ -24,6 +24,7 @@ import {
 
 interface ExportMenuProps {
   task: TranscriptionTask;
+  iconOnly?: boolean;
 }
 
 interface ExportFormatConfig {
@@ -79,7 +80,7 @@ const LOCAL_STORAGE_FORMAT_KEY = "transcription-export-format";
  * ExportMenu - Modal dialog for exporting transcriptions
  * Opens a centered modal with format selection and export mode toggle
  */
-export function ExportMenu({ task }: ExportMenuProps) {
+export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [isExporting, setIsExporting] = React.useState(false);
   const [exportStatus, setExportStatus] = React.useState<{
@@ -226,8 +227,10 @@ export function ExportMenu({ task }: ExportMenuProps) {
       <button
         onClick={() => setIsOpen(true)}
         disabled={isExporting}
+        title="Экспорт"
         className={cn(
-          "h-8 px-2 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
+          "h-8 rounded-md transition-all duration-150 flex items-center justify-center",
+          iconOnly ? "w-8 px-0" : "px-2 gap-1.5 text-xs font-medium",
           "hover:bg-muted/60 active:bg-muted/80 text-muted-foreground hover:text-foreground",
           isExporting && "opacity-50 cursor-not-allowed",
         )}
@@ -241,9 +244,11 @@ export function ExportMenu({ task }: ExportMenuProps) {
         ) : (
           <Download className="h-4 w-4" />
         )}
-        <span className="hidden sm:inline">
-          {isExporting ? "Exporting..." : "Export"}
-        </span>
+        {!iconOnly && (
+          <span className="hidden sm:inline">
+            {isExporting ? "Exporting..." : "Export"}
+          </span>
+        )}
       </button>
 
       {/* Export Modal */}

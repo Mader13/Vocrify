@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useMemo } from "react";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   TranscriptionTask,
@@ -14,6 +15,8 @@ import type {
   Language,
   DiarizationProvider,
   EnginePreference,
+  ArchiveMode,
+  ArchiveSettings,
 } from "@/types";
 import { logger } from "@/lib/logger";
 
@@ -48,6 +51,7 @@ interface TasksState {
   view: ViewType;
   options: TranscriptionOptions;
   settings: AppSettings;
+  archiveSettings: ArchiveSettings;
   selectedTaskId: string | null;
   upsertTask: (task: TranscriptionTask) => void;
   updateTaskProgress: (taskId: string, progress: number, stage?: ProgressStage, metrics?: ProgressMetrics) => void;
@@ -64,10 +68,12 @@ interface TasksState {
   setView: (view: ViewType) => void;
   setOptions: (options: Partial<TranscriptionOptions>) => void;
   setSettings: (settings: Partial<AppSettings>) => void;
+  setArchiveSettings: (settings: Partial<ArchiveSettings>) => void;
   resetSettings: () => void;
   deleteTask: (taskId: string) => void;
   removeTask: (taskId: string) => void;
   archiveTask: (taskId: string) => void;
+  archiveTaskWithMode: (taskId: string, mode: ArchiveMode) => Promise<void>;
   unarchiveTask: (taskId: string) => void;
   setHuggingFaceToken: (token: string | null) => void;
   updateSettings: (settings: Partial<AppSettings>) => void;
@@ -77,7 +83,7 @@ interface TasksState {
   setSpeakerSegments: (taskId: string, speakerSegments: TranscriptionSegment[], speakerTurns: SpeakerTurn[]) => void;
 }
 
-const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" | "selectedTaskId"> = {
+const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" | "archiveSettings" | "selectedTaskId"> = {
   tasks: [],
   view: "transcription",
   options: {
@@ -104,6 +110,11 @@ const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" |
     numSpeakers: 2,
     lastDiarizationProvider: "none",
     enginePreference: "auto",
+  },
+  archiveSettings: {
+    defaultMode: "delete_video",
+    rememberChoice: true,
+    showFileSizes: true,
   },
   selectedTaskId: null,
 };
@@ -225,6 +236,7 @@ export const useTasks = create<TasksState>()(
               progress: status === "completed" ? 100 : task.progress,
               ...(result && { result }),
               ...(error !== undefined && { error }),
+              ...(status === "processing" && !task.startedAt && { startedAt: new Date() }),
             };
             return updatedTask;
           });
@@ -397,6 +409,126 @@ export const useTasks = create<TasksState>()(
         }));
       },
 
+      setArchiveSettings: (newSettings) => {
+        logger.info("Archive settings updated", { settings: newSettings });
+        set((state) => ({ archiveSettings: { ...state.archiveSettings, ...newSettings } }));
+      },
+
+      archiveTaskWithMode: async (taskId, mode) => {
+        const task = get().tasks.find((t) => t.id === taskId);
+        if (!task) {
+          logger.error("Archive task not found", { taskId });
+          return;
+        }
+
+        const { convertToMp3, getArchiveDir, getFileSize } = await import("@/services/tauri");
+
+        logger.transcriptionInfo("Task archiving with mode", { taskId, mode, fileName: task.fileName });
+
+        let audioPath: string | undefined;
+        let archiveSize: number | undefined;
+
+        const readArchiveSize = async (filePath: string): Promise<number> => {
+          const sizeResult = await getFileSize(filePath);
+          if (sizeResult.success && typeof sizeResult.data === "number") {
+            return sizeResult.data;
+          }
+          logger.warn("Archive task: failed to read archive file size", {
+            taskId,
+            filePath,
+            error: sizeResult.error,
+          });
+          return task.fileSize;
+        };
+
+        try {
+          const archiveDirResult = await getArchiveDir();
+          if (!archiveDirResult.success || !archiveDirResult.data) {
+            logger.warn("Failed to get archive directory", { taskId, error: archiveDirResult.error });
+          }
+
+          switch (mode) {
+            case "keep_all": {
+              // Copy original file to archive (keep as is - video stays video)
+              if (task.filePath && archiveDirResult.success) {
+                const ext = task.filePath.split(".").pop()?.toLowerCase();
+                
+                // For video files, we keep as-is (original file stays accessible)
+                // For audio files, we can reference them directly
+                const isAudioFile = ext && ["mp3", "wav", "m4a", "flac", "ogg"].includes(ext);
+                if (isAudioFile) {
+                  audioPath = task.filePath;
+                  logger.transcriptionInfo("keep_all: using existing audio file", { taskId, audioPath });
+                } else {
+                  // For video - original file stays at original path
+                  logger.transcriptionInfo("keep_all: keeping original video file", { taskId, originalPath: task.filePath });
+                }
+              }
+              archiveSize = task.fileSize;
+              break;
+            }
+
+            case "delete_video": {
+              // Convert to MP3 and save to archive
+              if (task.filePath && archiveDirResult.success) {
+                const ext = task.filePath.split(".").pop()?.toLowerCase();
+                const isAudioFile = ext && ["mp3", "wav", "m4a", "flac", "ogg"].includes(ext);
+                
+                if (isAudioFile) {
+                  // Already audio - convert to ensure it's MP3
+                  const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
+                  const convertResult = await convertToMp3(task.filePath, mp3Path);
+                  if (convertResult.success && convertResult.data) {
+                    audioPath = convertResult.data;
+                    logger.transcriptionInfo("delete_video: copied audio to archive", { taskId, audioPath });
+                    archiveSize = await readArchiveSize(convertResult.data);
+                  }
+                } else {
+                  // Convert video to MP3
+                  const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
+                  const convertResult = await convertToMp3(task.filePath, mp3Path);
+                  if (convertResult.success && convertResult.data) {
+                    audioPath = convertResult.data;
+                    logger.transcriptionInfo("delete_video: converted to MP3", { taskId, audioPath });
+                    archiveSize = await readArchiveSize(convertResult.data);
+                  } else {
+                    logger.warn("delete_video: conversion failed", { taskId, error: convertResult.error });
+                  }
+                }
+              }
+              break;
+            }
+
+            case "text_only": {
+              // text_only - don't need to copy any files
+              logger.transcriptionInfo("text_only: no files copied to archive", { taskId });
+              archiveSize = 0;
+              break;
+            }
+          }
+
+          set((state) => ({
+            tasks: state.tasks.map((t) =>
+              t.id === taskId
+                ? {
+                    ...t,
+                    archived: true,
+                    archivedAt: new Date(),
+                    archiveMode: mode,
+                    audioPath: audioPath,
+                    archiveSize: archiveSize ?? task.fileSize,
+                  }
+                : t
+            ),
+          }));
+
+          logger.transcriptionInfo("Task archived successfully", { taskId, mode });
+        } catch (error) {
+          logger.error("Archive task failed", { taskId, error: String(error) });
+          throw error;
+        }
+      },
+
       addTask: async (path, name, size, options) => {
         logger.uploadInfo("Adding file", { fileName: name, filePath: path });
 
@@ -465,6 +597,7 @@ export const useTasks = create<TasksState>()(
         tasks: state.tasks,
         options: state.options,
         settings: state.settings,
+        archiveSettings: state.archiveSettings,
         view: state.view,
       }),
       storage: createJSONStorage(() => localStorage),
@@ -473,11 +606,13 @@ export const useTasks = create<TasksState>()(
 );
 
 export function useTasksByView(view: ViewType): TranscriptionTask[] {
-  return useTasks((state) => filterTasksByView(state.tasks, view));
+  const tasks = useTasks((state) => state.tasks);
+  return useMemo(() => filterTasksByView(tasks, view), [tasks, view]);
 }
 
 export function useArchivedTasks(): TranscriptionTask[] {
-  return useTasks((state) => getArchivedTasks(state.tasks));
+  const tasks = useTasks((state) => state.tasks);
+  return useMemo(() => getArchivedTasks(tasks), [tasks]);
 }
 
 export const useSettingsStore = useTasks;

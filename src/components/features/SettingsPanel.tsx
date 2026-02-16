@@ -26,8 +26,9 @@ import {
   DialogClose,
 } from "@/components/ui";
 import { useUIStore, useTasks, useSetupStore } from "@/stores";
-import { useSetupStore as useSetupStoreCheck } from "@/stores/setupStore";
 import { selectOutputDirectory, clearCache } from "@/services/tauri";
+import { logger } from "@/lib/logger";
+import { ArchiveSettingsPanel } from "./settings/ArchiveSettingsPanel";
 import { DEVICE_NAMES, LANGUAGE_NAMES } from "@/types";
 import type { DeviceType, Language } from "@/types";
 
@@ -132,7 +133,7 @@ export function SettingsPanel() {
 
   const resetSetupState = useSetupStore((s) => s.resetSetupState);
   
-  const setupStore = useSetupStoreCheck();
+  const setupStore = useSetupStore();
   const { ffmpegCheck, pythonCheck, deviceCheck, isChecking, checkAll } = setupStore;
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -142,7 +143,7 @@ export function SettingsPanel() {
     if (isSettingsOpen && !ffmpegCheck) {
       checkAll();
     }
-  }, [isSettingsOpen]);
+  }, [isSettingsOpen, ffmpegCheck, checkAll]);
 
   const handleClickOutside = useCallback(
     (event: MouseEvent) => {
@@ -195,7 +196,7 @@ export function SettingsPanel() {
     if (result.success) {
       window.location.reload();
     } else {
-      console.error("Failed to clear cache:", result.error);
+      logger.error("Failed to clear cache", { error: result.error });
     }
   };
 
@@ -462,6 +463,11 @@ export function SettingsPanel() {
                 </Button>
               </div>
             </div>
+          </div>
+
+          {/* Archive Settings Section */}
+          <div className="space-y-4 pt-4 mt-2 border-t">
+            <ArchiveSettingsPanel />
           </div>
         </div>
 

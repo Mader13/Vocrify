@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Download, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
 import {
   getFFmpegStatus,
   downloadFFmpeg,
@@ -16,66 +17,44 @@ export function FFmpegDownloader() {
   const [progress, setProgress] = React.useState<FFmpegProgress | null>(null);
   const [showDialog, setShowDialog] = React.useState(false);
 
-  React.useEffect(() => {
-    console.log("[FFmpegDownloader] Initializing...");
-
-    checkFFmpeg();
-
-    const unlistenProgress = onFFmpegProgress((progressData) => {
-      console.log("[FFmpegDownloader] Progress event:", progressData);
-      setProgress(progressData);
-    });
-
-    const unlistenStatus = onFFmpegStatus((statusEvent) => {
-      console.log("[FFmpegDownloader] Status event:", statusEvent);
-      handleStatusUpdate(statusEvent);
-    });
-
-    return () => {
-      console.log("[FFmpegDownloader] Cleaning up listeners...");
-      unlistenProgress.then((f) => f?.());
-      unlistenStatus.then((f) => f?.());
-    };
-  }, []);
-
-  const checkFFmpeg = async () => {
+  const checkFFmpeg = React.useCallback(async () => {
     try {
-      console.log("[FFmpegDownloader] Checking FFmpeg status...");
+      logger.debug("Checking FFmpeg status");
       const result = await getFFmpegStatus();
-      console.log("[FFmpegDownloader] Result:", result);
+      logger.debug("FFmpeg status result", result);
 
       if (result.success && result.data) {
-        console.log("[FFmpegDownloader] Setting status:", result.data);
+        logger.debug("Setting FFmpeg status", { tag: result.data.tag });
         setStatus(result.data);
         if (result.data.tag === "NotInstalled") {
-          console.log("[FFmpegDownloader] FFmpeg not installed, showing dialog");
+          logger.info("FFmpeg not installed, showing dialog");
           setShowDialog(true);
         }
       } else {
-        console.log("[FFmpegDownloader] Unknown status, showing dialog");
+        logger.warn("Unknown FFmpeg status, showing dialog");
         setStatus({ tag: "NotInstalled" });
         setShowDialog(true);
       }
     } catch (error) {
-      console.error("[FFmpegDownloader] Failed to check FFmpeg status:", error);
+      logger.error("Failed to check FFmpeg status", { error: String(error) });
       setStatus({ tag: "NotInstalled" });
     }
-  };
+  }, []);
 
-  const handleStatusUpdate = (payload: FFmpegStatusEvent) => {
-    console.log("[FFmpegDownloader] Status update:", payload);
+  const handleStatusUpdate = React.useCallback((payload: FFmpegStatusEvent) => {
+    logger.debug("FFmpeg status update", payload);
 
     switch (payload.status) {
       case "downloading":
-        console.log("[FFmpegDownloader] Setting status to: Downloading");
+        logger.info("FFmpeg downloading");
         setStatus({ tag: "Downloading" });
         break;
       case "extracting":
-        console.log("[FFmpegDownloader] Setting status to: Extracting");
+        logger.info("FFmpeg extracting");
         setStatus({ tag: "Extracting" });
         break;
       case "completed":
-        console.log("[FFmpegDownloader] Download completed, checking FFmpeg status...");
+        logger.info("FFmpeg download completed");
         setStatus({ tag: "Completed" });
         setTimeout(() => {
           setShowDialog(false);
@@ -83,26 +62,48 @@ export function FFmpegDownloader() {
         }, 2000);
         break;
       case "failed":
-        console.log("[FFmpegDownloader] Download failed:", payload.message);
+        logger.error("FFmpeg download failed", { message: payload.message });
         setStatus({ tag: "Failed", error: payload.message });
         break;
       default:
-        console.log("[FFmpegDownloader] Unknown status:", payload.status);
+        logger.warn("Unknown FFmpeg status", { status: payload.status });
     }
-  };
+  }, [checkFFmpeg]);
+
+  React.useEffect(() => {
+    logger.info("FFmpegDownloader initializing");
+
+    checkFFmpeg();
+
+    const unlistenProgress = onFFmpegProgress((progressData) => {
+      logger.debug("FFmpeg progress event", progressData);
+      setProgress(progressData);
+    });
+
+    const unlistenStatus = onFFmpegStatus((statusEvent) => {
+      logger.debug("FFmpeg status event", statusEvent);
+      handleStatusUpdate(statusEvent);
+    });
+
+    return () => {
+      logger.debug("FFmpegDownloader cleaning up listeners");
+      unlistenProgress.then((f) => f?.());
+      unlistenStatus.then((f) => f?.());
+    };
+  }, [checkFFmpeg, handleStatusUpdate]);
 
   const handleDownload = async () => {
     try {
-      console.log("[FFmpegDownloader] Starting FFmpeg download...");
+      logger.info("Starting FFmpeg download");
       setStatus({ tag: "Downloading" });
       setProgress(null);
       const result = await downloadFFmpeg();
       if (!result.success) {
         setStatus({ tag: "Failed", error: result.error || "Download failed" });
       }
-      console.log("[FFmpegDownloader] Download initiated successfully");
+      logger.info("FFmpeg download initiated");
     } catch (error) {
-      console.error("[FFmpegDownloader] Download failed:", error);
+      logger.error("FFmpeg download failed", { error: String(error) });
       setStatus({ tag: "Failed", error: String(error) });
     }
   };

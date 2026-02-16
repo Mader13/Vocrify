@@ -417,10 +417,35 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
         ? backendCurrentMb
         : (totalMb > 0 ? Math.round((totalMb * progressEvent.percent) / 100) : 0);
 
-      // If backend percent is 0 but current/total are known, compute percent locally
+      // Normalize progress defensively:
+      // backend can occasionally report 100% before bytes catch up.
       let progress = progressEvent.percent;
-      if ((progress <= 0 || !Number.isFinite(progress)) && totalMb > 0 && currentMb > 0) {
-        progress = Math.min(100, (currentMb / totalMb) * 100);
+      const computedProgress =
+        totalMb > 0 && currentMb >= 0
+          ? Math.min(100, (currentMb / totalMb) * 100)
+          : NaN;
+
+      if (!Number.isFinite(progress) || progress <= 0) {
+        if (Number.isFinite(computedProgress)) {
+          progress = computedProgress;
+        }
+      } else if (
+        Number.isFinite(computedProgress) &&
+        progress >= 99.9 &&
+        computedProgress < 99.5 &&
+        progressEvent.status === "downloading"
+      ) {
+        // Prevent false instant 100% while still downloading.
+        progress = computedProgress;
+      }
+
+      // While status is downloading, avoid showing 100% until bytes are essentially complete.
+      if (
+        progressEvent.status === "downloading" &&
+        Number.isFinite(computedProgress) &&
+        computedProgress < 99.5
+      ) {
+        progress = Math.min(progress, 99.4);
       }
 
       const totalEstimated = hasBackendEstimatedFlag || backendTotalMb <= 0;
@@ -712,7 +737,7 @@ export async function initializeModelsStore() {
       );
       listenersInitialized = true;
     } catch (error) {
-      console.error("Failed to initialize model event listeners:", error);
+      logger.modelError("Failed to initialize model event listeners", { error });
     }
   }
 

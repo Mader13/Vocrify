@@ -1,12 +1,14 @@
 import * as React from "react";
-import { useEffect, useRef, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import type WaveSurfer from "wavesurfer.js";
 import type RegionsPlugin from "wavesurfer.js/dist/plugins/regions.js";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getThemeColors, cacheWaveformPeaks, getCachedWaveformPeaks } from "@/lib/utils";
+import { getThemeColors, cacheWaveformPeaks, getCachedWaveformPeaks, formatTime } from "@/lib/utils";
+import { WaveformControls } from "@/components/features/WaveformControls";
+import { sanitizeSegments } from "@/lib/segment-utils";
 import { getAssetUrl, readFileAsBase64 } from "@/services/tauri";
-import type { TranscriptionTask, TranscriptionSegment, WaveformColorMode } from "@/types";
+import type { TranscriptionTask, WaveformColorMode } from "@/types";
 
 /**
  * Convert base64 string to Blob
@@ -63,6 +65,8 @@ interface VideoPlayerProps {
   task: TranscriptionTask;
   /** Current color mode for waveform regions */
   colorMode: WaveformColorMode;
+  /** Callback for current playback time updates */
+  onTimeUpdate?: (time: number) => void;
   /** Whether video player is visible */
   isVideoVisible?: boolean;
   /** Optional additional class names */
@@ -130,42 +134,6 @@ function mergeNearbySpeakerRegions(
 }
 
 /**
- * Remove malformed "umbrella" segment that covers almost entire file
- * while many normal segments also exist inside it.
- */
-function sanitizeSegments(
-  segments?: TranscriptionSegment[],
-): TranscriptionSegment[] {
-  if (!segments || segments.length === 0) return [];
-
-  const valid = segments.filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start);
-  if (valid.length <= 1) return valid;
-
-  const epsilon = 0.05;
-  const minStart = Math.min(...valid.map((s) => s.start));
-  const maxEnd = Math.max(...valid.map((s) => s.end));
-
-  const removeIndexes = new Set<number>();
-
-  valid.forEach((candidate, idx) => {
-    const isFullRange = candidate.start <= minStart + epsilon && candidate.end >= maxEnd - epsilon;
-    if (!isFullRange) return;
-
-    const nestedCount = valid.filter((s, i) => {
-      if (i === idx) return false;
-      return s.start >= candidate.start - epsilon && s.end <= candidate.end + epsilon;
-    }).length;
-
-    if (nestedCount >= 2) {
-      removeIndexes.add(idx);
-    }
-  });
-
-  if (removeIndexes.size === 0) return valid;
-  return valid.filter((_, idx) => !removeIndexes.has(idx));
-}
-
-/**
  * VideoPlayer component with integrated waveform visualization
  *
  * Features:
@@ -179,6 +147,7 @@ function sanitizeSegments(
 export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(function VideoPlayer({
   task,
   colorMode,
+  onTimeUpdate,
   isVideoVisible = true,
   className,
 }, forwardedRef) {
@@ -189,17 +158,43 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   const isWaveformReadyRef = useRef(false);
   const [isWaveformReady, setIsWaveformReady] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [isWaveformHovered, setIsWaveformHovered] = React.useState(false);
+  const [hoverPreviewTime, setHoverPreviewTime] = React.useState<number | null>(null);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [duration, setDuration] = React.useState(0);
+  const [waveformWidth, setWaveformWidth] = React.useState(0);
+  const [overlayWidth, setOverlayWidth] = React.useState(0);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [volume, setVolume] = React.useState(1);
+  const [playbackRate, setPlaybackRate] = React.useState(1);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   // Expose video element via ref
   useImperativeHandle(forwardedRef, () => internalVideoRef.current!);
 
   // Convert file path to Tauri asset URL for security
-  const assetUrl = useMemo(() => {
-    if (!task.filePath) return "";
-    const url = getAssetUrl(task.filePath);
-    console.log("[VideoPlayer DEBUG] assetUrl generated:", { filePath: task.filePath, url });
+  // Use audioPath if task is archived and has audioPath, otherwise use original file path
+  const mediaPath = React.useMemo(() => {
+    // If task is archived and has audioPath (from archive), use that
+    if (task.archived && task.audioPath) {
+      return task.audioPath;
+    }
+    // Otherwise use the original file path
+    return task.filePath || "";
+  }, [task.filePath, task.audioPath, task.archived]);
+
+  const assetUrl = React.useMemo(() => {
+    if (!mediaPath) return "";
+    const url = getAssetUrl(mediaPath);
+    console.log("[VideoPlayer DEBUG] assetUrl generated:", { filePath: mediaPath, url });
     return url;
-  }, [task.filePath]);
+  }, [mediaPath]);
+
+  // Check if video element should be shown (only for original video, not archived/audio-only)
+  const showVideoElement = React.useMemo(() => {
+    // Show video only if task is NOT archived and has original video file
+    return !task.archived && !!task.filePath && task.filePath.length > 0;
+  }, [task.filePath, task.archived]);
 
   /**
    * Generate regions based on color mode and transcription segments
@@ -467,13 +462,14 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
         }
 
         // Load audio file as Blob (workaround for Tauri asset URL CORS issue)
-        console.log("[VideoPlayer DEBUG] Loading audio as Blob...");
-        readFileAsBase64(task.filePath)
+        // Use mediaPath which handles archived audioPath correctly
+        console.log("[VideoPlayer DEBUG] Loading audio as Blob from:", mediaPath);
+        readFileAsBase64(mediaPath)
           .then((result) => {
             if (!ws) return;
             if (result.success && result.data) {
               console.log("[VideoPlayer DEBUG] Base64 loaded, length:", result.data.length);
-              const mimeType = getMimeType(task.filePath);
+              const mimeType = getMimeType(mediaPath);
               const blob = base64ToBlob(result.data, mimeType);
               console.log("[VideoPlayer DEBUG] Blob created:", blob.size, "bytes, type:", blob.type);
               ws.loadBlob(blob);
@@ -580,6 +576,12 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
             videoEl.currentTime = position;
           }
         });
+
+        // Event: Time update from WaveSurfer (more accurate than video for cursor)
+        ws.on("timeupdate", (time: number) => {
+          setCurrentTime(time);
+          onTimeUpdate?.(time);
+        });
       } catch (error) {
         console.error("[VideoPlayer DEBUG] Failed to create WaveSurfer:", error);
         setIsGenerating(false);
@@ -592,16 +594,20 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     const handleTimeUpdate = () => {
       const videoEl = internalVideoRef.current;
       if (!videoEl || !ws || !isWaveformReadyRef.current) return;
-      
-      const duration = videoEl.duration;
+
+      const videoDuration = videoEl.duration;
       // Skip if duration is not available (NaN, 0, Infinity) - video metadata not loaded yet
-      if (!Number.isFinite(duration) || duration <= 0) return;
-      
-      const ratio = videoEl.currentTime / duration;
+      if (!Number.isFinite(videoDuration) || videoDuration <= 0) return;
+
+      setDuration(videoDuration);
+
+      const ratio = videoEl.currentTime / videoDuration;
       // Skip if ratio is not finite (defensive check)
       if (!Number.isFinite(ratio)) return;
-      
+
       ws.seekTo(ratio);
+      setCurrentTime(videoEl.currentTime);
+      onTimeUpdate?.(videoEl.currentTime);
     };
 
     if (video) {
@@ -617,7 +623,43 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       }
       ws?.destroy();
     };
-  }, [generateRegions, task.filePath]);
+  }, [generateRegions, onTimeUpdate, task.filePath]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const updateWidth = () => {
+      const width = node.getBoundingClientRect().width;
+      setWaveformWidth(width);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [task.filePath]);
+
+  useEffect(() => {
+    const node = overlayRef.current;
+    if (!node) return;
+
+    const updateWidth = () => {
+      const width = node.getBoundingClientRect().width;
+      setOverlayWidth(width);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(node);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   // Regenerate regions when color mode or result changes
   useEffect(() => {
@@ -630,29 +672,149 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     }
   }, [colorMode, task.result, isWaveformReady, generateRegions]);
 
+  // Sync playback state with video element
+  useEffect(() => {
+    const videoElement = internalVideoRef.current;
+    if (!videoElement) return;
+
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+
+    videoElement.addEventListener("play", handlePlay);
+    videoElement.addEventListener("pause", handlePause);
+
+    // Set initial state
+    setIsPlaying(!videoElement.paused);
+
+    return () => {
+      videoElement.removeEventListener("play", handlePlay);
+      videoElement.removeEventListener("pause", handlePause);
+    };
+  }, []);
+
+  // Apply volume and playback rate to video element
+  useEffect(() => {
+    const videoElement = internalVideoRef.current;
+    if (!videoElement) return;
+
+    videoElement.volume = volume;
+  }, [volume]);
+
+  useEffect(() => {
+    const videoElement = internalVideoRef.current;
+    if (!videoElement) return;
+
+    videoElement.playbackRate = playbackRate;
+  }, [playbackRate]);
+
+  // Playback control handlers
+  const handleTogglePlayPause = useCallback(() => {
+    const videoElement = internalVideoRef.current;
+    if (!videoElement) return;
+
+    if (videoElement.paused) {
+      videoElement.play();
+    } else {
+      videoElement.pause();
+    }
+  }, []);
+
+  const handleVolumeChange = useCallback((newVolume: number) => {
+    setVolume(newVolume);
+  }, []);
+
+  const handlePlaybackRateChange = useCallback((newRate: number) => {
+    setPlaybackRate(newRate);
+  }, []);
+
+  const cursorRatio = duration > 0 ? Math.min(Math.max(currentTime / duration, 0), 1) : 0;
+  const cursorPosition = waveformWidth * cursorRatio;
+  const edgePadding = 16;
+  const overlayHalf = overlayWidth / 2;
+  const minCenter = edgePadding + overlayHalf;
+  const maxCenter = waveformWidth - edgePadding - overlayHalf;
+  const hasCenterSpace = minCenter <= maxCenter;
+  const constrainedCenter = waveformWidth > 0
+    ? hasCenterSpace
+      ? Math.min(Math.max(cursorPosition, minCenter), maxCenter)
+      : waveformWidth / 2
+    : edgePadding;
+  const timeOverlayStyle = {
+    left: `${constrainedCenter}px`,
+    transform: "translateX(-50%)",
+    pointerEvents: "none",
+  } satisfies React.CSSProperties;
+  const displayedTime = isWaveformHovered ? (hoverPreviewTime ?? currentTime) : currentTime;
+
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {/* Video Player - always in DOM but hidden when not visible */}
-      <div
-        className={cn(
-          "relative overflow-hidden rounded-xl border bg-black max-w-5xl mx-auto transition-all duration-300",
-          isVideoVisible
-            ? "animate-in fade-in slide-in-from-top-2"
-            : "sr-only"
-        )}
-      >
-        <video
-          ref={internalVideoRef}
-          src={assetUrl}
-          controls={isVideoVisible}
-          className="w-full aspect-video object-contain"
-        />
-      </div>
+      {/* Video Player - only show if video file exists and not deleted */}
+      {showVideoElement && (
+        <div
+          className={cn(
+            "relative overflow-hidden rounded-xl border bg-black max-w-5xl mx-auto transition-all duration-300",
+            isVideoVisible
+              ? "animate-in fade-in slide-in-from-top-2"
+              : "sr-only"
+          )}
+        >
+          <video
+            ref={internalVideoRef}
+            src={assetUrl}
+            controls={isVideoVisible}
+            className="w-full aspect-video object-contain"
+          />
+        </div>
+      )}
+
+      {/* Audio-only message when video is deleted */}
+      {!showVideoElement && mediaPath && (
+        <div className="rounded-xl border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
+          Video file removed. Showing audio waveform only.
+        </div>
+      )}
 
       {/* Waveform Container */}
       <div className="relative rounded-xl border bg-card overflow-hidden">
         {/* Waveform */}
-        <div ref={containerRef} className="w-full" />
+        <div
+          ref={containerRef}
+          className="w-full"
+          onMouseEnter={() => {
+            setIsWaveformHovered(true);
+            setHoverPreviewTime(null);
+          }}
+          onMouseLeave={() => {
+            setIsWaveformHovered(false);
+            setHoverPreviewTime(null);
+          }}
+          onMouseMove={(e) => {
+            if (duration > 0 && containerRef.current) {
+              const rect = containerRef.current.getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const ratio = Math.max(0, Math.min(1, x / rect.width));
+              setHoverPreviewTime(ratio * duration);
+            }
+          }}
+        />
+
+        {/* Time Overlay */}
+        <div
+          ref={overlayRef}
+          style={timeOverlayStyle}
+          className={cn(
+            "absolute top-2 px-2 py-1 rounded-md bg-black/70 text-white text-xs font-mono transition-all duration-200 z-10 whitespace-nowrap leading-tight",
+            isWaveformHovered ? "bg-black/90 scale-105" : "bg-black/70"
+          )}
+        >
+          {isWaveformHovered ? (
+            <>
+              {formatTime(displayedTime)} / {formatTime(duration)}
+            </>
+          ) : (
+            formatTime(displayedTime)
+          )}
+        </div>
 
         {/* Generating Spinner */}
         {isGenerating && (
@@ -664,6 +826,18 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
           </div>
         )}
       </div>
+
+      {/* Waveform Controls */}
+      <WaveformControls
+        isPlaying={isPlaying}
+        currentTime={currentTime}
+        duration={duration}
+        volume={volume}
+        playbackRate={playbackRate}
+        onTogglePlayPause={handleTogglePlayPause}
+        onVolumeChange={handleVolumeChange}
+        onPlaybackRateChange={handlePlaybackRateChange}
+      />
     </div>
   );
 });
