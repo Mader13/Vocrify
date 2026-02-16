@@ -2,10 +2,10 @@ import { useState } from "react";
 import { Key, ExternalLink, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useSetupStore } from "@/stores/setupStore";
 
 /**
- * Step 5: Optional Settings
- * Configure optional components like HuggingFace token
+ * Step 4: Optional settings.
  */
 export function OptionalStep() {
   const [showToken, setShowToken] = useState(false);
@@ -14,13 +14,12 @@ export function OptionalStep() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Опциональные настройки</h3>
+        <h3 className="text-lg font-semibold">Optional settings</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Дополнительные компоненты для расширенной функциональности
+          Configure non-required features.
         </p>
       </div>
 
-      {/* HuggingFace Token Section */}
       <div className="rounded-lg border border-muted bg-muted/30 p-4 space-y-4">
         <div className="flex items-start gap-3">
           <div className="shrink-0 p-2 rounded-lg bg-primary/10 text-primary">
@@ -29,12 +28,11 @@ export function OptionalStep() {
           <div className="flex-1">
             <h4 className="font-medium">HuggingFace Token</h4>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Токен необходим для диаризации (разделение спикеров)
+              Optional token for high-quality diarization providers.
             </p>
           </div>
         </div>
 
-        {/* Token input */}
         <div className="space-y-2">
           <label htmlFor="hf-token" className="text-sm font-medium">
             API Token
@@ -59,7 +57,7 @@ export function OptionalStep() {
               type="button"
               onClick={() => setShowToken(!showToken)}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
-              aria-label={showToken ? "Скрыть токен" : "Показать токен"}
+              aria-label={showToken ? "Hide token" : "Show token"}
             >
               {showToken ? (
                 <EyeOff className="h-4 w-4" aria-hidden="true" />
@@ -69,7 +67,7 @@ export function OptionalStep() {
             </button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Получите токен на{" "}
+            Get token at{" "}
             <a
               href="https://huggingface.co/settings/tokens"
               target="_blank"
@@ -82,89 +80,76 @@ export function OptionalStep() {
           </p>
         </div>
 
-        {/* Token validation status */}
         {token && (
           <div className="flex items-center gap-2 text-sm">
             {token.startsWith("hf_") ? (
               <>
                 <CheckCircle2 className="h-4 w-4 text-green-500" aria-hidden="true" />
                 <span className="text-green-600 dark:text-green-400">
-                  Формат токена корректный
+                  Token format looks valid
                 </span>
               </>
             ) : (
               <span className="text-yellow-600 dark:text-yellow-400">
-                Токен должен начинаться с "hf_"
+                Token should start with `hf_`
               </span>
             )}
           </div>
         )}
       </div>
 
-      {/* Info about diarization */}
       <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
-        <h4 className="text-sm font-medium mb-2">О диаризации</h4>
+        <h4 className="text-sm font-medium mb-2">Note</h4>
         <p className="text-xs text-muted-foreground">
-          Диаризация позволяет разделять аудио на разных спикеров.
-          Для использования этой функции необходим HuggingFace токен с доступом к
-          моделям pyannote/speaker-diarization и pyannote/segmentation.
+          This step is optional and can be configured later in settings.
         </p>
-        <p className="text-xs text-muted-foreground mt-2">
-          <span className="font-medium">Примечание:</span> Это опциональная функция.
-          Вы можете пропустить этот шаг и добавить токен позже в настройках.
-        </p>
-      </div>
-
-      {/* Skip notice */}
-      <div className="text-center text-sm text-muted-foreground">
-        Вы можете пропустить этот шаг и настроить позже в настройках приложения
       </div>
     </div>
   );
 }
 
-/**
- * Footer actions for Optional step
- */
 export interface OptionalStepFooterProps {
   onBack: () => void;
   onComplete: () => void;
-  /** Callback to get the current token value */
   onGetToken?: () => string | undefined;
 }
 
 export function OptionalStepFooter({ onBack, onComplete }: OptionalStepFooterProps) {
+  const { runtimeReadiness, pythonCheck, ffmpegCheck } = useSetupStore();
+  const canComplete =
+    runtimeReadiness?.ready === true ||
+    Boolean(
+      pythonCheck?.status === "ok" &&
+        ffmpegCheck?.installed &&
+        ffmpegCheck.status !== "error"
+    );
+
   return (
     <div className="flex items-center justify-between">
       <Button variant="ghost" onClick={onBack}>
-        Назад
+        Back
       </Button>
       <div className="flex items-center gap-2">
-        <Button variant="outline" onClick={onComplete}>
-          Пропустить
+        <Button variant="outline" onClick={onComplete} disabled={!canComplete}>
+          Skip
         </Button>
-        <Button onClick={onComplete}>
-          Завершить настройку
+        <Button onClick={onComplete} disabled={!canComplete}>
+          Finish setup
         </Button>
       </div>
     </div>
   );
 }
 
-/**
- * Hook to manage optional step state
- */
 export function useOptionalStep() {
   const [huggingFaceToken, setHuggingFaceToken] = useState<string | null>(null);
 
   const saveToken = (token: string) => {
     setHuggingFaceToken(token || null);
-    // TODO: Save to settings via Tauri API
   };
 
   const clearToken = () => {
     setHuggingFaceToken(null);
-    // TODO: Clear from settings via Tauri API
   };
 
   return {

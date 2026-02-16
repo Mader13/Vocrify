@@ -4,6 +4,7 @@ vi.mock("@/services/tauri", () => ({
   checkFFmpegStatus: vi.fn(),
   checkModelsStatus: vi.fn(),
   checkPythonEnvironment: vi.fn(),
+  checkRuntimeReadiness: vi.fn(),
   getAvailableDevices: vi.fn(),
   isSetupComplete: vi.fn(),
   markSetupComplete: vi.fn(),
@@ -14,6 +15,7 @@ import {
   checkFFmpegStatus,
   checkModelsStatus,
   checkPythonEnvironment,
+  checkRuntimeReadiness,
   getAvailableDevices,
   isSetupComplete,
   markSetupComplete,
@@ -24,6 +26,7 @@ import { useSetupStore } from "@/stores/setupStore";
 const mockedCheckFFmpegStatus = vi.mocked(checkFFmpegStatus);
 const mockedCheckModelsStatus = vi.mocked(checkModelsStatus);
 const mockedCheckPythonEnvironment = vi.mocked(checkPythonEnvironment);
+const mockedCheckRuntimeReadiness = vi.mocked(checkRuntimeReadiness);
 const mockedGetAvailableDevices = vi.mocked(getAvailableDevices);
 const mockedIsSetupComplete = vi.mocked(isSetupComplete);
 const mockedMarkSetupComplete = vi.mocked(markSetupComplete);
@@ -38,6 +41,7 @@ function resetStore() {
     ffmpegCheck: null,
     deviceCheck: null,
     modelCheck: null,
+    runtimeReadiness: null,
     error: null,
   });
 }
@@ -97,6 +101,18 @@ describe("setupStore", () => {
         message: "ok",
       },
     });
+    mockedCheckRuntimeReadiness.mockResolvedValue({
+      success: true,
+      data: {
+        ready: true,
+        pythonReady: true,
+        ffmpegReady: true,
+        pythonMessage: "ok",
+        ffmpegMessage: "ok",
+        message: "Runtime is ready",
+        checkedAt: "2026-02-16T00:00:00.000Z",
+      },
+    });
     mockedMarkSetupComplete.mockResolvedValue({ success: true });
     mockedResetSetup.mockResolvedValue({ success: true });
   });
@@ -146,7 +162,7 @@ describe("setupStore", () => {
     expect(state.modelCheck?.hasRequiredModel).toBe(true);
   });
 
-  it("checkAll populates all checks", async () => {
+  it("checkAll populates all checks and runtime readiness", async () => {
     await useSetupStore.getState().checkAll();
 
     const state = useSetupStore.getState();
@@ -154,6 +170,7 @@ describe("setupStore", () => {
     expect(state.ffmpegCheck?.installed).toBe(true);
     expect(state.deviceCheck?.status).toBe("ok");
     expect(state.modelCheck?.status).toBe("ok");
+    expect(state.runtimeReadiness?.ready).toBe(true);
   });
 
   it("goToStep changes current step", () => {
@@ -173,14 +190,39 @@ describe("setupStore", () => {
     expect(useSetupStore.getState().currentStep).toBe("python");
   });
 
-  it("completeSetup marks store complete", async () => {
+  it("completeSetup marks store complete when runtime is ready", async () => {
     await useSetupStore.getState().completeSetup();
     expect(useSetupStore.getState().isComplete).toBe(true);
   });
 
-  it("skipSetup marks store complete", () => {
+  it("completeSetup fails when runtime is not ready", async () => {
+    mockedCheckRuntimeReadiness.mockResolvedValueOnce({
+      success: true,
+      data: {
+        ready: false,
+        pythonReady: false,
+        ffmpegReady: true,
+        pythonMessage: "python missing",
+        ffmpegMessage: "ok",
+        message: "Runtime is not ready",
+        checkedAt: "2026-02-16T00:00:00.000Z",
+      },
+    });
+
+    await useSetupStore.getState().completeSetup();
+
+    const state = useSetupStore.getState();
+    expect(state.isComplete).toBe(false);
+    expect(state.error).toContain("Runtime is not ready");
+    expect(mockedMarkSetupComplete).not.toHaveBeenCalled();
+  });
+
+  it("skipSetup does not mark store complete", () => {
     useSetupStore.getState().skipSetup();
-    expect(useSetupStore.getState().isComplete).toBe(true);
+
+    const state = useSetupStore.getState();
+    expect(state.isComplete).toBe(false);
+    expect(state.error).toContain("cannot be skipped");
   });
 
   it("resetSetupState resets state when backend reset succeeds", async () => {

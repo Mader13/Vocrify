@@ -19,8 +19,12 @@ import type {
 } from "@/types";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-// UI Notification Store - используется для рендеринга уведомлений
+// UI Notification Store - используется для рендеринга тост-уведомлений
 import { useNotificationStore as useUINotificationStore } from "@/components/ui/notifications";
+
+// Notification Center Store - используется для постоянного хранения уведомлений
+import { useNotificationCenterStore } from "@/components/ui/notification-center/store";
+import type { NotificationPriority } from "@/components/ui/notification-center/types";
 
 // ============================================================================
 // Notification Settings Store (for NotificationSettings component)

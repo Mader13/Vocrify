@@ -53,6 +53,7 @@ src-tauri/WixTools/
 src-tauri/bundle/
 src-tauri/gen/
 src-tauri/capabilities/generated/
+src-tauri/resources/ai-engine/
 
 # Python
 __pycache__/

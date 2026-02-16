@@ -15,7 +15,8 @@ use std::process::Stdio;
 use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
+
+use crate::python_installer::create_hidden_command;
 
 /// Python bridge errors
 #[derive(Debug, Error)]
@@ -140,7 +141,7 @@ impl PythonBridge {
         eprintln!("[INFO] PythonBridge: Starting diarization with {:?}", provider);
         eprintln!("[INFO] Audio: {:?}", audio_path);
 
-        let mut cmd = Command::new(&self.python_path);
+        let mut cmd = create_hidden_command(&self.python_path);
         cmd.arg(&self.engine_path)
             .arg("--diarize-only")
             .arg("--provider").arg(provider.as_str())
@@ -221,7 +222,7 @@ impl PythonBridge {
         eprintln!("[INFO] PythonBridge: Starting Parakeet transcription");
         eprintln!("[INFO] Model: {}, Device: {}", model, device);
 
-        let mut cmd = Command::new(&self.python_path);
+        let mut cmd = create_hidden_command(&self.python_path);
         cmd.arg(&self.engine_path)
             .arg("--transcribe-only")
             .arg("--model").arg(model)
@@ -292,7 +293,7 @@ impl PythonBridge {
 
     /// Check if Python engine is available
     pub async fn check_available(&self) -> Result<bool, PythonBridgeError> {
-        let output = Command::new(&self.python_path)
+        let output = create_hidden_command(&self.python_path)
             .arg(&self.engine_path)
             .arg("--test")
             .output()
@@ -303,7 +304,7 @@ impl PythonBridge {
 
     /// Get Python version
     pub async fn get_python_version(&self) -> Result<String, PythonBridgeError> {
-        let output = Command::new(&self.python_path)
+        let output = create_hidden_command(&self.python_path)
             .arg("--version")
             .output()
             .await?;

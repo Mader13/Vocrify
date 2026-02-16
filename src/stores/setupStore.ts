@@ -11,12 +11,14 @@ import type {
   FFmpegCheckResult,
   ModelCheckResult,
   DeviceCheckResult,
+  RuntimeReadinessStatus,
 } from "@/types/setup";
 import { logger } from "@/lib/logger";
 import {
   checkPythonEnvironment,
   checkFFmpegStatus,
   checkModelsStatus,
+  checkRuntimeReadiness,
   isSetupComplete,
   markSetupComplete,
   resetSetup as apiResetSetup,
@@ -34,6 +36,7 @@ interface SetupStore {
   ffmpegCheck: FFmpegCheckResult | null;
   deviceCheck: DeviceCheckResult | null;
   modelCheck: ModelCheckResult | null;
+  runtimeReadiness: RuntimeReadinessStatus | null;
 
   // Error state
   error: string | null;
@@ -59,10 +62,8 @@ interface SetupStore {
   initialize: () => Promise<void>;
 }
 
-// Step order for navigation
 const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "optional"];
 
-// Initial state
 const initialState = {
   currentStep: "python" as SetupStep,
   isComplete: false,
@@ -71,38 +72,88 @@ const initialState = {
   ffmpegCheck: null as FFmpegCheckResult | null,
   deviceCheck: null as DeviceCheckResult | null,
   modelCheck: null as ModelCheckResult | null,
+  runtimeReadiness: null as RuntimeReadinessStatus | null,
   error: null as string | null,
 };
+
+function failedPythonCheck(message: string): PythonCheckResult {
+  return {
+    status: "error",
+    version: null,
+    executable: null,
+    inVenv: false,
+    pytorchInstalled: false,
+    pytorchVersion: null,
+    cudaAvailable: false,
+    mpsAvailable: false,
+    message,
+  };
+}
+
+function failedFFmpegCheck(message: string): FFmpegCheckResult {
+  return {
+    status: "error",
+    installed: false,
+    path: null,
+    version: null,
+    message,
+  };
+}
+
+function failedDeviceCheck(message: string): DeviceCheckResult {
+  return {
+    status: "error",
+    devices: [],
+    recommended: null,
+    message,
+  };
+}
+
+function failedModelCheck(message: string): ModelCheckResult {
+  return {
+    status: "error",
+    installedModels: [],
+    hasRequiredModel: false,
+    message,
+  };
+}
+
+function buildRuntimeReadiness(
+  pythonCheck: PythonCheckResult,
+  ffmpegCheck: FFmpegCheckResult
+): RuntimeReadinessStatus {
+  const pythonReady = pythonCheck.status === "ok";
+  const ffmpegReady = ffmpegCheck.installed && ffmpegCheck.status !== "error";
+  const ready = pythonReady && ffmpegReady;
+
+  return {
+    ready,
+    pythonReady,
+    ffmpegReady,
+    pythonMessage: pythonCheck.message,
+    ffmpegMessage: ffmpegCheck.message,
+    message: ready
+      ? "Runtime ready"
+      : "Runtime is not ready: Python and/or FFmpeg are missing",
+    checkedAt: new Date().toISOString(),
+  };
+}
 
 export const useSetupStore = create<SetupStore>()((set, get) => ({
   ...initialState,
 
-  /**
-   * Initialize store - check if setup was already completed
-   */
   initialize: async () => {
     const { isChecking, isComplete } = get();
-    
-    // Skip if already checked and complete
-    if (isComplete) {
-      logger.debug("Setup already initialized and complete");
+
+    if (isComplete || isChecking) {
       return;
     }
-    
-    // Skip if already checking
-    if (isChecking) {
-      logger.debug("Setup initialization already in progress");
-      return;
-    }
-    
+
     set({ isChecking: true });
     try {
       const result = await isSetupComplete();
       if (result.success && result.data) {
         set({ isComplete: true });
-        logger.info("Setup already completed");
-      } else {
-        logger.info("Setup not completed, wizard will be shown");
       }
     } catch (error) {
       logger.error("Failed to check setup status", { error: String(error) });
@@ -111,16 +162,12 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     }
   },
 
-  /**
-   * Run all checks in parallel
-   */
   checkAll: async () => {
     const { isChecking } = get();
     if (isChecking) {
-      logger.info("Checks already in progress, skipping");
       return;
     }
-    
+
     set({ isChecking: true, error: null });
     logger.info("Running all setup checks");
 
@@ -133,63 +180,39 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
           checkModelsStatus(),
         ]);
 
-      // Process Python check
-      const pythonCheck: PythonCheckResult = pythonResult.success
-        ? pythonResult.data!
-        : {
-            status: "error" as CheckStatus,
-            version: null,
-            executable: null,
-            inVenv: false,
-            pytorchInstalled: false,
-            pytorchVersion: null,
-            cudaAvailable: false,
-            mpsAvailable: false,
-            message: pythonResult.error || "Не удалось проверить окружение Python",
-          };
+      const pythonCheck: PythonCheckResult =
+        pythonResult.success && pythonResult.data
+          ? pythonResult.data
+          : failedPythonCheck(pythonResult.error || "Failed to check Python");
 
-      // Process FFmpeg check
-      const ffmpegCheck: FFmpegCheckResult = ffmpegResult.success
-        ? ffmpegResult.data!
-        : {
-            status: "error" as CheckStatus,
-            installed: false,
-            path: null,
-            version: null,
-            message: ffmpegResult.error || "Не удалось проверить FFmpeg",
-          };
+      const ffmpegCheck: FFmpegCheckResult =
+        ffmpegResult.success && ffmpegResult.data
+          ? ffmpegResult.data
+          : failedFFmpegCheck(ffmpegResult.error || "Failed to check FFmpeg");
 
-      // Process Device check
-      const availableDevicesCount = devicesResult.success ? devicesResult.data!.devices.filter(d => d.available).length : 0;
-      const deviceCheck: DeviceCheckResult = devicesResult.success
-        ? {
-            status: "ok" as CheckStatus,
-            devices: devicesResult.data!.devices,
-            recommended: devicesResult.data!.recommended || null,
-            message: `Обнаружено устройств: ${availableDevicesCount}`,
-          }
-        : {
-            status: "error" as CheckStatus,
-            devices: [],
-            recommended: null,
-            message: devicesResult.error || "Не удалось проверить устройства",
-          };
+      const deviceCheck: DeviceCheckResult =
+        devicesResult.success && devicesResult.data
+          ? {
+              status: "ok" as CheckStatus,
+              devices: devicesResult.data.devices,
+              recommended: devicesResult.data.recommended || null,
+              message: `Devices found: ${devicesResult.data.devices.filter((d) => d.available).length}`,
+            }
+          : failedDeviceCheck(devicesResult.error || "Failed to check devices");
 
-      // Process Model check
-      const modelCheck: ModelCheckResult = modelsResult.success
-        ? modelsResult.data!
-        : {
-            status: "error" as CheckStatus,
-            installedModels: [],
-            hasRequiredModel: false,
-            message: modelsResult.error || "Не удалось проверить модели",
-          };
+      const modelCheck: ModelCheckResult =
+        modelsResult.success && modelsResult.data
+          ? modelsResult.data
+          : failedModelCheck(modelsResult.error || "Failed to check models");
+
+      const runtimeReadiness = buildRuntimeReadiness(pythonCheck, ffmpegCheck);
 
       set({
         pythonCheck,
         ffmpegCheck,
         deviceCheck,
         modelCheck,
+        runtimeReadiness,
         isChecking: false,
       });
 
@@ -198,6 +221,7 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
         ffmpeg: ffmpegCheck.status,
         device: deviceCheck.status,
         model: modelCheck.status,
+        runtimeReady: runtimeReadiness.ready,
       });
     } catch (error) {
       const errorMessage =
@@ -207,247 +231,156 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     }
   },
 
-  /**
-   * Check Python environment only
-   */
   checkPython: async () => {
     logger.info("Checking Python environment");
     try {
       const result = await checkPythonEnvironment();
       if (result.success && result.data) {
         set({ pythonCheck: result.data });
-        logger.info("Python check completed", { status: result.data.status });
       } else {
         set({
-          pythonCheck: {
-            status: "error",
-            version: null,
-            executable: null,
-            inVenv: false,
-            pytorchInstalled: false,
-            pytorchVersion: null,
-            cudaAvailable: false,
-            mpsAvailable: false,
-            message: result.error || "Check failed",
-          },
+          pythonCheck: failedPythonCheck(result.error || "Check failed"),
         });
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Check failed";
-      set({
-        pythonCheck: {
-          status: "error",
-          version: null,
-          executable: null,
-          inVenv: false,
-          pytorchInstalled: false,
-          pytorchVersion: null,
-          cudaAvailable: false,
-          mpsAvailable: false,
-          message: errorMessage,
-        },
-      });
+      set({ pythonCheck: failedPythonCheck(errorMessage) });
       logger.error("Python check failed", { error: errorMessage });
     }
   },
 
-  /**
-   * Check FFmpeg installation only
-   */
   checkFFmpeg: async () => {
     logger.info("Checking FFmpeg");
     try {
       const result = await checkFFmpegStatus();
       if (result.success && result.data) {
         set({ ffmpegCheck: result.data });
-        logger.info("FFmpeg check completed", { status: result.data.status });
       } else {
-        set({
-          ffmpegCheck: {
-            status: "error",
-            installed: false,
-            path: null,
-            version: null,
-            message: result.error || "Check failed",
-          },
-        });
+        set({ ffmpegCheck: failedFFmpegCheck(result.error || "Check failed") });
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Check failed";
-      set({
-        ffmpegCheck: {
-          status: "error",
-          installed: false,
-          path: null,
-          version: null,
-          message: errorMessage,
-        },
-      });
+      set({ ffmpegCheck: failedFFmpegCheck(errorMessage) });
       logger.error("FFmpeg check failed", { error: errorMessage });
     }
   },
 
-  /**
-   * Check compute devices only
-   */
   checkDevice: async () => {
     logger.info("Checking compute devices");
     try {
       const result = await getAvailableDevices();
       if (result.success && result.data) {
         const devices = result.data.devices;
-        const availableDevicesCount = devices.filter(d => d.available).length;
-        const recommended = result.data.recommended;
         set({
           deviceCheck: {
             status: "ok",
-            devices: devices,
-            recommended: recommended || null,
-            message: `Обнаружено устройств: ${availableDevicesCount}`,
+            devices,
+            recommended: result.data.recommended || null,
+            message: `Devices found: ${devices.filter((d) => d.available).length}`,
           },
-        });
-        logger.info("Device check completed", {
-          deviceCount: devices.length,
         });
       } else {
         set({
-          deviceCheck: {
-            status: "error",
-            devices: [],
-            recommended: null,
-            message: result.error || "Check failed",
-          },
+          deviceCheck: failedDeviceCheck(result.error || "Check failed"),
         });
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Check failed";
-      set({
-        deviceCheck: {
-          status: "error",
-          devices: [],
-          recommended: null,
-          message: errorMessage,
-        },
-      });
+      set({ deviceCheck: failedDeviceCheck(errorMessage) });
       logger.error("Device check failed", { error: errorMessage });
     }
   },
 
-  /**
-   * Check AI models only
-   */
   checkModel: async () => {
     logger.info("Checking AI models");
     try {
       const result = await checkModelsStatus();
       if (result.success && result.data) {
         set({ modelCheck: result.data });
-        logger.info("Model check completed", { status: result.data.status });
       } else {
-        set({
-          modelCheck: {
-            status: "error",
-            installedModels: [],
-            hasRequiredModel: false,
-            message: result.error || "Check failed",
-          },
-        });
+        set({ modelCheck: failedModelCheck(result.error || "Check failed") });
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Check failed";
-      set({
-        modelCheck: {
-          status: "error",
-          installedModels: [],
-          hasRequiredModel: false,
-          message: errorMessage,
-        },
-      });
+      set({ modelCheck: failedModelCheck(errorMessage) });
       logger.error("Model check failed", { error: errorMessage });
     }
   },
 
-  /**
-   * Navigate to next step
-   */
   nextStep: () => {
     const { currentStep } = get();
     const currentIndex = STEPS.indexOf(currentStep);
     if (currentIndex < STEPS.length - 1) {
-      const nextStepValue = STEPS[currentIndex + 1];
-      set({ currentStep: nextStepValue });
-      logger.debug("Setup step changed", { step: nextStepValue });
+      set({ currentStep: STEPS[currentIndex + 1] });
     }
   },
 
-  /**
-   * Navigate to previous step
-   */
   prevStep: () => {
     const { currentStep } = get();
     const currentIndex = STEPS.indexOf(currentStep);
     if (currentIndex > 0) {
-      const prevStepValue = STEPS[currentIndex - 1];
-      set({ currentStep: prevStepValue });
-      logger.debug("Setup step changed", { step: prevStepValue });
+      set({ currentStep: STEPS[currentIndex - 1] });
     }
   },
 
-  /**
-   * Navigate to specific step
-   */
   goToStep: (step: SetupStep) => {
     set({ currentStep: step });
-    logger.debug("Setup step changed", { step });
   },
 
-  /**
-   * Mark setup as completed
-   */
   completeSetup: async () => {
     logger.info("Completing setup");
     try {
+      const readinessResult = await checkRuntimeReadiness();
+      if (!readinessResult.success || !readinessResult.data) {
+        set({
+          isComplete: false,
+          error: readinessResult.error || "Failed to verify runtime readiness",
+        });
+        return;
+      }
+
+      const readiness = readinessResult.data;
+      set({ runtimeReadiness: readiness });
+
+      if (!readiness.ready) {
+        set({ isComplete: false, error: readiness.message || "Runtime is not ready" });
+        return;
+      }
+
       const result = await markSetupComplete();
       if (result.success) {
-        set({ isComplete: true });
-        logger.info("Setup marked as complete");
+        set({ isComplete: true, error: null });
       } else {
-        set({ error: result.error || "Failed to complete setup" });
-        logger.error("Failed to mark setup complete", { error: result.error });
+        set({ isComplete: false, error: result.error || "Failed to complete setup" });
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to complete setup";
-      set({ error: errorMessage });
+      set({ isComplete: false, error: errorMessage });
       logger.error("Failed to complete setup", { error: errorMessage });
     }
   },
 
-  /**
-   * Skip setup wizard
-   */
   skipSetup: () => {
-    set({ isComplete: true });
-    logger.info("Setup skipped by user");
+    set({
+      isComplete: false,
+      error: "Setup cannot be skipped until required runtime dependencies are ready.",
+    });
+    logger.info("Setup skip blocked: runtime-ready gate is enforced");
   },
 
-  /**
-   * Reset setup state and allow wizard to be shown again
-   */
   resetSetupState: async () => {
     logger.info("Resetting setup state");
     try {
       const result = await apiResetSetup();
       if (result.success) {
         set(initialState);
-        logger.info("Setup state reset");
       } else {
         set({ error: result.error || "Failed to reset setup" });
-        logger.error("Failed to reset setup", { error: result.error });
       }
     } catch (error) {
       const errorMessage =

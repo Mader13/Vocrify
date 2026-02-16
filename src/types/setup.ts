@@ -141,3 +141,23 @@ export interface EnvironmentStatus {
   /** Overall message about environment status */
   message: string;
 }
+
+/**
+ * Runtime readiness status (models are intentionally excluded)
+ */
+export interface RuntimeReadinessStatus {
+  /** True only when required runtime dependencies are available */
+  ready: boolean;
+  /** Python + PyTorch readiness */
+  pythonReady: boolean;
+  /** FFmpeg readiness */
+  ffmpegReady: boolean;
+  /** Human-readable Python check message */
+  pythonMessage: string;
+  /** Human-readable FFmpeg check message */
+  ffmpegMessage: string;
+  /** Combined readiness message */
+  message: string;
+  /** RFC3339 timestamp for latest check */
+  checkedAt: string;
+}

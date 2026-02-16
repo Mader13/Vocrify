@@ -20,6 +20,11 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use scopeguard;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+use crate::python_installer::create_hidden_command;
+
 /// Maximum concurrent downloads allowed
 const MAX_CONCURRENT_DOWNLOADS: usize = 3;
 
@@ -318,7 +323,7 @@ impl DownloadManager {
         let engine_path = Self::get_python_engine_path(&app);
         let cache_dir = Self::get_models_dir(&app)?;
 
-        let mut cmd = Command::new(&python_exe);
+        let mut cmd = create_hidden_command(&python_exe);
         cmd.arg(&engine_path)
             .arg("--download-model")
             .arg(&model_name)

@@ -557,11 +557,17 @@ cargo build --features rust-transcribe
 - `python_bridge.rs` invokes Python diarization via compatibility flags (`--diarize-only`, `--audio`, `--provider`, `--num-speakers`, `--cache-dir`). If `ai-engine/main.py` no longer supports this contract, diarization fails at process startup and Rust currently returns transcription without speaker fields.
 - Rust audio decode currently fails on several media containers (`.mp4`, `.m4a`, `.mov`, `.mkv`, `.avi`, `.webm`) with "no supported format was detected"; in `auto` mode `transcribeWithFallback()` should bypass Rust for these extensions and call Python directly.
 - **Critical:** Never call `invoke("transcribe_rust")` directly from components. Always use `transcribeWithFallback()`.
+- Setup wizard checks (`check_python_environment`, `check_ffmpeg_status`, `check_models_status`) should not rely on `main.py --command` for embeddable Python: `main.py` imports `commands` package, which can fail before checks run if optional deps are missing. Prefer direct calls to `environment_checks.py` helpers.
+- Model downloads can appear stuck at 0% if Python process exits before emitting JSON progress (e.g., missing `requests`/`tenacity`/`huggingface_hub` in embeddable Python). Backend should emit `model-download-error` on any spawn/early-exit failure and remove task from `downloading_models` to avoid permanent stuck state.
 
 ### Python Env Gotcha (Windows)
 
 - Tauri `get_python_executable()` prefers `ai-engine/venv`, then `ai-engine/.venv`, then parent `.venv`.
 - If project root `.venv` is selected but has no `torch`, diarization fails despite GPU/driver being present.
+- Setup completion must be derived from live runtime checks (Python+PyTorch and FFmpeg), not only a persisted `.setup_complete` marker.
+- Setup Installer may validate system Python via `py` launcher; runtime resolver must also consider `py` (not only `python`) or setup can report success while `check_python_environment`/`check_ffmpeg_status` fail in production.
+- Production bundles must include `ai-engine` runtime files in Tauri resources. Use `bun run prepare:tauri-resources` before `tauri build` (now wired into scripts/config); otherwise setup checks fail because `main.py` is missing at runtime.
+- Setup Installer must reject unsupported system Python versions (3.13+). If it accepts Python 3.14 because `torch` is installed, wizard gets stuck in a false-success state and never installs portable 3.12.
 
 ### Logging System
 

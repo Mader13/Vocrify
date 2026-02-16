@@ -1,12 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type {
   PythonCheckResult,
   FFmpegCheckResult,
   ModelCheckResult,
   EnvironmentStatus,
+  RuntimeReadinessStatus,
 } from "@/types/setup";
 import { logger } from "@/lib/logger";
 import type { CommandResult } from "./core";
+
+export interface InstallProgress {
+  stage: "idle" | "checking" | "downloadingPython" | "extractingPython" | "installingPip" | "installingPytorch" | "installingDependencies" | "complete" | "error";
+  percent: number;
+  message: string;
+  error?: string;
+}
 
 export async function checkPythonEnvironment(): Promise<CommandResult<PythonCheckResult>> {
   try {
@@ -63,6 +72,21 @@ export async function getEnvironmentStatus(): Promise<CommandResult<EnvironmentS
   }
 }
 
+export async function checkRuntimeReadiness(): Promise<CommandResult<RuntimeReadinessStatus>> {
+  try {
+    const result = await invoke<RuntimeReadinessStatus>("check_runtime_readiness");
+    logger.info("Runtime readiness checked", {
+      ready: result.ready,
+      pythonReady: result.pythonReady,
+      ffmpegReady: result.ffmpegReady,
+    });
+    return { success: true, data: result };
+  } catch (error) {
+    logger.error("Failed to check runtime readiness", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function isSetupComplete(): Promise<CommandResult<boolean>> {
   try {
     const result = await invoke<boolean>("is_setup_complete");
@@ -93,4 +117,53 @@ export async function resetSetup(): Promise<CommandResult<void>> {
     logger.error("Failed to reset setup", { error: String(error) });
     return { success: false, error: String(error) };
   }
+}
+
+export async function checkPythonInstalled(): Promise<CommandResult<boolean>> {
+  try {
+    const result = await invoke<boolean>("check_python_installed");
+    logger.info("Python installation check", { installed: result });
+    return { success: true, data: result };
+  } catch (error) {
+    logger.error("Failed to check Python installation", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function installPythonFull(): Promise<CommandResult<void>> {
+  try {
+    logger.info("Starting Python installation");
+    await invoke("install_python_full");
+    logger.info("Python installation completed");
+    return { success: true };
+  } catch (error) {
+    logger.error("Failed to install Python", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function getPythonInstallProgress(): Promise<CommandResult<InstallProgress>> {
+  try {
+    const result = await invoke<InstallProgress>("get_python_install_progress");
+    return { success: true, data: result };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function cancelPythonInstall(): Promise<CommandResult<void>> {
+  try {
+    await invoke("cancel_python_install");
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+export function onPythonInstallProgress(
+  callback: (progress: InstallProgress) => void
+): Promise<UnlistenFn> {
+  return listen<InstallProgress>("python-install-progress", (event) => {
+    callback(event.payload);
+  });
 }

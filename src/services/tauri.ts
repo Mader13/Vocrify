@@ -9,5 +9,6 @@ export { getAvailableDevices, getFFmpegStatus, downloadFFmpeg } from "./tauri/de
 export type { FFmpegStatus, FFmpegProgress, FFmpegStatusEvent } from "./tauri/device-commands";
 export { getFilesMetadata, selectMediaFiles, selectOutputDirectory, selectExportPath, exportTranscription, getModelsDir, getAssetUrl, readFileAsBase64 } from "./tauri/dialog-commands";
 export { onProgressUpdate, onTranscriptionComplete, onTranscriptionError, onSegmentUpdate, onModelDownloadProgress, onModelDownloadComplete, onModelDownloadError, onModelDownloadRetrying, onModelDownloadStage, onModelDownloadStageComplete, onBackendLogs, onDevicesDetected, onFFmpegProgress, onFFmpegStatus } from "./tauri/events";
-export { checkPythonEnvironment, checkFFmpegStatus, checkModelsStatus, getEnvironmentStatus, isSetupComplete, markSetupComplete, resetSetup } from "./tauri/setup-commands";
+export { checkPythonEnvironment, checkFFmpegStatus, checkModelsStatus, getEnvironmentStatus, checkRuntimeReadiness, isSetupComplete, markSetupComplete, resetSetup, installPythonFull, checkPythonInstalled, getPythonInstallProgress, cancelPythonInstall, onPythonInstallProgress } from "./tauri/setup-commands";
+export type { InstallProgress } from "./tauri/setup-commands";
 export { getFileSize, deleteFile, convertToMp3, getArchiveDir } from "./tauri/archive-commands";

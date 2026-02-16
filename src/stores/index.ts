@@ -19,6 +19,7 @@ import type {
   ArchiveSettings,
 } from "@/types";
 import { logger } from "@/lib/logger";
+import { recoverInterruptedTasks } from "@/stores/utils/task-recovery";
 
 export type ViewType = "transcription" | "models" | "settings" | "archive";
 
@@ -592,6 +593,36 @@ export const useTasks = create<TasksState>()(
       version: 1,
       migrate: (persistedState: unknown, _version: number) => {
         return persistedState as TasksState;
+      },
+      merge: (persistedState: unknown, currentState: TasksState): TasksState => {
+        const typedPersisted = persistedState as Partial<TasksState> | undefined;
+        const persistedTasks = Array.isArray(typedPersisted?.tasks) ? typedPersisted.tasks : [];
+
+        const { tasks: recoveredTasks, recoveredCount } = recoverInterruptedTasks(persistedTasks);
+
+        if (recoveredCount > 0) {
+          logger.transcriptionWarn("Recovered interrupted transcription tasks after app restart", {
+            recoveredCount,
+          });
+        }
+
+        return {
+          ...currentState,
+          ...typedPersisted,
+          tasks: recoveredTasks,
+          options: {
+            ...currentState.options,
+            ...(typedPersisted?.options ?? {}),
+          },
+          settings: {
+            ...currentState.settings,
+            ...(typedPersisted?.settings ?? {}),
+          },
+          archiveSettings: {
+            ...currentState.archiveSettings,
+            ...(typedPersisted?.archiveSettings ?? {}),
+          },
+        };
       },
       partialize: (state) => ({
         tasks: state.tasks,

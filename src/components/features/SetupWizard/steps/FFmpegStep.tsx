@@ -6,15 +6,14 @@ import { useSetupStore } from "@/stores/setupStore";
 
 /**
  * Step 2: FFmpeg Installation Check
- * Verifies FFmpeg is installed and accessible
+ * Verifies FFmpeg is installed and accessible.
  */
 export function FFmpegStep() {
   const { ffmpegCheck, checkFFmpeg, isChecking } = useSetupStore();
 
-  // Run check on mount
   useEffect(() => {
     if (!ffmpegCheck) {
-      checkFFmpeg();
+      void checkFFmpeg();
     }
   }, [ffmpegCheck, checkFFmpeg]);
 
@@ -23,25 +22,23 @@ export function FFmpegStep() {
       <div>
         <h3 className="text-lg font-semibold">FFmpeg</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Проверка FFmpeg для обработки аудио/видео
+          FFmpeg is required for audio/video preprocessing.
         </p>
       </div>
 
-      {/* Main check card */}
       <CheckCard
         title="FFmpeg"
         status={ffmpegCheck?.status ?? "pending"}
-        message={ffmpegCheck?.message ?? "Проверка FFmpeg..."}
+        message={ffmpegCheck?.message ?? "Checking FFmpeg..."}
         onRetry={checkFFmpeg}
       >
         {ffmpegCheck && (
           <div className="space-y-1">
-            {/* FFmpeg installation status */}
             <CheckItem
               label={
                 ffmpegCheck.installed
-                  ? `FFmpeg ${ffmpegCheck.version ?? "установлен"}`
-                  : "FFmpeg не найден"
+                  ? `FFmpeg ${ffmpegCheck.version ?? "installed"}`
+                  : "FFmpeg not found"
               }
               sublabel={ffmpegCheck.path ?? undefined}
               status={ffmpegCheck.installed ? "ok" : "error"}
@@ -50,20 +47,19 @@ export function FFmpegStep() {
         )}
       </CheckCard>
 
-      {/* Installation instructions for errors */}
       {ffmpegCheck?.status === "error" && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-3">
           <h4 className="font-medium text-red-600 dark:text-red-400">
-            Требуется установка FFmpeg
+            FFmpeg installation required
           </h4>
           <div className="text-sm space-y-2 text-muted-foreground">
-            <p>FFmpeg необходим для обработки аудио и видео файлов:</p>
-            
+            <p>Install FFmpeg and ensure it is available in PATH.</p>
+
             <div className="space-y-2">
               <p className="font-medium text-foreground">Windows:</p>
               <ol className="list-decimal list-inside space-y-1 ml-2">
                 <li>
-                  Скачайте FFmpeg с{" "}
+                  Download from{" "}
                   <a
                     href="https://ffmpeg.org/download.html"
                     target="_blank"
@@ -74,8 +70,8 @@ export function FFmpegStep() {
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 </li>
-                <li>Распакуйте архив в папку (например, C:\ffmpeg)</li>
-                <li>Добавьте C:\ffmpeg\bin в переменную PATH</li>
+                <li>Extract to a folder (e.g. `C:\\ffmpeg`).</li>
+                <li>Add `C:\\ffmpeg\\bin` to `PATH`.</li>
               </ol>
             </div>
 
@@ -96,21 +92,15 @@ export function FFmpegStep() {
         </div>
       )}
 
-      {/* Loading state */}
       {isChecking && !ffmpegCheck && (
         <div className="flex items-center justify-center py-8">
-          <div className="animate-pulse text-muted-foreground">
-            Проверка FFmpeg...
-          </div>
+          <div className="animate-pulse text-muted-foreground">Checking FFmpeg...</div>
         </div>
       )}
     </div>
   );
 }
 
-/**
- * Footer actions for FFmpeg step
- */
 export interface FFmpegStepFooterProps {
   onBack: () => void;
   onNext: () => void;
@@ -118,28 +108,25 @@ export interface FFmpegStepFooterProps {
 
 export function FFmpegStepFooter({ onBack, onNext }: FFmpegStepFooterProps) {
   const { ffmpegCheck, checkFFmpeg, isChecking } = useSetupStore();
-  
+
   const hasError = ffmpegCheck?.status === "error";
+  const canProceed = Boolean(ffmpegCheck?.installed && ffmpegCheck.status !== "error");
 
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onBack}>
-          Назад
+          Back
         </Button>
         {hasError && (
-          <Button
-            variant="outline"
-            onClick={() => checkFFmpeg()}
-            disabled={isChecking}
-          >
-            Повторить
+          <Button variant="outline" onClick={() => void checkFFmpeg()} disabled={isChecking}>
+            Retry
           </Button>
         )}
       </div>
       <div className="flex items-center gap-2">
-        <Button onClick={onNext} disabled={isChecking}>
-          {hasError ? "Пропустить" : "Продолжить"}
+        <Button onClick={onNext} disabled={isChecking || !canProceed}>
+          Continue
         </Button>
       </div>
     </div>

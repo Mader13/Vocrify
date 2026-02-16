@@ -46,6 +46,7 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   const {
     currentStep,
     isComplete,
+    error,
     checkAll,
     nextStep,
     prevStep,
@@ -116,7 +117,6 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       case "python":
         return (
           <PythonStepFooter
-            onSkip={handleSkip}
             onNext={handleNext}
           />
         );
@@ -200,6 +200,9 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       {/* Footer with navigation */}
       <div className="px-6 py-4 border-t bg-muted/30">
         {renderStepFooter()}
+        {error && (
+          <p className="mt-3 text-sm text-destructive">{error}</p>
+        )}
       </div>
     </div>
   );

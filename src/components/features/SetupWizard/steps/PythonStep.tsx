@@ -1,35 +1,84 @@
-import { useEffect } from "react";
-import { ExternalLink } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Download, X, RefreshCw, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckCard, CheckItem } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
+import { 
+  installPythonFull, 
+  onPythonInstallProgress, 
+  cancelPythonInstall,
+  type InstallProgress 
+} from "@/services/tauri/setup-commands";
 
-/**
- * Step 1: Python Environment Check
- * Verifies Python version, PyTorch installation, and GPU support
- */
 export function PythonStep() {
   const { pythonCheck, checkPython, isChecking } = useSetupStore();
+  
+  const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
 
-  // Run check on mount
   useEffect(() => {
     if (!pythonCheck) {
       checkPython();
     }
   }, [pythonCheck, checkPython]);
 
-  // Determine individual check statuses
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    
+    const setupListener = async () => {
+      unlisten = await onPythonInstallProgress((progress) => {
+        setInstallProgress(progress);
+        if (progress.stage === "complete") {
+          setIsInstalling(false);
+          setInstallError(null);
+          void (async () => {
+            await checkPython();
+            setInstallProgress(null);
+          })();
+        } else if (progress.stage === "error") {
+          setIsInstalling(false);
+          setInstallError(progress.error || "Unknown error");
+          setInstallProgress(null);
+        }
+      });
+    };
+    
+    setupListener();
+    
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [checkPython]);
+
+  const handleInstall = useCallback(async () => {
+    setIsInstalling(true);
+    setInstallError(null);
+    setInstallProgress(null);
+    
+    const result = await installPythonFull();
+    if (!result.success) {
+      setIsInstalling(false);
+      setInstallError(result.error || "Installation failed");
+    }
+  }, []);
+
+  const handleCancel = useCallback(async () => {
+    await cancelPythonInstall();
+    setIsInstalling(false);
+    setInstallProgress(null);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setInstallError(null);
+    handleInstall();
+  }, [handleInstall]);
+
   const pythonStatus = pythonCheck?.version ? "ok" : pythonCheck ? "error" : "pending";
-  const pytorchStatus = pythonCheck?.pytorchInstalled
-    ? "ok"
-    : pythonCheck
-      ? "error"
-      : "pending";
-  const venvStatus = pythonCheck?.inVenv
-    ? "ok"
-    : pythonCheck
-      ? "warning"
-      : "pending";
+  const pytorchStatus = pythonCheck?.pytorchInstalled ? "ok" : pythonCheck ? "error" : "pending";
+  const venvStatus = pythonCheck?.inVenv ? "ok" : pythonCheck ? "warning" : "pending";
+
+  const needsInstall = pythonCheck?.status === "error" || !pythonCheck?.version;
 
   return (
     <div className="space-y-6">
@@ -40,84 +89,111 @@ export function PythonStep() {
         </p>
       </div>
 
-      {/* Main check card */}
-      <CheckCard
-        title="Окружение Python"
-        status={pythonCheck?.status ?? "pending"}
-        message={pythonCheck?.message ?? "Проверка Python..."}
-        onRetry={checkPython}
-      >
-        {pythonCheck && (
-          <div className="space-y-1">
-            {/* Python version */}
-            <CheckItem
-              label={`Python ${pythonCheck.version ?? "не найден"}`}
-              sublabel={pythonCheck.executable ?? undefined}
-              status={pythonStatus}
-            />
-
-            {/* PyTorch */}
-            <CheckItem
-              label={
-                pythonCheck.pytorchInstalled
-                  ? `PyTorch ${pythonCheck.pytorchVersion ?? "установлен"}`
-                  : "PyTorch не установлен"
-              }
-              sublabel={
-                pythonCheck.pytorchInstalled
-                  ? `${pythonCheck.cudaAvailable ? "CUDA" : ""} ${pythonCheck.mpsAvailable ? "MPS" : ""} ${!pythonCheck.cudaAvailable && !pythonCheck.mpsAvailable ? "CPU only" : ""}`.trim()
-                  : undefined
-              }
-              status={pytorchStatus}
-            />
-
-            {/* Virtual environment (optional) */}
-            <CheckItem
-              label="Virtual Environment"
-              sublabel={pythonCheck.inVenv ? "Активировано" : "Не обнаружено (рекомендуется)"}
-              status={venvStatus}
-            />
+      {isInstalling || installProgress ? (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="font-medium">Установка Python</h4>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={handleCancel}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <X className="h-4 w-4 mr-1" />
+              Отмена
+            </Button>
           </div>
-        )}
-      </CheckCard>
+          
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span>{installProgress?.message || "Подготовка..."}</span>
+              <span>{Math.round(installProgress?.percent || 0)}%</span>
+            </div>
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${installProgress?.percent || 0}%` }}
+              />
+            </div>
+          </div>
 
-      {/* Installation instructions for errors */}
-      {pythonCheck?.status === "error" && (
+          {installError && (
+            <div className="flex items-center gap-2 text-destructive text-sm">
+              <AlertCircle className="h-4 w-4" />
+              <span>{installError}</span>
+            </div>
+          )}
+
+          {installProgress?.stage === "complete" && (
+            <div className="flex items-center gap-2 text-green-600 text-sm">
+              <CheckCircle className="h-4 w-4" />
+              <span>Python успешно установлен!</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <CheckCard
+          title="Окружение Python"
+          status={pythonCheck?.status ?? "pending"}
+          message={pythonCheck?.message ?? "Проверка Python..."}
+          onRetry={checkPython}
+        >
+          {pythonCheck && (
+            <div className="space-y-1">
+              <CheckItem
+                label={`Python ${pythonCheck.version ?? "не найден"}`}
+                sublabel={pythonCheck.executable ?? undefined}
+                status={pythonStatus}
+              />
+
+              <CheckItem
+                label={
+                  pythonCheck.pytorchInstalled
+                    ? `PyTorch ${pythonCheck.pytorchVersion ?? "установлен"}`
+                    : "PyTorch не установлен"
+                }
+                sublabel={
+                  pythonCheck.pytorchInstalled
+                    ? `${pythonCheck.cudaAvailable ? "CUDA" : ""} ${pythonCheck.mpsAvailable ? "MPS" : ""} ${!pythonCheck.cudaAvailable && !pythonCheck.mpsAvailable ? "CPU only" : ""}`.trim()
+                    : undefined
+                }
+                status={pytorchStatus}
+              />
+
+              <CheckItem
+                label="Virtual Environment"
+                sublabel={pythonCheck.inVenv ? "Активировано" : "Не обнаружено (рекомендуется)"}
+                status={venvStatus}
+              />
+            </div>
+          )}
+        </CheckCard>
+      )}
+
+      {needsInstall && !isInstalling && !installProgress && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-3">
           <h4 className="font-medium text-red-600 dark:text-red-400">
             Требуется установка
           </h4>
-          <div className="text-sm space-y-2 text-muted-foreground">
-            <p>Для работы приложения необходим Python 3.10 или 3.12:</p>
-            <ol className="list-decimal list-inside space-y-1 ml-2">
-              <li>
-                Установите Python{" "}
-                <a
-                  href="https://www.python.org/downloads/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline inline-flex items-center gap-1"
-                >
-                  python.org/downloads
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              </li>
-              <li>Установите PyTorch с поддержкой GPU:</li>
-            </ol>
-            <div className="bg-muted rounded-md p-3 font-mono text-xs overflow-x-auto mt-2">
-              <code>
-                pip install torch torchvision torchaudio --extra-index-url
-                https://download.pytorch.org/whl/cu121
-              </code>
-            </div>
-            <p className="text-xs">
-              Для macOS с Apple Silicon используйте стандартную установку без extra-index-url
-            </p>
-          </div>
+          <p className="text-sm text-muted-foreground">
+            Приложение установит Python и все необходимые зависимости автоматически.
+          </p>
+          <Button onClick={handleInstall} className="w-full">
+            <Download className="h-4 w-4 mr-2" />
+            Установить Python
+          </Button>
         </div>
       )}
 
-      {/* Loading state */}
+      {installError && !isInstalling && (
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleRetry} className="flex-1">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Повторить
+          </Button>
+        </div>
+      )}
+
       {isChecking && !pythonCheck && (
         <div className="flex items-center justify-center py-8">
           <div className="animate-pulse text-muted-foreground">
@@ -129,18 +205,14 @@ export function PythonStep() {
   );
 }
 
-/**
- * Footer actions for Python step
- */
 export interface PythonStepFooterProps {
-  onSkip?: () => void;
   onNext: () => void;
 }
 
-export function PythonStepFooter({ onSkip, onNext }: PythonStepFooterProps) {
+export function PythonStepFooter({ onNext }: PythonStepFooterProps) {
   const { pythonCheck, checkPython, isChecking } = useSetupStore();
   
-  const canProceed = pythonCheck?.status === "ok" || pythonCheck?.status === "warning";
+  const canProceed = pythonCheck?.status === "ok";
   const hasError = pythonCheck?.status === "error";
 
   return (
@@ -157,11 +229,6 @@ export function PythonStepFooter({ onSkip, onNext }: PythonStepFooterProps) {
         )}
       </div>
       <div className="flex items-center gap-2">
-        {onSkip && (
-          <Button variant="ghost" onClick={onSkip}>
-            Пропустить
-          </Button>
-        )}
         <Button onClick={onNext} disabled={!canProceed || isChecking}>
           Продолжить
         </Button>

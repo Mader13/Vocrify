@@ -3,10 +3,12 @@ export type AIModel =
   | "whisper-base"
   | "whisper-small"
   | "whisper-medium"
-  | "whisper-large"
+  | "whisper-large-v3"
   | "parakeet"
   | "parakeet-tdt-0.6b-v3"
-  | "parakeet-tdt-1.1b";
+  | "parakeet-tdt-1.1b"
+  | "pyannote-diarization"
+  | "sherpa-onnx-diarization";
 
 export type ModelType = "whisper" | "parakeet" | "diarization";
 
@@ -98,10 +100,12 @@ export const MODEL_NAMES: Record<AIModel, string> = {
   "whisper-base": "Whisper Base",
   "whisper-small": "Whisper Small",
   "whisper-medium": "Whisper Medium",
-  "whisper-large": "Whisper Large (best quality)",
+  "whisper-large-v3": "Whisper Large V3 (best quality)",
   parakeet: "Parakeet (NVIDIA)",
   "parakeet-tdt-0.6b-v3": "Parakeet 0.6B (multilingual)",
   "parakeet-tdt-1.1b": "Parakeet 1.1B (English only)",
+  "pyannote-diarization": "PyAnnote Diarization",
+  "sherpa-onnx-diarization": "Sherpa-ONNX Diarization",
 };
 
 export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {
@@ -129,7 +133,7 @@ export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {
     supportsStreaming: true,
     typicalRealtimeFactor: 1.2,
   },
-  "whisper-large": {
+  "whisper-large-v3": {
     type: "whisper",
     speedCategory: "slow",
     supportsStreaming: true,
@@ -152,6 +156,18 @@ export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {
     speedCategory: "medium",
     supportsStreaming: false,
     typicalRealtimeFactor: 2.2,
+  },
+  "pyannote-diarization": {
+    type: "whisper", // diarization model, using whisper as placeholder
+    speedCategory: "fast",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 1.0,
+  },
+  "sherpa-onnx-diarization": {
+    type: "whisper", // diarization model, using whisper as placeholder
+    speedCategory: "fast",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 1.0,
   },
 };
 

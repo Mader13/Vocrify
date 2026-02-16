@@ -18,10 +18,11 @@ use std::sync::{
 use tauri::{AppHandle, Emitter, Manager, State};
 use std::env;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::sync::Mutex;
 use tauri_plugin_dialog::DialogExt;
 use scopeguard;
+
+use python_installer::{create_hidden_command, create_hidden_std_command};
 
 pub mod ffmpeg_manager;
 pub mod whisper_engine;
@@ -29,9 +30,13 @@ pub mod sherpa_diarizer;
 pub mod python_bridge;
 pub mod engine_router;
 pub mod transcription_manager;
+pub mod python_installer;
 
 // Re-export FFmpeg types for frontend
 pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgress, get_ffmpeg_status, download_ffmpeg};
+
+// Re-export Python installer types for frontend
+pub use python_installer::{InstallProgress, check_python_installed, install_python_full, get_python_install_progress, cancel_python_install};
 
 // Re-export Whisper types for frontend
 pub use whisper_engine::{WhisperEngine, DeviceType as WhisperDeviceType, TranscriptionSegment as WhisperSegment, download_ggml_model as download_ggml_model_impl};
@@ -408,6 +413,29 @@ pub struct EnvironmentStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeReadinessStatus {
+    pub ready: bool,
+    pub python_ready: bool,
+    pub ffmpeg_ready: bool,
+    pub python_message: String,
+    pub ffmpeg_message: String,
+    pub message: String,
+    pub checked_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetupState {
+    schema_version: u32,
+    runtime_ready: bool,
+    last_verified_at: String,
+    completed_at: Option<String>,
+    python_executable: Option<String>,
+    ffmpeg_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiskUsage {
     pub total_size_mb: u64,
     pub free_space_mb: u64,
@@ -503,45 +531,46 @@ impl Serialize for AppError {
 
 /// Get the path to the Python engine
 fn get_python_engine_path(app: &AppHandle) -> PathBuf {
-    // In development, use the ai-engine directory
-    let resource_path = app
-        .path()
-        .resource_dir()
-        .unwrap_or_else(|_| PathBuf::from("."));
-    
-    // Try resource directory first (for production builds)
-    let engine_path = resource_path.join("ai-engine").join("main.py");
-    if engine_path.exists() {
-        return dunce::simplified(&engine_path).to_path_buf();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // Prefer app data location first (used by runtime installer flow)
+    if let Ok(app_data_dir) = app.path().app_data_dir() {
+        candidates.push(app_data_dir.join("ai-engine").join("main.py"));
+        candidates.push(app_data_dir.join("Vocrify").join("ai-engine").join("main.py"));
     }
-    
-    // Fall back to development path (relative to src-tauri)
-    let dev_path = PathBuf::from("../ai-engine/main.py");
-    if dev_path.exists() {
-        if let Ok(absolute) = std::env::current_dir() {
-            let abs_path = absolute.join(&dev_path);
-            // Use canonicalize to resolve symlinks, .., . and get absolute path
-            if let Ok(normalized) = std::fs::canonicalize(&abs_path) {
+
+    // Resource directory candidates (for production builds).
+    // Depending on bundler/runtime layout, resource_dir can point either to
+    // ".../resources" or app root near the executable.
+    if let Ok(resource_path) = app.path().resource_dir() {
+        candidates.push(resource_path.join("ai-engine").join("main.py"));
+        candidates.push(resource_path.join("resources").join("ai-engine").join("main.py"));
+    }
+
+    // Executable-relative candidates (Windows installer layouts).
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            candidates.push(exe_dir.join("ai-engine").join("main.py"));
+            candidates.push(exe_dir.join("resources").join("ai-engine").join("main.py"));
+        }
+    }
+
+    // Development candidates.
+    candidates.push(PathBuf::from("../ai-engine/main.py"));
+    candidates.push(PathBuf::from("ai-engine/main.py"));
+
+    for candidate in &candidates {
+        if candidate.exists() {
+            if let Ok(normalized) = std::fs::canonicalize(candidate) {
                 return normalized;
             }
+            return dunce::simplified(candidate).to_path_buf();
         }
-        return dunce::simplified(&dev_path).to_path_buf();
     }
-    
-    // Try current working directory
-    let cwd_path = PathBuf::from("ai-engine/main.py");
-    if cwd_path.exists() {
-        if let Ok(absolute) = std::env::current_dir() {
-            let abs_path = absolute.join(&cwd_path);
-            // Use canonicalize to resolve symlinks, .., . and get absolute path
-            if let Ok(normalized) = std::fs::canonicalize(&abs_path) {
-                return normalized;
-            }
-        }
-        return dunce::simplified(&cwd_path).to_path_buf();
-    }
-    
-    // Last resort - assume it's in the current directory
+
+    eprintln!("[WARN] Python engine main.py not found. Checked paths: {:?}", candidates);
+
+    // Last resort fallback for diagnostics.
     PathBuf::from("ai-engine/main.py")
 }
 
@@ -610,9 +639,23 @@ fn validate_file_path(file_path: &str) -> Result<PathBuf, AppError> {
 
 /// Check whether a Python executable has torch installed.
 fn python_has_torch(python_exe: &Path) -> bool {
-    let output = std::process::Command::new(python_exe)
+    let output = create_hidden_std_command(python_exe)
         .arg("-c")
         .arg("import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('torch') else 1)")
+        .output();
+
+    match output {
+        Ok(o) => o.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Check whether a Python executable/command can be started.
+fn python_is_runnable(python_exe: &Path) -> bool {
+    let output = create_hidden_std_command(python_exe)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .output();
 
     match output {
@@ -648,6 +691,61 @@ fn pick_best_python_executable(candidates: Vec<PathBuf>) -> Option<PathBuf> {
             first
         );
         return Some(dunce::simplified(first).to_path_buf());
+    }
+
+    None
+}
+
+/// Return system-level Python command candidates in priority order.
+fn get_system_python_candidates() -> Vec<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        vec![
+            PathBuf::from("python"),
+            PathBuf::from("python3"),
+            PathBuf::from("python12"),
+            PathBuf::from("py"),
+        ]
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        vec![
+            PathBuf::from("python3"),
+            PathBuf::from("python"),
+            PathBuf::from("python12"),
+        ]
+    }
+}
+
+/// Pick the best runnable system Python command.
+/// Prefer commands with torch installed.
+fn pick_best_system_python(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    let runnable: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|p| python_is_runnable(p))
+        .collect();
+
+    eprintln!("[DEBUG] pick_best_system_python: runnable candidates = {:?}", runnable);
+
+    for exe in &runnable {
+        let has_torch = python_has_torch(exe);
+        eprintln!(
+            "[DEBUG] Checking system python command: {:?}, has_torch = {}",
+            exe, has_torch
+        );
+        if has_torch {
+            eprintln!("[INFO] Selected system Python with torch installed: {:?}", exe);
+            return Some(exe.clone());
+        }
+    }
+
+    if let Some(first) = runnable.first() {
+        eprintln!(
+            "[WARN] Selected runnable system Python without torch: {:?}",
+            first
+        );
+        return Some(first.clone());
     }
 
     None
@@ -697,6 +795,7 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
 
     // Try multiple venv locations in order of preference.
     // Includes legacy project-level env names used in this repository.
+    // Also include embeddable Python (installed by python_installer.rs)
     let mut venv_paths = {
         #[cfg(target_os = "windows")]
         {
@@ -704,6 +803,8 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
                 engine_dir.join("venv").join("Scripts").join("python.exe"),
                 engine_dir.join(".venv").join("Scripts").join("python.exe"),
                 engine_dir.join("env").join("Scripts").join("python.exe"),
+                // Embeddable Python installed by python_installer.rs
+                engine_dir.join("python").join("python.exe"),
             ]
         }
 
@@ -713,9 +814,39 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
                 engine_dir.join("venv").join("bin").join("python"),
                 engine_dir.join(".venv").join("bin").join("python"),
                 engine_dir.join("env").join("bin").join("python"),
+                // Embeddable Python installed by python_installer.rs
+                engine_dir.join("python").join("bin").join("python"),
             ]
         }
     };
+
+    // Add installer-managed Python location under AppData.
+    if let Ok(app_data_dir) = app.path().app_data_dir() {
+        #[cfg(target_os = "windows")]
+        {
+            venv_paths.push(app_data_dir.join("ai-engine").join("python").join("python.exe"));
+            venv_paths.push(
+                app_data_dir
+                    .join("Vocrify")
+                    .join("ai-engine")
+                    .join("python")
+                    .join("python.exe"),
+            );
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            venv_paths.push(app_data_dir.join("ai-engine").join("python").join("bin").join("python"));
+            venv_paths.push(
+                app_data_dir
+                    .join("Vocrify")
+                    .join("ai-engine")
+                    .join("python")
+                    .join("bin")
+                    .join("python"),
+            );
+        }
+    }
 
     // Try common virtual environment locations in parent directories
     if let Some(parent_dir) = engine_dir.parent() {
@@ -746,21 +877,87 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
             eprintln!("[INFO] Found Python venv in project hierarchy: {:?}", best);
             return best;
         }
-
-        // Try system python and keep it if torch is present
-        let system_python = PathBuf::from("python");
-        if python_has_torch(&system_python) {
-            eprintln!("[INFO] Selected system Python with torch installed");
-            return system_python;
-        }
-
-        eprintln!("[WARN] No Python with torch detected in known environments; using system Python as last resort.");
-        return system_python;
     }
 
-    // Fall back to system Python
-    eprintln!("[WARN] No Python venv found, using system Python. This may cause issues if dependencies are not installed.");
+    // Fall back to system Python command candidates
+    if let Some(best_system_python) = pick_best_system_python(get_system_python_candidates()) {
+        return best_system_python;
+    }
+
+    eprintln!(
+        "[WARN] No runnable Python command found in known environments; falling back to `python`."
+    );
     PathBuf::from("python")
+}
+
+/// Ensure minimal Python packages required for model downloads are available.
+/// This is especially important for embeddable Python installs where
+/// requirements.txt may not have been installed yet.
+async fn ensure_python_download_dependencies(python_exe: &Path) -> Result<(), AppError> {
+    let check_output = create_hidden_command(python_exe)
+        .arg("-c")
+        .arg(
+            "import importlib.util;mods=['requests','tenacity','huggingface_hub'];missing=[m for m in mods if importlib.util.find_spec(m) is None];print(','.join(missing))",
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| AppError::PythonError(format!("Failed to check Python dependencies: {}", e)))?;
+
+    if !check_output.status.success() {
+        let stderr = String::from_utf8_lossy(&check_output.stderr);
+        return Err(AppError::PythonError(format!(
+            "Failed to check Python dependencies: {}",
+            stderr.trim()
+        )));
+    }
+
+    let stdout = String::from_utf8_lossy(&check_output.stdout);
+    let missing: Vec<String> = stdout
+        .trim()
+        .split(',')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!(
+        "[INFO] Installing missing Python download dependencies: {:?}",
+        missing
+    );
+
+    let mut install_cmd = create_hidden_command(python_exe);
+    install_cmd
+        .arg("-m")
+        .arg("pip")
+        .arg("install")
+        .arg("--upgrade")
+        .arg("--no-warn-script-location");
+    for dep in &missing {
+        install_cmd.arg(dep);
+    }
+
+    let install_output = install_cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| AppError::PythonError(format!("Failed to install Python dependencies: {}", e)))?;
+
+    if !install_output.status.success() {
+        let stderr = String::from_utf8_lossy(&install_output.stderr);
+        return Err(AppError::PythonError(format!(
+            "Failed to install Python dependencies ({}): {}",
+            missing.join(", "),
+            stderr.trim()
+        )));
+    }
+
+    Ok(())
 }
 
 /// Build TranscriptionManager with Python bridge configured for diarization.
@@ -844,7 +1041,7 @@ async fn spawn_transcription(
         eprintln!("[DEBUG]   Added to PATH");
     }
 
-    let mut cmd = Command::new(&python_exe);
+    let mut cmd = create_hidden_command(&python_exe);
     cmd.arg(&engine_path)
         .arg("--file")
         .arg(&validated_path) // Use validated path instead of user input
@@ -1345,7 +1542,7 @@ async fn run_python_engine(app: AppHandle) -> Result<String, AppError> {
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
     
-    let output = Command::new(&python_exe)
+    let output = create_hidden_command(&python_exe)
         .arg(&engine_path)
         .arg("--test")
         .output()
@@ -1369,7 +1566,7 @@ async fn run_python_engine(app: AppHandle) -> Result<String, AppError> {
 async fn check_cuda_available(app: AppHandle) -> Result<bool, AppError> {
     let python_exe = get_python_executable(&app);
     
-    let output = Command::new(&python_exe)
+    let output = create_hidden_command(&python_exe)
         .arg("-c")
         .arg("import torch; print(torch.cuda.is_available())")
         .output()
@@ -1472,7 +1669,7 @@ except Exception as e:
     print(json.dumps(error_result))
 "#;
     
-    let output = Command::new(&python_exe)
+    let output = create_hidden_command(&python_exe)
         .arg("-c")
         .arg(script)
         .output()
@@ -1828,11 +2025,32 @@ async fn spawn_model_download(
     // All model downloads are handled by Python engine
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
+    let engine_dir = engine_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| AppError::PythonError(format!("Invalid Python engine path: {:?}", engine_path)))?;
+
+    ensure_python_download_dependencies(&python_exe).await?;
     
     eprintln!("[DEBUG] Final paths - Python: {:?}, Engine: {:?}", python_exe, engine_path);
+
+    // Run main.py through a bootstrap script that injects engine dir into sys.path.
+    // Embeddable Python runs in isolated mode and may not include script dir by default.
+    let bootstrap = r#"
+import runpy
+import sys
+from pathlib import Path
+engine = Path(sys.argv[1])
+sys.path.insert(0, str(engine.parent))
+sys.argv = [str(engine)] + sys.argv[2:]
+runpy.run_path(str(engine), run_name="__main__")
+"#;
     
-    let mut cmd = Command::new(&python_exe);
-    cmd.arg(&engine_path)
+    let mut cmd = create_hidden_command(&python_exe);
+    cmd.current_dir(&engine_dir)
+        .arg("-c")
+        .arg(bootstrap)
+        .arg(engine_path.to_string_lossy().to_string())
         .arg("--download-model")
         .arg(&python_model_name)
         .arg("--cache-dir")
@@ -1865,7 +2083,23 @@ async fn spawn_model_download(
     match child.try_wait() {
         Ok(Some(exit_status)) => {
             println!("[DEBUG] Process exited immediately with status: {:?}", exit_status);
-            return Err(AppError::PythonError(format!("Python process failed to start. Exit code: {:?}", exit_status)));
+            let output = child
+                .wait_with_output()
+                .await
+                .map_err(AppError::IoError)?;
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let details = if !stderr.trim().is_empty() {
+                stderr.trim().to_string()
+            } else if !stdout.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                "no additional output".to_string()
+            };
+            return Err(AppError::PythonError(format!(
+                "Python process exited immediately ({:?}): {}",
+                exit_status, details
+            )));
         }
         Ok(None) => {
             println!("[DEBUG] Process appears to be running");
@@ -2123,6 +2357,7 @@ async fn download_model(
     drop(manager);
 
     let handle = tokio::spawn(async move {
+        let app_for_events = app_clone.clone();
         let download_result = spawn_model_download(
             app_clone,
             model_name_clone.clone(),
@@ -2136,18 +2371,23 @@ async fn download_model(
             let _ = std::fs::remove_file(path);
         }
 
-        // CRITICAL: Only remove from downloading_models if download succeeded
-        // This prevents premature removal before .completed file is created
+        // Always remove from active map when task finishes (success or error)
+        {
+            let mut manager = task_manager_clone.lock().await;
+            manager.downloading_models.remove(&model_name_clone);
+        }
+
         match download_result {
             Ok(_) => {
-                let mut manager = task_manager_clone.lock().await;
-                manager.downloading_models.remove(&model_name_clone);
                 eprintln!("[INFO] Removed {} from downloading_models (successful)", model_name_clone);
             }
             Err(e) => {
-                eprintln!("[ERROR] Model download failed for {}: {}", model_name_clone, e);
-                // Do NOT remove from downloading_models on error - this allows UI to show it as stuck/failed
-                // The user will need to manually cancel/delete the failed download
+                let error_text = e.to_string();
+                eprintln!("[ERROR] Model download failed for {}: {}", model_name_clone, error_text);
+                let _ = app_for_events.emit("model-download-error", serde_json::json!({
+                    "modelName": model_name_clone,
+                    "error": error_text,
+                }));
             }
         }
     });
@@ -2244,7 +2484,7 @@ async fn delete_model(
 
     eprintln!("[DEBUG] Using Python to delete model (will clear model pool first)");
 
-    let output = tokio::process::Command::new(&python_exe)
+    let output = create_hidden_command(&python_exe)
         .arg(&engine_path)
         .arg("--delete-model")
         .arg(&model_name)
@@ -2491,8 +2731,23 @@ async fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMetadata>
 // Setup Wizard Persistence Functions
 // ============================================================================
 
-/// Get the path to the setup completion flag file
-fn get_setup_flag_path(app: &AppHandle) -> PathBuf {
+const SETUP_STATE_SCHEMA_VERSION: u32 = 1;
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+/// Get the path to the structured setup state file.
+fn get_setup_state_path(app: &AppHandle) -> PathBuf {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."));
+    app_data.join("setup_state.json")
+}
+
+/// Legacy marker used by older builds.
+fn get_legacy_setup_flag_path(app: &AppHandle) -> PathBuf {
     let app_data = app
         .path()
         .app_data_dir()
@@ -2500,43 +2755,92 @@ fn get_setup_flag_path(app: &AppHandle) -> PathBuf {
     app_data.join("Vocrify").join(".setup_complete")
 }
 
-/// Check if setup has been completed
-fn is_setup_complete_impl(app: &AppHandle) -> bool {
-    get_setup_flag_path(app).exists()
+fn load_setup_state(app: &AppHandle) -> Option<SetupState> {
+    let path = get_setup_state_path(app);
+    if !path.exists() {
+        return None;
+    }
+
+    let content = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str::<SetupState>(&content).ok()
 }
 
-/// Mark setup as complete by creating the flag file
-fn mark_setup_complete_impl(app: &AppHandle) -> Result<(), String> {
-    let path = get_setup_flag_path(app);
-    
-    // Ensure parent directory exists
+fn persist_setup_state(app: &AppHandle, state: &SetupState) -> Result<(), String> {
+    let path = get_setup_state_path(app);
     if let Some(parent) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             return Err(format!("Failed to create setup directory: {}", e));
         }
     }
-    
-    // Write timestamp to the flag file
-    let timestamp = chrono::Utc::now().to_rfc3339();
-    std::fs::write(&path, timestamp)
-        .map_err(|e| format!("Failed to write setup flag: {}", e))?;
-    
-    eprintln!("[INFO] Setup marked as complete at: {:?}", path);
+
+    let json = serde_json::to_string_pretty(state)
+        .map_err(|e| format!("Failed to serialize setup state: {}", e))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write setup state: {}", e))?;
+
+    eprintln!("[INFO] Setup state saved at: {:?}", path);
     Ok(())
 }
 
-/// Reset setup by removing the flag file
-fn reset_setup_impl(app: &AppHandle) -> Result<(), String> {
-    let path = get_setup_flag_path(app);
-    
-    if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("Failed to remove setup flag: {}", e))?;
-        eprintln!("[INFO] Setup reset - flag file removed");
+fn mark_setup_complete_impl(
+    app: &AppHandle,
+    readiness: &RuntimeReadinessStatus,
+    completed_at: Option<String>,
+    python_executable: Option<String>,
+    ffmpeg_path: Option<String>,
+) -> Result<(), String> {
+    let state = SetupState {
+        schema_version: SETUP_STATE_SCHEMA_VERSION,
+        runtime_ready: readiness.ready,
+        last_verified_at: readiness.checked_at.clone(),
+        completed_at,
+        python_executable,
+        ffmpeg_path,
+    };
+
+    persist_setup_state(app, &state)
+}
+
+fn update_runtime_state_impl(
+    app: &AppHandle,
+    readiness: &RuntimeReadinessStatus,
+    python_executable: Option<String>,
+    ffmpeg_path: Option<String>,
+) -> Result<(), String> {
+    let existing = load_setup_state(app);
+    let completed_at = if readiness.ready {
+        existing
+            .and_then(|state| state.completed_at)
+            .or_else(|| Some(now_rfc3339()))
     } else {
-        eprintln!("[INFO] Setup reset - no flag file to remove");
+        None
+    };
+
+    mark_setup_complete_impl(
+        app,
+        readiness,
+        completed_at,
+        python_executable,
+        ffmpeg_path,
+    )
+}
+
+/// Reset setup by removing the state file and legacy marker.
+fn reset_setup_impl(app: &AppHandle) -> Result<(), String> {
+    let state_path = get_setup_state_path(app);
+    if state_path.exists() {
+        std::fs::remove_file(&state_path)
+            .map_err(|e| format!("Failed to remove setup state file: {}", e))?;
+        eprintln!("[INFO] Setup reset - state file removed");
     }
-    
+
+    let legacy_path = get_legacy_setup_flag_path(app);
+    if legacy_path.exists() {
+        std::fs::remove_file(&legacy_path)
+            .map_err(|e| format!("Failed to remove legacy setup flag: {}", e))?;
+        eprintln!("[INFO] Setup reset - legacy flag file removed");
+    }
+
     Ok(())
 }
 
@@ -2544,20 +2848,40 @@ fn reset_setup_impl(app: &AppHandle) -> Result<(), String> {
 // Setup Wizard Tauri Commands
 // ============================================================================
 
-/// Check Python environment through Python backend
-#[tauri::command]
-async fn check_python_environment(app: AppHandle) -> Result<PythonCheckResult, String> {
-    let engine_path = get_python_engine_path(&app);
-    let python_exe = get_python_executable(&app);
+fn is_python_runtime_ready(check: &PythonCheckResult) -> bool {
+    check.status == "ok" && check.pytorch_installed && check.version.is_some()
+}
+
+fn is_ffmpeg_runtime_ready(check: &FFmpegCheckResult) -> bool {
+    check.installed && check.status != "error"
+}
+
+async fn run_python_environment_check_impl(app: &AppHandle) -> Result<PythonCheckResult, String> {
+    let engine_path = get_python_engine_path(app);
+    let python_exe = get_python_executable(app);
+    let engine_dir = engine_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
     
     eprintln!("[INFO] Checking Python environment...");
     eprintln!("[DEBUG] Python exe: {:?}", python_exe);
     eprintln!("[DEBUG] Engine path: {:?}", engine_path);
     
-    let output = Command::new(&python_exe)
-        .arg(&engine_path)
-        .arg("--command")
-        .arg("check_python")
+    let check_code = r#"
+import json, sys
+from pathlib import Path
+engine_dir = Path(sys.argv[1])
+sys.path.insert(0, str(engine_dir))
+from environment_checks import check_python_environment
+print(json.dumps(check_python_environment()), flush=True)
+"#;
+
+    let output = python_installer::create_hidden_command(&python_exe)
+        .current_dir(&engine_dir)
+        .arg("-c")
+        .arg(check_code)
+        .arg(engine_dir.to_string_lossy().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -2580,18 +2904,30 @@ async fn check_python_environment(app: AppHandle) -> Result<PythonCheckResult, S
     Ok(result)
 }
 
-/// Check FFmpeg installation through Python backend
-#[tauri::command]
-async fn check_ffmpeg_status(app: AppHandle) -> Result<FFmpegCheckResult, String> {
-    let engine_path = get_python_engine_path(&app);
-    let python_exe = get_python_executable(&app);
+async fn run_ffmpeg_status_check_impl(app: &AppHandle) -> Result<FFmpegCheckResult, String> {
+    let engine_path = get_python_engine_path(app);
+    let python_exe = get_python_executable(app);
+    let engine_dir = engine_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
     
     eprintln!("[INFO] Checking FFmpeg status...");
+
+    let check_code = r#"
+import json, sys
+from pathlib import Path
+engine_dir = Path(sys.argv[1])
+sys.path.insert(0, str(engine_dir))
+from environment_checks import check_ffmpeg
+print(json.dumps(check_ffmpeg()), flush=True)
+"#;
     
-    let output = Command::new(&python_exe)
-        .arg(&engine_path)
-        .arg("--command")
-        .arg("check_ffmpeg")
+    let output = python_installer::create_hidden_command(&python_exe)
+        .current_dir(&engine_dir)
+        .arg("-c")
+        .arg(check_code)
+        .arg(engine_dir.to_string_lossy().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -2613,21 +2949,108 @@ async fn check_ffmpeg_status(app: AppHandle) -> Result<FFmpegCheckResult, String
     Ok(result)
 }
 
+struct RuntimeReadinessEvaluation {
+    readiness: RuntimeReadinessStatus,
+    python_executable: Option<String>,
+    ffmpeg_path: Option<String>,
+}
+
+async fn evaluate_runtime_readiness(app: &AppHandle) -> RuntimeReadinessEvaluation {
+    let checked_at = now_rfc3339();
+
+    let python_result = run_python_environment_check_impl(app).await;
+    let ffmpeg_result = run_ffmpeg_status_check_impl(app).await;
+
+    let (python_ready, python_message, python_executable) = match python_result {
+        Ok(result) => (
+            is_python_runtime_ready(&result),
+            result.message,
+            result.executable,
+        ),
+        Err(err) => (false, format!("Python check failed: {}", err), None),
+    };
+
+    let (ffmpeg_ready, ffmpeg_message, ffmpeg_path) = match ffmpeg_result {
+        Ok(result) => (
+            is_ffmpeg_runtime_ready(&result),
+            result.message,
+            result.path,
+        ),
+        Err(err) => (false, format!("FFmpeg check failed: {}", err), None),
+    };
+
+    let ready = python_ready && ffmpeg_ready;
+    let message = if ready {
+        "Runtime is ready".to_string()
+    } else if !python_ready && !ffmpeg_ready {
+        "Runtime is not ready: Python and FFmpeg are required".to_string()
+    } else if !python_ready {
+        "Runtime is not ready: Python environment is not configured".to_string()
+    } else {
+        "Runtime is not ready: FFmpeg is not configured".to_string()
+    };
+
+    RuntimeReadinessEvaluation {
+        readiness: RuntimeReadinessStatus {
+            ready,
+            python_ready,
+            ffmpeg_ready,
+            python_message,
+            ffmpeg_message,
+            message,
+            checked_at,
+        },
+        python_executable,
+        ffmpeg_path,
+    }
+}
+
+/// Check Python environment through Python backend
+#[tauri::command]
+async fn check_python_environment(app: AppHandle) -> Result<PythonCheckResult, String> {
+    run_python_environment_check_impl(&app).await
+}
+
+/// Check FFmpeg installation through Python backend
+#[tauri::command]
+async fn check_ffmpeg_status(app: AppHandle) -> Result<FFmpegCheckResult, String> {
+    run_ffmpeg_status_check_impl(&app).await
+}
+
+#[tauri::command]
+async fn check_runtime_readiness(app: AppHandle) -> Result<RuntimeReadinessStatus, String> {
+    Ok(evaluate_runtime_readiness(&app).await.readiness)
+}
+
 /// Check AI models through Python backend
 #[tauri::command]
 async fn check_models_status(app: AppHandle) -> Result<ModelCheckResult, String> {
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
+    let engine_dir = engine_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
     let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
     
     eprintln!("[INFO] Checking models status...");
     eprintln!("[DEBUG] Models dir: {:?}", models_dir);
+
+    let check_code = r#"
+import json, sys
+from pathlib import Path
+engine_dir = Path(sys.argv[1])
+cache_dir = sys.argv[2] if len(sys.argv) > 2 else None
+sys.path.insert(0, str(engine_dir))
+from environment_checks import check_models
+print(json.dumps(check_models(cache_dir)), flush=True)
+"#;
     
-    let output = Command::new(&python_exe)
-        .arg(&engine_path)
-        .arg("--command")
-        .arg("check_models")
-        .arg("--cache-dir")
+    let output = create_hidden_command(&python_exe)
+        .current_dir(&engine_dir)
+        .arg("-c")
+        .arg(check_code)
+        .arg(engine_dir.to_string_lossy().to_string())
         .arg(models_dir.to_string_lossy().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2655,15 +3078,29 @@ async fn check_models_status(app: AppHandle) -> Result<ModelCheckResult, String>
 async fn get_environment_status(app: AppHandle) -> Result<EnvironmentStatus, String> {
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
+    let engine_dir = engine_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
     let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
     
     eprintln!("[INFO] Getting full environment status...");
+
+    let check_code = r#"
+import json, sys
+from pathlib import Path
+engine_dir = Path(sys.argv[1])
+cache_dir = sys.argv[2] if len(sys.argv) > 2 else None
+sys.path.insert(0, str(engine_dir))
+from environment_checks import get_full_environment_status
+print(json.dumps(get_full_environment_status(cache_dir)), flush=True)
+"#;
     
-    let output = Command::new(&python_exe)
-        .arg(&engine_path)
-        .arg("--command")
-        .arg("check_environment")
-        .arg("--cache-dir")
+    let output = create_hidden_command(&python_exe)
+        .current_dir(&engine_dir)
+        .arg("-c")
+        .arg(check_code)
+        .arg(engine_dir.to_string_lossy().to_string())
         .arg(models_dir.to_string_lossy().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -2689,15 +3126,32 @@ async fn get_environment_status(app: AppHandle) -> Result<EnvironmentStatus, Str
 /// Check if setup has been completed
 #[tauri::command]
 async fn is_setup_complete(app: AppHandle) -> Result<bool, String> {
-    let complete = is_setup_complete_impl(&app);
-    eprintln!("[INFO] Setup complete status: {}", complete);
-    Ok(complete)
+    let readiness = evaluate_runtime_readiness(&app).await;
+    update_runtime_state_impl(
+        &app,
+        &readiness.readiness,
+        readiness.python_executable.clone(),
+        readiness.ffmpeg_path.clone(),
+    )?;
+    eprintln!("[INFO] Setup complete status (runtime-ready): {}", readiness.readiness.ready);
+    Ok(readiness.readiness.ready)
 }
 
 /// Mark setup as complete
 #[tauri::command]
 async fn mark_setup_complete(app: AppHandle) -> Result<(), String> {
-    mark_setup_complete_impl(&app)
+    let readiness = evaluate_runtime_readiness(&app).await;
+    if !readiness.readiness.ready {
+        return Err(readiness.readiness.message);
+    }
+
+    mark_setup_complete_impl(
+        &app,
+        &readiness.readiness,
+        Some(now_rfc3339()),
+        readiness.python_executable,
+        readiness.ffmpeg_path,
+    )
 }
 
 /// Reset setup status (for re-run from settings)
@@ -2882,59 +3336,16 @@ async fn transcribe_rust(
             "taskId": task_id,
             "progress": 10,
             "stage": "transcribing",
-            "message": "Starting transcription...",
+            "message": "Transcribing audio...",
         }));
 
-        let task_id_clone = task_id.clone();
-        let app_clone = app.clone();
-        
-        // Spawn background task to emit progress updates during transcription
-        let progress_handle = tokio::spawn(async move {
-            let start_time = std::time::Instant::now();
-            let progress_interval = std::time::Duration::from_millis(500);
-            
-            loop {
-                tokio::time::sleep(progress_interval).await;
-                
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let ratio = (elapsed / expected_processing_secs).min(0.95);
-                let progress = (10.0 + ratio * 80.0) as u8;
-                
-                // Calculate estimated time remaining
-                let eta_secs = if ratio > 0.01 {
-                    Some((elapsed / ratio - elapsed).max(0.0))
-                } else {
-                    None
-                };
-                
-                eprintln!("[PROGRESS] Transcribing: {}% (elapsed={:.1}s, expected={:.1}s)", progress, elapsed, expected_processing_secs);
-                
-                let _ = app_clone.emit("progress-update", serde_json::json!({
-                    "taskId": task_id_clone,
-                    "progress": progress,
-                    "stage": "transcribing",
-                    "message": format!("Transcribing... {:.0}%", progress),
-                    "metrics": {
-                        "processedDuration": elapsed.min(expected_processing_secs * ratio),
-                        "totalDuration": expected_processing_secs,
-                        "estimatedTimeRemaining": eta_secs,
-                    }
-                }));
-                
-                // Stop when we reach 90%
-                if progress >= 90 {
-                    break;
-                }
-            }
-        });
-
-        // Run transcription
+        eprintln!("[PROGRESS] Starting transcription...");
+ 
+        // Run transcription - transcribe_file is blocking, no real-time progress available
         let enable_diarization = options.enable_diarization;
         let result = manager.transcribe_file(&audio_path, &tm_options, hf_token.as_deref()).await
             .map_err(|e| {
                 eprintln!("[ERROR] Rust transcription failed: {}", e);
-
-                // Emit error to frontend
                 let _ = app.emit("transcription-error", serde_json::json!({
                     "taskId": task_id,
                     "error": e.to_string(),
@@ -2942,8 +3353,26 @@ async fn transcribe_rust(
                 e.to_string()
             })?;
 
-        // Cancel progress task and emit final transcription progress
-        progress_handle.abort();
+        // Transcription done - emit completion progress
+        let audio_duration = result.duration;
+        eprintln!("[PROGRESS] Transcription done: audio_duration={:.1}s", audio_duration);
+        
+        // Emit progress - since we can't track real progress during transcription,
+        // we'll show a reasonable completion percentage based on audio length
+        let progress = if audio_duration > 300.0 {
+            50 // Long audio takes more time
+        } else if audio_duration > 60.0 {
+            40
+        } else {
+            30
+        };
+        
+        let _ = app.emit("progress-update", serde_json::json!({
+            "taskId": task_id,
+            "progress": progress,
+            "stage": "transcribing",
+            "message": format!("Processed {:.0}s of audio...", audio_duration),
+        }));
         
         let final_duration = result.duration;
         eprintln!("[PROGRESS] Transcription complete: duration={:.1}s", final_duration);
@@ -2957,32 +3386,7 @@ async fn transcribe_rust(
 
         // Handle diarization if enabled
         if enable_diarization {
-            // Diarization progress (90-98%)
-            let diarize_task_id = task_id.clone();
-            let diarize_app = app.clone();
-            let diarize_handle = tokio::spawn(async move {
-                let start_time = std::time::Instant::now();
-                let progress_interval = std::time::Duration::from_millis(500);
-                let mut progress = 90u8;
-                
-                while progress < 98 {
-                    tokio::time::sleep(progress_interval).await;
-                    let increment = (start_time.elapsed().as_secs_f64() / 3.0 * 8.0).min(8.0);
-                    progress = (90.0 + increment) as u8;
-                    progress = progress.min(98);
-                    
-                    let _ = diarize_app.emit("progress-update", serde_json::json!({
-                        "taskId": diarize_task_id,
-                        "progress": progress,
-                        "stage": "diarizing",
-                        "message": format!("Diarizing speakers... {}%", progress),
-                    }));
-                }
-            });
-
-            // Wait for diarization to complete (happens inside transcribe_file for now)
-            // Since diarization is integrated, we just emit completion
-            diarize_handle.abort();
+            eprintln!("[PROGRESS] Diarizing...");
             
             let _ = app.emit("progress-update", serde_json::json!({
                 "taskId": task_id,
@@ -3383,6 +3787,12 @@ pub fn run() {
             // Setup Wizard commands
             check_python_environment,
             check_ffmpeg_status,
+            check_runtime_readiness,
+            // Python Installer commands
+            check_python_installed,
+            install_python_full,
+            get_python_install_progress,
+            cancel_python_install,
             check_models_status,
             get_environment_status,
             is_setup_complete,
