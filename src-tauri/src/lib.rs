@@ -2750,6 +2750,24 @@ async fn load_model_rust(
     }
 }
 
+/// Estimate realtime factor (RTF) for a given model
+/// This is used to estimate processing time for progress calculation
+fn model_rtf_estimate(model: &str) -> f64 {
+    match model {
+        "whisper-tiny" => 3.0,
+        "whisper-base" => 2.5,
+        "whisper-small" => 1.8,
+        "whisper-medium" => 1.2,
+        "whisper-large" | "whisper-large-v2" | "whisper-large-v3" => 0.9,
+        "parakeet" => 4.0,
+        "parakeet-tdt-0.6b-v3" => 4.2,
+        "parakeet-tdt-1.1b" => 2.2,
+        "moonshine-tiny" => 3.5,
+        "moonshine-base" => 2.0,
+        _ => 1.5,
+    }
+}
+
 /// Transcribe using Rust transcribe-rs engine
 #[tauri::command]
 async fn transcribe_rust(
@@ -2825,13 +2843,24 @@ async fn transcribe_rust(
 
     #[cfg(feature = "rust-transcribe")]
     {
-        // Emit progress start
+        // Emit loading stage progress (0-10%)
         let _ = app.emit("progress-update", serde_json::json!({
             "taskId": task_id,
-            "progress": 5,
+            "progress": 0,
             "stage": "loading",
-            "message": "Starting Rust transcription...",
+            "message": "Loading audio and model...",
         }));
+
+        // Get RTF estimate for this model
+        let model_name = options.model.as_str();
+        let rtf = model_rtf_estimate(model_name);
+        
+        // Try to get audio duration for better progress estimation
+        // We'll use a default estimate if we can't determine it easily
+        let estimated_duration_secs = 60.0; // Default: assume 1 minute audio
+        let expected_processing_secs = (estimated_duration_secs / rtf).max(5.0);
+        
+        eprintln!("[PROGRESS] Estimated RTF={}, expected processing time={:.1}s", rtf, expected_processing_secs);
 
         // Convert RustTranscriptionOptions to transcription_manager::TranscriptionOptions
         let tm_options = transcription_manager::TranscriptionOptions::from(options.clone());
@@ -2845,6 +2874,59 @@ async fn transcribe_rust(
             }
         };
 
+        // Emit loading complete, starting transcription
+        let _ = app.emit("progress-update", serde_json::json!({
+            "taskId": task_id,
+            "progress": 10,
+            "stage": "transcribing",
+            "message": "Starting transcription...",
+        }));
+
+        let task_id_clone = task_id.clone();
+        let app_clone = app.clone();
+        
+        // Spawn background task to emit progress updates during transcription
+        let progress_handle = tokio::spawn(async move {
+            let start_time = std::time::Instant::now();
+            let progress_interval = std::time::Duration::from_millis(500);
+            
+            loop {
+                tokio::time::sleep(progress_interval).await;
+                
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let ratio = (elapsed / expected_processing_secs).min(0.95);
+                let progress = (10.0 + ratio * 80.0) as u8;
+                
+                // Calculate estimated time remaining
+                let eta_secs = if ratio > 0.01 {
+                    Some((elapsed / ratio - elapsed).max(0.0))
+                } else {
+                    None
+                };
+                
+                eprintln!("[PROGRESS] Transcribing: {}% (elapsed={:.1}s, expected={:.1}s)", progress, elapsed, expected_processing_secs);
+                
+                let _ = app_clone.emit("progress-update", serde_json::json!({
+                    "taskId": task_id_clone,
+                    "progress": progress,
+                    "stage": "transcribing",
+                    "message": format!("Transcribing... {:.0}%", progress),
+                    "metrics": {
+                        "processedDuration": elapsed.min(expected_processing_secs * ratio),
+                        "totalDuration": expected_processing_secs,
+                        "estimatedTimeRemaining": eta_secs,
+                    }
+                }));
+                
+                // Stop when we reach 90%
+                if progress >= 90 {
+                    break;
+                }
+            }
+        });
+
+        // Run transcription
+        let enable_diarization = options.enable_diarization;
         let result = manager.transcribe_file(&audio_path, &tm_options, hf_token.as_deref()).await
             .map_err(|e| {
                 eprintln!("[ERROR] Rust transcription failed: {}", e);
@@ -2856,6 +2938,56 @@ async fn transcribe_rust(
                 }));
                 e.to_string()
             })?;
+
+        // Cancel progress task and emit final transcription progress
+        progress_handle.abort();
+        
+        let final_duration = result.duration;
+        eprintln!("[PROGRESS] Transcription complete: duration={:.1}s", final_duration);
+        
+        let _ = app.emit("progress-update", serde_json::json!({
+            "taskId": task_id,
+            "progress": 90,
+            "stage": if enable_diarization { "diarizing" } else { "finalizing" },
+            "message": if enable_diarization { "Running speaker diarization..." } else { "Finalizing..." },
+        }));
+
+        // Handle diarization if enabled
+        if enable_diarization {
+            // Diarization progress (90-98%)
+            let diarize_task_id = task_id.clone();
+            let diarize_app = app.clone();
+            let diarize_handle = tokio::spawn(async move {
+                let start_time = std::time::Instant::now();
+                let progress_interval = std::time::Duration::from_millis(500);
+                let mut progress = 90u8;
+                
+                while progress < 98 {
+                    tokio::time::sleep(progress_interval).await;
+                    let increment = (start_time.elapsed().as_secs_f64() / 3.0 * 8.0).min(8.0);
+                    progress = (90.0 + increment) as u8;
+                    progress = progress.min(98);
+                    
+                    let _ = diarize_app.emit("progress-update", serde_json::json!({
+                        "taskId": diarize_task_id,
+                        "progress": progress,
+                        "stage": "diarizing",
+                        "message": format!("Diarizing speakers... {}%", progress),
+                    }));
+                }
+            });
+
+            // Wait for diarization to complete (happens inside transcribe_file for now)
+            // Since diarization is integrated, we just emit completion
+            diarize_handle.abort();
+            
+            let _ = app.emit("progress-update", serde_json::json!({
+                "taskId": task_id,
+                "progress": 98,
+                "stage": "finalizing",
+                "message": "Preparing output...",
+            }));
+        }
 
         // Emit completion
         let _ = app.emit("transcription-complete", serde_json::json!({
