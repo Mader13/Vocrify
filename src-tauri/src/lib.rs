@@ -486,6 +486,9 @@ pub enum AppError {
 
     #[error("Access denied: {0}")]
     AccessDenied(String),
+
+    #[error("{0}")]
+    Other(String),
 }
 
 impl Serialize for AppError {
@@ -3205,6 +3208,109 @@ async fn read_file_as_base64(file_path: String) -> Result<String, AppError> {
     Ok(base64_string)
 }
 
+/// Get file size in bytes
+#[tauri::command]
+async fn get_file_size(path: String) -> Result<u64, AppError> {
+    let validated_path = validate_file_path(&path)?;
+    let metadata = std::fs::metadata(&validated_path)
+        .map_err(|e| AppError::IoError(e))?;
+    Ok(metadata.len())
+}
+
+/// Delete a file
+#[tauri::command]
+async fn delete_file(path: String) -> Result<(), AppError> {
+    let validated_path = validate_file_path(&path)?;
+    std::fs::remove_file(&validated_path)
+        .map_err(|e| AppError::IoError(e))?;
+    Ok(())
+}
+
+/// Convert audio/video to MP3 using FFmpeg
+#[tauri::command]
+async fn convert_to_mp3(
+    app: AppHandle,
+    input_path: String,
+    output_path: String,
+) -> Result<String, AppError> {
+    eprintln!("[DEBUG] convert_to_mp3 called: input={}, output={}", input_path, output_path);
+    
+    // Validate input file (must exist)
+    let validated_input = validate_file_path(&input_path)?;
+    eprintln!("[DEBUG] validated input path: {}", validated_input.display());
+    
+    // For output path, just ensure the parent directory exists and is writable
+    let output_pathbuf = PathBuf::from(&output_path);
+    if let Some(parent_dir) = output_pathbuf.parent() {
+        if !parent_dir.exists() {
+            std::fs::create_dir_all(parent_dir)
+                .map_err(|e| AppError::IoError(e))?;
+        }
+    }
+    let validated_output = output_pathbuf;
+    eprintln!("[DEBUG] output path: {}", validated_output.display());
+    
+    // Get FFmpeg path
+    let ffmpeg_path = match crate::ffmpeg_manager::get_ffmpeg_path(&app).await {
+        Ok(path) => {
+            eprintln!("[DEBUG] FFmpeg path found: {}", path.display());
+            path
+        }
+        Err(e) => {
+            eprintln!("[ERROR] FFmpeg not found: {}", e);
+            return Err(AppError::Other(format!("FFmpeg not found: {}", e)));
+        }
+    };
+    
+    // Run FFmpeg conversion
+    eprintln!("[DEBUG] Running FFmpeg conversion...");
+    
+    let status = std::process::Command::new(&ffmpeg_path)
+        .args([
+            "-i", validated_input.to_str().unwrap_or(&input_path),
+            "-vn",
+            "-acodec", "libmp3lame",
+            "-q:a", "2",
+            "-y",
+            validated_output.to_str().unwrap_or(&output_path),
+        ])
+        .output()
+        .map_err(|e| AppError::IoError(e))?;
+    
+    if !status.status.success() {
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        let stdout = String::from_utf8_lossy(&status.stdout);
+        eprintln!("[ERROR] FFmpeg conversion failed: status={}, stderr={}", status.status, stderr);
+        eprintln!("[DEBUG] FFmpeg stdout: {}", stdout);
+        return Err(AppError::Other(format!("FFmpeg conversion failed: {}", stderr)));
+    }
+    
+    // Verify output file exists
+    if !validated_output.exists() {
+        eprintln!("[ERROR] Output file was not created: {}", validated_output.display());
+        return Err(AppError::Other("Output file was not created".to_string()));
+    }
+    
+    eprintln!("[DEBUG] Conversion successful: {}", validated_output.display());
+    Ok(output_path)
+}
+
+/// Get or create the archive directory
+#[tauri::command]
+async fn get_archive_dir(app: AppHandle) -> Result<String, AppError> {
+    let app_data_dir = app.path().app_data_dir()
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    
+    let archive_dir = app_data_dir.join("archive");
+    
+    if !archive_dir.exists() {
+        std::fs::create_dir_all(&archive_dir)
+            .map_err(|e| AppError::IoError(e))?;
+    }
+    
+    Ok(archive_dir.to_string_lossy().to_string())
+}
+
 /// Main entry point
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -3259,6 +3365,11 @@ pub fn run() {
             save_huggingface_token,
             get_huggingface_token_command,
             read_file_as_base64,
+            // Archive commands
+            get_file_size,
+            delete_file,
+            convert_to_mp3,
+            get_archive_dir,
             // Phase 3: Rust Transcription commands
             init_transcription_manager,
             load_model_rust,
@@ -3790,8 +3901,6 @@ mod tests {
 
 #[cfg(test)]
 mod test_python {
-    use super::*;
-    
     #[test]
     fn test_python_executable_path() {
         // This test just prints the path - not a real test

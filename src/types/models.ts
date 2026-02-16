@@ -1,0 +1,200 @@
+export type AIModel =
+  | "whisper-tiny"
+  | "whisper-base"
+  | "whisper-small"
+  | "whisper-medium"
+  | "whisper-large"
+  | "parakeet"
+  | "parakeet-tdt-0.6b-v3"
+  | "parakeet-tdt-1.1b";
+
+export type ModelType = "whisper" | "parakeet" | "diarization";
+
+export interface ModelConfig {
+  type: "whisper" | "parakeet";
+  speedCategory: "fast" | "medium" | "slow";
+  supportsStreaming: boolean;
+  typicalRealtimeFactor: number;
+}
+
+export interface AvailableModel {
+  name: string;
+  sizeMb: number;
+  modelType: ModelType;
+  description: string;
+  installed: boolean;
+  path?: string;
+}
+
+export interface LocalModel {
+  name: string;
+  sizeMb: number;
+  modelType: ModelType;
+  installed: boolean;
+  path?: string;
+}
+
+export interface DiskUsage {
+  totalSizeMb: number;
+  freeSpaceMb: number;
+}
+
+export interface ModelDownloadProgress {
+  modelName: string;
+  currentMb: number;
+  totalMb: number;
+  percent: number;
+  speedMbS: number;
+  etaS?: number;
+  totalEstimated?: boolean;
+  status: "downloading" | "paused" | "completed" | "error" | "cancelled";
+  error?: string;
+}
+
+export interface ModelDownloadStageEvent {
+  modelName: string;
+  stage: "segmentation" | "embedding";
+  submodelName: string;
+  currentMb: number;
+  totalMb: number;
+  percent: number;
+  speedMbS: number;
+}
+
+export interface ModelDownloadStageCompleteEvent {
+  modelName: string;
+  stage: "segmentation" | "embedding";
+}
+
+export interface ModelDownloadState {
+  modelName: string;
+  progress: number;
+  currentMb: number;
+  totalMb: number;
+  speedMbS: string;
+  etaS?: number;
+  totalEstimated?: boolean;
+  status: "downloading" | "paused" | "completed" | "error" | "cancelled";
+  error?: string;
+  currentStage?: "segmentation" | "embedding" | null;
+  stages?: {
+    segmentation?: {
+      progress: number;
+      currentMb: number;
+      totalMb: number;
+      completed: boolean;
+    };
+    embedding?: {
+      progress: number;
+      currentMb: number;
+      totalMb: number;
+      completed: boolean;
+    };
+  };
+}
+
+export const MODEL_NAMES: Record<AIModel, string> = {
+  "whisper-tiny": "Whisper Tiny (fastest)",
+  "whisper-base": "Whisper Base",
+  "whisper-small": "Whisper Small",
+  "whisper-medium": "Whisper Medium",
+  "whisper-large": "Whisper Large (best quality)",
+  parakeet: "Parakeet (NVIDIA)",
+  "parakeet-tdt-0.6b-v3": "Parakeet 0.6B (multilingual)",
+  "parakeet-tdt-1.1b": "Parakeet 1.1B (English only)",
+};
+
+export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {
+  "whisper-tiny": {
+    type: "whisper",
+    speedCategory: "fast",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 3.0,
+  },
+  "whisper-base": {
+    type: "whisper",
+    speedCategory: "fast",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 2.5,
+  },
+  "whisper-small": {
+    type: "whisper",
+    speedCategory: "medium",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 1.8,
+  },
+  "whisper-medium": {
+    type: "whisper",
+    speedCategory: "slow",
+    supportsStreaming: true,
+    typicalRealtimeFactor: 1.2,
+  },
+  "whisper-large": {
+    type: "whisper",
+    speedCategory: "slow",
+    supportsStreaming: true,
+    typicalRealtimeFactor: 0.9,
+  },
+  parakeet: {
+    type: "parakeet",
+    speedCategory: "fast",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 4.0,
+  },
+  "parakeet-tdt-0.6b-v3": {
+    type: "parakeet",
+    speedCategory: "fast",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 4.2,
+  },
+  "parakeet-tdt-1.1b": {
+    type: "parakeet",
+    speedCategory: "medium",
+    supportsStreaming: false,
+    typicalRealtimeFactor: 2.2,
+  },
+};
+
+export const AVAILABLE_MODELS: AvailableModel[] = [
+  { name: "whisper-tiny", sizeMb: 74, modelType: "whisper", description: "Самый быстрый, минимальная точность", installed: false },
+  { name: "whisper-base", sizeMb: 139, modelType: "whisper", description: "Баланс скорости и точности", installed: false },
+  { name: "whisper-small", sizeMb: 466, modelType: "whisper", description: "Хорошая точность, средняя скорость", installed: false },
+  { name: "whisper-medium", sizeMb: 1505, modelType: "whisper", description: "Высокая точность", installed: false },
+  { name: "whisper-large-v3", sizeMb: 2960, modelType: "whisper", description: "Максимальная точность, медленный", installed: false },
+  { name: "parakeet-tdt-0.6b-v3", sizeMb: 640, modelType: "parakeet", description: "Многоязычная, включая русский", installed: false },
+  { name: "parakeet-tdt-1.1b", sizeMb: 2490, modelType: "parakeet", description: "Английский, высокая точность", installed: false },
+  { name: "pyannote-diarization", sizeMb: 463, modelType: "diarization", description: "PyAnnote модель диаризации", installed: false },
+  { name: "sherpa-onnx-diarization", sizeMb: 45, modelType: "diarization", description: "Sherpa-ONNX модель диаризации", installed: false },
+];
+
+export const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  "whisper-tiny": "Whisper Tiny (74MB)",
+  "whisper-base": "Whisper Base (139MB)",
+  "whisper-small": "Whisper Small (466MB)",
+  "whisper-medium": "Whisper Medium (1.5GB)",
+  "whisper-large-v3": "Whisper Large V3 (3GB)",
+  "parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B (640MB)",
+  "parakeet-tdt-1.1b": "Parakeet TDT 1.1B (2.5GB)",
+  "pyannote-segmentation-3.0": "PyAnnote Segmentation 3.0 (68MB)",
+  "pyannote-embedding-3.0": "PyAnnote Embedding 3.0 (395MB)",
+  "sherpa-onnx-segmentation": "Sherpa Segmentation (7MB)",
+  "sherpa-onnx-embedding": "Sherpa Embedding (38MB)",
+};
+
+export const MODEL_ICONS: Record<ModelType, string> = {
+  whisper: "🐍",
+  parakeet: "🦜",
+  diarization: "🎤",
+};
+
+export function isPyannoteModel(modelName: string): boolean {
+  return modelName.toLowerCase().includes("pyannote");
+}
+
+export function isSherpaModel(modelName: string): boolean {
+  return modelName.toLowerCase().includes("sherpa-onnx");
+}
+
+export function requiresHuggingFaceToken(provider: string): boolean {
+  return provider === "pyannote";
+}

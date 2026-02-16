@@ -1,10 +1,11 @@
 import * as React from "react";
-import { CheckCircle2, FolderOpen, HardDrive } from "lucide-react";
+import { CheckCircle2, FolderOpen, HardDrive, Mic } from "lucide-react";
 import { useModelsStore } from "@/stores/modelsStore";
 import { ModelCard } from "@/components/features/ModelCard";
 import { HuggingFaceTokenCard } from "@/components/features/HuggingFaceTokenCard";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { openModelsFolder } from "@/services/tauri";
 import { MODEL_NAMES } from "@/types";
 
@@ -35,7 +36,7 @@ export function ModelsManagement() {
 
   const formatSize = (mb: number | undefined): string => {
     if (mb === undefined || mb === null || isNaN(mb)) {
-      return "—";
+      return "N/A";
     }
     if (mb >= 1024) {
       return `${(mb / 1024).toFixed(1)} GB`;
@@ -50,7 +51,7 @@ export function ModelsManagement() {
     const totalSeconds = Math.round(etaS);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
+    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
   };
 
   const totalDownloads = Object.values(downloads).filter(
@@ -83,9 +84,9 @@ export function ModelsManagement() {
       <div className="mx-auto max-w-7xl">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Управление моделями</h1>
+            <h1 className="text-3xl font-bold">Model Management</h1>
             <p className="text-muted-foreground mt-2">
-              Скачайте и управляйте моделями для транскрипции
+              Download and manage models for transcription and diarization
             </p>
           </div>
           <Button
@@ -94,7 +95,7 @@ export function ModelsManagement() {
             className="gap-2"
           >
             <FolderOpen className="h-4 w-4" />
-            Открыть папку с моделями
+            Open Models Folder
           </Button>
         </div>
 
@@ -102,14 +103,14 @@ export function ModelsManagement() {
           {selectedTranscriptionModel && (
             <div className="rounded-xl border bg-card/80 p-4 transition-all duration-200 hover:border-primary/40 hover:shadow-sm lg:col-span-2">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                Выбранная модель
+                Selected Model
               </p>
               <p className="mt-2 line-clamp-1 text-lg font-semibold">
                 {MODEL_NAMES[selectedTranscriptionModel as keyof typeof MODEL_NAMES] ??
                   selectedTranscriptionModel}
               </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Используется по умолчанию для новых задач транскрипции.
+                Used by default for new transcription tasks.
               </p>
             </div>
           )}
@@ -121,7 +122,7 @@ export function ModelsManagement() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Занято моделями
+                  Disk Usage
                 </p>
                 <p className="text-xl font-semibold">
                   {formatSize(diskUsage?.totalSizeMb)}
@@ -137,7 +138,7 @@ export function ModelsManagement() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Скачено моделей
+                  Installed
                 </p>
                 <p className="text-xl font-semibold">
                   {installedModelsCount}
@@ -149,7 +150,7 @@ export function ModelsManagement() {
 
         {totalDownloads.length > 0 && (
           <div className="mb-8 p-4 rounded-xl border bg-primary/5">
-            <h2 className="font-semibold mb-3">Активные загрузки</h2>
+            <h2 className="font-semibold mb-3">Active Downloads</h2>
             <div className="space-y-3">
               {totalDownloads.map((download) => (
                 <div key={download.modelName} className="space-y-1">
@@ -161,9 +162,9 @@ export function ModelsManagement() {
                   <p className="text-xs text-muted-foreground">
                     {formatSize(download.currentMb)} /{" "}
                     {formatSize(download.totalMb)}
-                    {download.totalEstimated ? " (оценочно)" : ""}
-                    {download.speedMbS && ` • ${download.speedMbS} MB/s`}
-                    {formatEta(download.etaS) && ` • осталось ~${formatEta(download.etaS)}`}
+                    {download.totalEstimated ? " (estimated)" : ""}
+                    {download.speedMbS && ` - ${download.speedMbS} MB/s`}
+                    {formatEta(download.etaS) && ` - ~${formatEta(download.etaS)} remaining`}
                   </p>
                 </div>
               ))}
@@ -171,92 +172,156 @@ export function ModelsManagement() {
           </div>
         )}
 
-        <div className="space-y-8">
-          <div>
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <span>🐍</span> Whisper Models
-            </h2>
-            <div className="space-y-3">
-              {whisperModels.map((model, index) => (
-                  <ModelCard
-                    key={model.name}
-                    model={model}
-                    download={downloads[model.name]}
-                    animationDelayMs={index * 45}
-                    onDownload={() => downloadModel(model.name, "whisper")}
-                    onDownloadCancel={() => cancelModelDownload(model.name)}
-                    onDelete={() =>
-                      deleteModel(model.name).then(() => loadModels())
-                    }
-                    onSelect={() => setSelectedTranscriptionModel(model.name)}
-                    isSelected={selectedTranscriptionModel === model.name}
-                  />
-                ))}
-            </div>
-          </div>
+        <Tabs defaultValue="transcription" className="w-full">
+          <TabsList className="mb-6">
+            <TabsTrigger value="transcription" className="gap-2">
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                />
+              </svg>
+              Transcription
+            </TabsTrigger>
+            <TabsTrigger value="diarization" className="gap-2">
+              <Mic className="w-4 h-4" />
+              Diarization
+            </TabsTrigger>
+          </TabsList>
 
-          <div>
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <span>🦜</span> Parakeet Models
-            </h2>
-            <div className="space-y-3">
-              {parakeetModels.map((model, index) => (
-                  <ModelCard
-                    key={model.name}
-                    model={model}
-                    download={downloads[model.name]}
-                    animationDelayMs={100 + index * 45}
-                    onDownload={() => downloadModel(model.name, "parakeet")}
-                    onDownloadCancel={() => cancelModelDownload(model.name)}
-                    onDelete={() =>
-                      deleteModel(model.name).then(() => loadModels())
-                    }
-                    onSelect={() => setSelectedTranscriptionModel(model.name)}
-                    isSelected={selectedTranscriptionModel === model.name}
-                  />
-                ))}
-            </div>
-          </div>
+          <TabsContent value="transcription">
+            <div className="space-y-8">
+              <div>
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                  <span>Python</span> Whisper Models
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Open-source model from OpenAI, supports multiple languages
+                </p>
+                <div className="space-y-3">
+                  {whisperModels.map((model, index) => (
+                    <ModelCard
+                      key={model.name}
+                      model={model}
+                      download={downloads[model.name]}
+                      animationDelayMs={index * 45}
+                      onDownload={() => downloadModel(model.name, "whisper")}
+                      onDownloadCancel={() => cancelModelDownload(model.name)}
+                      onDelete={() =>
+                        deleteModel(model.name).then(() => loadModels())
+                      }
+                      onSelect={() => setSelectedTranscriptionModel(model.name)}
+                      isSelected={selectedTranscriptionModel === model.name}
+                    />
+                  ))}
+                </div>
+              </div>
 
-          <div>
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <span>🎤</span> Диаризация (разделение спикеров)
-            </h2>
-            <div className="mb-4">
-              <HuggingFaceTokenCard />
-            </div>
-            <div className="space-y-3">
-              {diarizationModels.map((model, index) => (
-                  <ModelCard
-                    key={model.name}
-                    model={model}
-                    download={downloads[model.name]}
-                    animationDelayMs={180 + index * 45}
-                    onDownload={() => downloadModel(model.name, "diarization")}
-                    onDownloadCancel={() => cancelModelDownload(model.name)}
-                    onDelete={() =>
-                      deleteModel(model.name).then(() => loadModels())
-                    }
-                  />
-                ))}
-            </div>
-          </div>
-        </div>
+              <div>
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                  <span>GPU</span> Parakeet Models
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  NVIDIA model optimized for GPU acceleration
+                </p>
+                <div className="space-y-3">
+                  {parakeetModels.map((model, index) => (
+                    <ModelCard
+                      key={model.name}
+                      model={model}
+                      download={downloads[model.name]}
+                      animationDelayMs={100 + index * 45}
+                      onDownload={() => downloadModel(model.name, "parakeet")}
+                      onDownloadCancel={() => cancelModelDownload(model.name)}
+                      onDelete={() =>
+                        deleteModel(model.name).then(() => loadModels())
+                      }
+                      onSelect={() => setSelectedTranscriptionModel(model.name)}
+                      isSelected={selectedTranscriptionModel === model.name}
+                    />
+                  ))}
+                </div>
+              </div>
 
-        <div className="mt-8 p-4 rounded-xl border bg-muted/50">
-          <h3 className="font-medium mb-2">Примечание</h3>
-          <ul className="text-sm text-muted-foreground space-y-1">
-            <li>
-              • Whisper - открытая модель от OpenAI, поддерживает множество
-              языков
-            </li>
-            <li>• Parakeet - модель от NVIDIA, оптимизирована для GPU</li>
-            <li>
-              • Модели загружаются в директорию приложения и доступны офлайн
-            </li>
-            <li>• Для работы Parakeet рекомендуется использовать GPU</li>
-          </ul>
-        </div>
+              <div className="p-4 rounded-xl border bg-muted/50">
+                <h3 className="font-medium mb-2">Note</h3>
+                <ul className="text-sm text-muted-foreground space-y-1">
+                  <li>
+                    - Whisper - open model from OpenAI, supports many languages
+                  </li>
+                  <li>- Parakeet - NVIDIA model, optimized for GPU</li>
+                  <li>
+                    - Models are downloaded to the app directory and available offline
+                  </li>
+                  <li>- GPU is recommended for Parakeet</li>
+                </ul>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="diarization">
+            <div className="space-y-8">
+              <div>
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                  <span className="text-2xl">HuggingFace</span> Token Setup
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Required for PyAnnote diarization models
+                </p>
+                <HuggingFaceTokenCard />
+              </div>
+
+              <div>
+                <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                  <span>Microphone</span> Diarization Models
+                </h2>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Models for speaker separation in audio
+                </p>
+                <div className="space-y-3">
+                  {diarizationModels.map((model, index) => (
+                    <ModelCard
+                      key={model.name}
+                      model={model}
+                      download={downloads[model.name]}
+                      animationDelayMs={180 + index * 45}
+                      onDownload={() => downloadModel(model.name, "diarization")}
+                      onDownloadCancel={() => cancelModelDownload(model.name)}
+                      onDelete={() =>
+                        deleteModel(model.name).then(() => loadModels())
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl border bg-muted/50">
+                <h3 className="font-medium mb-2">About Diarization</h3>
+                <ul className="text-sm text-muted-foreground space-y-1">
+                  <li>
+                    - PyAnnote - high accuracy, requires HuggingFace token
+                  </li>
+                  <li>
+                    - Sherpa-ONNX - lightweight, works without token
+                  </li>
+                  <li>
+                    - Diarization identifies different speakers in audio
+                  </li>
+                  <li>
+                    - Works in combination with transcription models
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

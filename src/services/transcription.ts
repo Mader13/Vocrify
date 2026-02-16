@@ -51,8 +51,7 @@ function shouldBypassRustForFile(filePath: string): boolean {
  */
 export function shouldUseRustEngine(model: string): boolean {
   // All transcribe-rs supported models use Rust
-  if (model.startsWith("whisper") || 
-      model.startsWith("distil-") ||
+  if (model.startsWith("whisper") ||
       model.startsWith("parakeet") || 
       model.startsWith("moonshine") ||
       model.startsWith("sense")) {

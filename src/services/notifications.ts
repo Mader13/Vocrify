@@ -16,128 +16,68 @@ import type {
   TranscriptionTask,
   TaskStatus,
   NotificationSettings,
-  NotificationCategory,
 } from "@/types";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
+// UI Notification Store - используется для рендеринга уведомлений
+import { useNotificationStore as useUINotificationStore } from "@/components/ui/notifications";
+
 // ============================================================================
-// Notification Store (Zustand)
+// Notification Settings Store (for NotificationSettings component)
 // ============================================================================
 
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 
-export type NotificationType = "success" | "error" | "warning" | "info";
-
-export interface Notification {
-  id: string;
-  type: NotificationType;
-  title: string;
-  message: string;
-  timestamp: Date;
-  duration?: number; // Auto-dismiss after ms (0 = no auto-dismiss)
-  variant?: NotificationType;
-  category?: NotificationCategory;
-  action?: {
-    label: string;
-    onClick: () => void;
-  };
-  metadata?: {
-    category?: "model" | "transcription" | "system" | "ffmpeg";
-    taskId?: string;
-    modelName?: string;
-    fileName?: string;
-  };
-}
-
-interface NotificationState {
-  notifications: Notification[];
+interface NotificationSettingsState {
   settings: NotificationSettings;
-  addNotification: (notification: Omit<Notification, "id" | "timestamp">) => string;
   updateSettings: (updates: Partial<NotificationSettings>) => void;
-  removeNotification: (id: string) => void;
-  clearAll: () => void;
-  clearByType: (type: NotificationType) => void;
-  clearByCategory: (category: string) => void;
+  addNotification: (notification: {
+    title: string;
+    message: string;
+    type: "success" | "error" | "warning" | "info";
+    category?: string;
+  }) => string;
 }
 
-/**
- * Notification store for managing in-app notifications
- */
-export const useNotificationStore = create<NotificationState>((set, get) => ({
-  notifications: [],
-  settings: {
-    enabled: true,
-    position: "top-right",
-    duration: 4000,
-    soundEnabled: false,
-    desktopNotificationsEnabled: false,
-    categories: {
-      download: true,
-      transcription: true,
-      error: true,
-      info: true,
-    },
+const defaultSettings: NotificationSettings = {
+  enabled: true,
+  position: "top-right",
+  duration: 4000,
+  soundEnabled: false,
+  desktopNotificationsEnabled: false,
+  categories: {
+    download: true,
+    transcription: true,
+    error: true,
+    info: true,
   },
+};
 
-  updateSettings: (updates) => {
-    set((state) => ({
-      settings: { ...state.settings, ...updates },
-    }));
-  },
-
-  addNotification: (notification) => {
-    const id = crypto.randomUUID();
-    const newNotification: Notification = {
-      ...notification,
-      id,
-      timestamp: new Date(),
-      duration: notification.duration ?? 5000, // Default 5 seconds
-    };
-
-    set((state) => ({
-      notifications: [...state.notifications, newNotification],
-    }));
-
-    logger.info("Notification added", {
-      type: notification.type,
-      title: notification.title,
-      category: notification.metadata?.category,
-    });
-
-    // Auto-dismiss if duration is set
-    if (newNotification.duration && newNotification.duration > 0) {
-      setTimeout(() => {
-        get().removeNotification(id);
-      }, newNotification.duration);
+export const useNotificationStore = create<NotificationSettingsState>()(
+  persist(
+    (set) => ({
+      settings: defaultSettings,
+      updateSettings: (updates) => {
+        set((state) => ({
+          settings: { ...state.settings, ...updates },
+        }));
+      },
+      addNotification: (notification) => {
+        const uiStore = useUINotificationStore.getState();
+        return uiStore.show({
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+        });
+      },
+    }),
+    {
+      name: "notification-settings",
+      storage: createJSONStorage(() => localStorage),
     }
-
-    return id;
-  },
-
-  removeNotification: (id) => {
-    set((state) => ({
-      notifications: state.notifications.filter((n) => n.id !== id),
-    }));
-  },
-
-  clearAll: () => {
-    set({ notifications: [] });
-  },
-
-  clearByType: (type) => {
-    set((state) => ({
-      notifications: state.notifications.filter((n) => n.type !== type),
-    }));
-  },
-
-  clearByCategory: (category) => {
-    set((state) => ({
-      notifications: state.notifications.filter(
-        (n) => n.metadata?.category !== category
-      ),
-    }));
-  },
-}));
+  )
+);
 
 // ============================================================================
 // Notification Emitter
@@ -290,38 +230,24 @@ export class NotificationEmitter {
   // ------------------------------------------------------------------------
 
   private onModelDownloadComplete(modelName: string): void {
-    const { addNotification } = useNotificationStore.getState();
-
-    addNotification({
+    const uiStore = useUINotificationStore.getState();
+    uiStore.show({
       type: "success",
       title: "Model Download Complete",
       message: `Model "${modelName}" has been successfully downloaded and is ready to use.`,
       duration: 5000,
-      metadata: {
-        category: "model",
-        modelName,
-      },
     });
 
     logger.modelInfo("Model download complete notification sent", { modelName });
   }
 
   private onModelDownloadError(modelName: string, error: string): void {
-    const { addNotification } = useNotificationStore.getState();
-
-    addNotification({
+    const uiStore = useUINotificationStore.getState();
+    uiStore.show({
       type: "error",
       title: "Model Download Failed",
       message: `Failed to download model "${modelName}": ${error}`,
       duration: 8000,
-      action: {
-        label: "Retry",
-        onClick: () => this.retryModelDownload(modelName),
-      },
-      metadata: {
-        category: "model",
-        modelName,
-      },
     });
 
     logger.modelError("Model download error notification sent", { modelName, error });
@@ -335,17 +261,12 @@ export class NotificationEmitter {
   }): void {
     // Only notify on stage completion (100% progress for that stage)
     if (stage.percent === 100) {
-      const { addNotification } = useNotificationStore.getState();
-
-      addNotification({
+      const uiStore = useUINotificationStore.getState();
+      uiStore.show({
         type: "info",
         title: "Model Download Progress",
         message: `Download stage "${stage.stage}" completed for model "${stage.modelName}".`,
         duration: 3000,
-        metadata: {
-          category: "model",
-          modelName: stage.modelName,
-        },
       });
     }
   }
@@ -365,56 +286,43 @@ export class NotificationEmitter {
 
     this.lastProgressNotification.set("ffmpeg", now);
 
-    const { addNotification } = useNotificationStore.getState();
-
-    addNotification({
+    const uiStore = useUINotificationStore.getState();
+    uiStore.show({
       type: "info",
       title: "FFmpeg Download Progress",
       message: `Downloading FFmpeg: ${progress.percent.toFixed(1)}% (${this.formatBytes(progress.currentBytes)} / ${this.formatBytes(progress.totalBytes)})`,
       duration: 3000,
-      metadata: {
-        category: "ffmpeg",
-      },
     });
   }
 
   private onFFmpegStatus(status: { status: string; message: string }): void {
-    const { addNotification } = useNotificationStore.getState();
+    const uiStore = useUINotificationStore.getState();
 
     switch (status.status) {
       case "completed":
-        addNotification({
+        uiStore.show({
           type: "success",
           title: "FFmpeg Installed",
           message: "FFmpeg has been successfully downloaded and installed.",
           duration: 5000,
-          metadata: {
-            category: "ffmpeg",
-          },
         });
         break;
 
       case "failed":
-        addNotification({
+        uiStore.show({
           type: "error",
           title: "FFmpeg Installation Failed",
           message: status.message || "Failed to download or install FFmpeg.",
           duration: 8000,
-          metadata: {
-            category: "ffmpeg",
-          },
         });
         break;
 
       case "extracting":
-        addNotification({
+        uiStore.show({
           type: "info",
           title: "Installing FFmpeg",
           message: "Extracting FFmpeg binaries...",
           duration: 3000,
-          metadata: {
-            category: "ffmpeg",
-          },
         });
         break;
     }
@@ -444,53 +352,39 @@ export class NotificationEmitter {
 
     this.lastProgressNotification.set(event.taskId, now);
 
-    const { addNotification } = useNotificationStore.getState();
+    const uiStore = useUINotificationStore.getState();
 
     // Get task info for better context
     const task = this.getTaskById(event.taskId);
     const fileName = task?.fileName ?? "Unknown file";
 
-    addNotification({
+    uiStore.show({
       type: "info",
       title: this.getTranscriptionStageTitle(event.stage),
       message: `${fileName}: ${event.progress.toFixed(0)}% complete`,
       duration: 3000,
-      metadata: {
-        category: "transcription",
-        taskId: event.taskId,
-        fileName,
-      },
     });
   }
 
   private onTranscriptionComplete(taskId: string, result: { segments: any[] }): void {
-    const { addNotification } = useNotificationStore.getState();
+    const uiStore = useUINotificationStore.getState();
 
     const task = this.getTaskById(taskId);
     const fileName = task?.fileName ?? "Unknown file";
     const segmentCount = result.segments?.length ?? 0;
 
-    addNotification({
+    uiStore.show({
       type: "success",
       title: "Transcription Complete",
       message: `Successfully transcribed "${fileName}" with ${segmentCount} segments.`,
       duration: 6000,
-      action: {
-        label: "View",
-        onClick: () => this.navigateToTask(taskId),
-      },
-      metadata: {
-        category: "transcription",
-        taskId,
-        fileName,
-      },
     });
 
     logger.transcriptionInfo("Transcription complete notification sent", { taskId, fileName });
   }
 
   private onTranscriptionError(taskId: string, error: string): void {
-    const { addNotification } = useNotificationStore.getState();
+    const uiStore = useUINotificationStore.getState();
 
     const task = this.getTaskById(taskId);
     if (task?.status === "completed" || task?.status === "cancelled") {
@@ -504,20 +398,11 @@ export class NotificationEmitter {
 
     const fileName = task?.fileName ?? "Unknown file";
 
-    addNotification({
+    uiStore.show({
       type: "error",
       title: "Transcription Failed",
       message: `Failed to transcribe "${fileName}": ${error}`,
       duration: 10000,
-      action: {
-        label: "Retry",
-        onClick: () => this.retryTranscription(taskId),
-      },
-      metadata: {
-        category: "transcription",
-        taskId,
-        fileName,
-      },
     });
 
     logger.transcriptionError("Transcription error notification sent", { taskId, fileName, error });
@@ -552,37 +437,6 @@ export class NotificationEmitter {
     const sizes = ["B", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-  }
-
-  private retryModelDownload(modelName: string): void {
-    // Trigger model download retry
-    const { useModelsStore } = require("@/stores");
-    const model = useModelsStore.getState().availableModels.find(
-      (m: any) => m.name === modelName
-    );
-    if (model) {
-      useModelsStore.getState().downloadModel(modelName, model.type);
-    }
-  }
-
-  private retryTranscription(taskId: string): void {
-    // Trigger transcription retry
-    const task = this.getTaskById(taskId);
-    if (task) {
-      const { useTasks } = require("@/stores");
-      const enginePreference = useTasks.getState().settings.enginePreference;
-
-      import("@/services/transcription").then(({ transcribeWithFallback }) => {
-        transcribeWithFallback(task.id, task.filePath, task.options, enginePreference);
-      });
-    }
-  }
-
-  private navigateToTask(taskId: string): void {
-    // Navigate to the task view
-    const { useUIStore } = require("@/stores");
-    useUIStore.getState().setSelectedTask(taskId);
-    useUIStore.getState().setCurrentView("transcription");
   }
 }
 
@@ -626,14 +480,13 @@ export async function initializeNotifications(
 export function notifySuccess(
   title: string,
   message: string,
-  metadata?: Notification["metadata"]
+  _metadata?: Record<string, unknown>
 ): string {
-  const { addNotification } = useNotificationStore.getState();
-  return addNotification({
+  const uiStore = useUINotificationStore.getState();
+  return uiStore.show({
     type: "success",
     title,
     message,
-    metadata,
   });
 }
 
@@ -643,15 +496,14 @@ export function notifySuccess(
 export function notifyError(
   title: string,
   message: string,
-  metadata?: Notification["metadata"]
+  _metadata?: Record<string, unknown>
 ): string {
-  const { addNotification } = useNotificationStore.getState();
-  return addNotification({
+  const uiStore = useUINotificationStore.getState();
+  return uiStore.show({
     type: "error",
     title,
     message,
     duration: 8000,
-    metadata,
   });
 }
 
@@ -661,14 +513,13 @@ export function notifyError(
 export function notifyWarning(
   title: string,
   message: string,
-  metadata?: Notification["metadata"]
+  _metadata?: Record<string, unknown>
 ): string {
-  const { addNotification } = useNotificationStore.getState();
-  return addNotification({
+  const uiStore = useUINotificationStore.getState();
+  return uiStore.show({
     type: "warning",
     title,
     message,
-    metadata,
   });
 }
 
@@ -678,14 +529,13 @@ export function notifyWarning(
 export function notifyInfo(
   title: string,
   message: string,
-  metadata?: Notification["metadata"]
+  _metadata?: Record<string, unknown>
 ): string {
-  const { addNotification } = useNotificationStore.getState();
-  return addNotification({
+  const uiStore = useUINotificationStore.getState();
+  return uiStore.show({
     type: "info",
     title,
     message,
-    metadata,
   });
 }
 
@@ -696,15 +546,14 @@ export function notifyProgress(
   title: string,
   message: string,
   progress: number,
-  metadata?: Notification["metadata"]
+  _metadata?: Record<string, unknown>
 ): string {
-  const { addNotification } = useNotificationStore.getState();
-  return addNotification({
+  const uiStore = useUINotificationStore.getState();
+  return uiStore.show({
     type: "info",
     title: `${title} (${progress.toFixed(0)}%)`,
     message,
-    duration: 0, // Don't auto-dismiss progress notifications
-    metadata,
+    duration: 0,
   });
 }
 
@@ -713,39 +562,26 @@ export function notifyProgress(
  */
 export function updateNotification(
   id: string,
-  updates: Partial<Omit<Notification, "id" | "timestamp">>
+  updates: Record<string, unknown>
 ): void {
-  const { notifications } = useNotificationStore.getState();
-  const index = notifications.findIndex((n) => n.id === id);
-
-  if (index !== -1) {
-    const updated = {
-      ...notifications[index],
-      ...updates,
-    };
-
-    useNotificationStore.setState((state) => ({
-      notifications: [
-        ...state.notifications.slice(0, index),
-        updated,
-        ...state.notifications.slice(index + 1),
-      ],
-    }));
-  }
+  const uiStore = useUINotificationStore.getState();
+  uiStore.update(id, updates);
 }
 
 /**
  * Dismiss a notification
  */
 export function dismissNotification(id: string): void {
-  useNotificationStore.getState().removeNotification(id);
+  const uiStore = useUINotificationStore.getState();
+  uiStore.dismiss(id);
 }
 
 /**
  * Clear all notifications
  */
 export function clearAllNotifications(): void {
-  useNotificationStore.getState().clearAll();
+  const uiStore = useUINotificationStore.getState();
+  uiStore.clear();
 }
 
 // ============================================================================
@@ -756,11 +592,11 @@ export function clearAllNotifications(): void {
  * React hook for accessing notifications
  * Usage:
  * ```tsx
- * const { notifications, addNotification, removeNotification } = useNotifications();
+ * const { notifications, success, error, dismiss } = useNotifications();
  * ```
  */
 export function useNotifications() {
-  return useNotificationStore();
+  return useUINotificationStore();
 }
 
 // ============================================================================

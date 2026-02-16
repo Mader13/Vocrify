@@ -6,6 +6,7 @@ export { ScrollArea } from "./scroll-area";
 export { Select } from "./select";
 export { Slider } from "./slider";
 export { Switch } from "./switch";
+export { Tabs, TabsList, TabsTrigger, TabsContent } from "./tabs";
 
 // Notifications
 export {

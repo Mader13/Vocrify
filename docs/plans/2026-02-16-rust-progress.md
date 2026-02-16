@@ -13,6 +13,7 @@
 ### Task 1: Document model speed estimates in Rust
 
 **Files:**
+
 - Modify: `src-tauri/src/lib.rs`
 
 **Step 1: Write the failing test**
@@ -56,6 +57,7 @@ Defer to the final commit after all tasks.
 ### Task 2: Emit smooth progress during Rust transcription
 
 **Files:**
+
 - Modify: `src-tauri/src/lib.rs`
 
 **Step 1: Write the failing test**
@@ -70,8 +72,8 @@ Skip.
 
 Inside `transcribe_rust`:
 
-1) Emit `loading` start at 0% and end at 10% (already 5%, adjust to 0/10).
-2) After audio is loaded and duration is known, compute:
+1. Emit `loading` start at 0% and end at 10% (already 5%, adjust to 0/10).
+2. After audio is loaded and duration is known, compute:
 
 ```rust
 let duration_s = /* audio duration in seconds */;
@@ -79,7 +81,7 @@ let rtf = model_rtf_estimate(&options.model);
 let expected_s = (duration_s / rtf).max(1.0);
 ```
 
-3) Spawn a Tokio task that, every 500–1000ms, emits:
+3. Spawn a Tokio task that, every 500–1000ms, emits:
 
 ```rust
 let elapsed = start.elapsed().as_secs_f64();
@@ -89,11 +91,11 @@ let progress = 10.0 + ratio * 80.0; // 10..90
 
 Use stage "transcribing" and include `metrics` with `processedDuration`, `totalDuration`, `estimatedTimeRemaining`.
 
-4) Stop the timer once transcription completes.
+4. Stop the timer once transcription completes.
 
-5) If diarization is enabled, emit stage "diarizing" with progress range 90..98 on a short timer (similar structure, but capped).
+5. If diarization is enabled, emit stage "diarizing" with progress range 90..98 on a short timer (similar structure, but capped).
 
-6) Emit "finalizing" at 98%, then 100% immediately before `transcription-complete`.
+6. Emit "finalizing" at 98%, then 100% immediately before `transcription-complete`.
 
 **Step 4: Run test to verify it passes**
 
@@ -114,6 +116,7 @@ Defer to the final commit after all tasks.
 ### Task 3: Add temporary debug logging for verification
 
 **Files:**
+
 - Modify: `src-tauri/src/lib.rs`
 
 **Step 1: Write the failing test**
@@ -141,6 +144,7 @@ Defer to final commit.
 ### Task 4: Cleanup and finalize
 
 **Files:**
+
 - Modify: `src-tauri/src/lib.rs`
 
 **Step 1: Write the failing test**

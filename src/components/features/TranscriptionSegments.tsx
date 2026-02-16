@@ -37,7 +37,7 @@ export interface TranscriptionSegmentsProps {
   segments: TranscriptionSegment[];
   /** Current playback time in seconds */
   currentTime: number;
-  /** Index of the segment clicked by user (for direct selection) */
+  /** Index of segment clicked by user (temporary selection lock) */
   selectedSegmentIndex?: number;
   /** Callback when a segment is clicked, receives the index and start time */
   onSegmentClick: (index: number, startTime: number) => void;
@@ -211,6 +211,18 @@ function VirtualizedSegmentRow(
  */
 export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
   ({ segments, currentTime, selectedSegmentIndex, onSegmentClick, isVideoVisible = true, searchQuery = "", highlightedSearchIndex, onScrollToSegment }): React.JSX.Element => {
+    const scrollElementToCenter = useCallback((container: HTMLElement, element: HTMLElement) => {
+      const containerRect = container.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      const elementTop = container.scrollTop + (elementRect.top - containerRect.top);
+      const centeredTop = elementTop - (container.clientHeight / 2) + (element.clientHeight / 2);
+
+      container.scrollTo({
+        top: Math.max(0, centeredTop),
+        behavior: "smooth",
+      });
+    }, []);
+
     // Calculate matching segment indices based on search query
     const matchingIndices = useMemo(() => {
       if (!searchQuery.trim()) {
@@ -248,26 +260,25 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
     // Ref to track if user is manually scrolling (to pause auto-scroll temporarily)
     const isUserScrollingRef = useRef(false);
     const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
     /**
-     * Update the active segment index based on current playback time or selected segment
+     * Update active segment index based on current playback time
      */
     useEffect(() => {
-      // If user selected a specific segment, use it
       if (selectedSegmentIndex !== undefined && selectedSegmentIndex >= 0) {
-        const selectedSegment = segments[selectedSegmentIndex];
-        if (selectedSegment && currentTime >= selectedSegment.start && currentTime <= selectedSegment.end) {
-          if (selectedSegmentIndex !== activeIndex) {
-            setActiveIndex(selectedSegmentIndex);
-          }
-          return;
+        if (selectedSegmentIndex !== activeIndex) {
+          setActiveIndex(selectedSegmentIndex);
         }
+        return;
       }
 
-      // Otherwise find by current time
-      const newActiveIndex = segments.findIndex((segment) =>
-        currentTime >= segment.start && currentTime <= segment.end
-      );
+      const lastIndex = segments.length - 1;
+      const newActiveIndex = segments.findIndex((segment, index) => {
+        if (index === lastIndex) {
+          return currentTime >= segment.start && currentTime <= segment.end;
+        }
+
+        return currentTime >= segment.start && currentTime < segment.end;
+      });
 
       if (newActiveIndex !== -1 && newActiveIndex !== activeIndex) {
         setActiveIndex(newActiveIndex);
@@ -291,6 +302,20 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
     }, []);
 
     /**
+     * Check if active segment has moved below the middle line of container.
+     * While playback is running, we keep active segment at or above middle.
+     */
+    const isElementBelowMiddle = useCallback((element: HTMLElement, container: HTMLElement) => {
+      const elementRect = element.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      const elementCenterY = (elementRect.top + elementRect.bottom) / 2;
+      const containerMiddleY = (containerRect.top + containerRect.bottom) / 2;
+
+      return elementCenterY > containerMiddleY;
+    }, []);
+
+    /**
      * Handle user scroll events to pause auto-scroll
      */
     const handleScroll = useCallback(() => {
@@ -310,23 +335,38 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
      * Auto-scroll to the active segment when it changes
      */
     useEffect(() => {
-      if (activeIndex !== -1 && activeIndex !== lastScrolledIndexRef.current && !isUserScrollingRef.current) {
-        // For non-virtualized list (<200 segments), scroll the DOM element
-        if (segments.length <= 200) {
-          const element = segmentRefs.current[activeIndex];
-          const container = containerRef.current;
-          
-          if (element && container) {
-            // Only scroll if element is not already visible
-            if (!isElementVisible(element, container)) {
-              element.scrollIntoView({ behavior: "smooth", block: "center" });
-            }
+      if (activeIndex === -1) {
+        return;
+      }
+
+      // For non-virtualized list (<200 segments), scroll the DOM element
+      if (segments.length <= 200) {
+        const element = segmentRefs.current[activeIndex];
+        const container = containerRef.current;
+
+        if (element && container) {
+          const belowMiddle = isElementBelowMiddle(element, container);
+          const notVisible = !isElementVisible(element, container);
+          const shouldScroll = belowMiddle || notVisible;
+          const indexChanged = activeIndex !== lastScrolledIndexRef.current;
+          const canAutoScroll = !isUserScrollingRef.current || belowMiddle;
+
+          if (shouldScroll && canAutoScroll && (indexChanged || belowMiddle)) {
+            scrollElementToCenter(container, element);
           }
         }
-        // For virtualized list, the List component handles scrolling internally
-        lastScrolledIndexRef.current = activeIndex;
       }
-    }, [currentTime, segments.length, isElementVisible]);
+
+      // For virtualized list, the List component handles scrolling internally
+      lastScrolledIndexRef.current = activeIndex;
+    }, [
+      activeIndex,
+      currentTime,
+      segments.length,
+      isElementVisible,
+      isElementBelowMiddle,
+      scrollElementToCenter,
+    ]);
 
     /**
      * Render all segments without virtualization (<200 segments)
@@ -349,6 +389,7 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
             return (
               <div
                 key={`${segment.start}-${index}`}
+                data-segment-index={index}
                 ref={(el) => {
                   segmentRefs.current[index] = el;
                 }}

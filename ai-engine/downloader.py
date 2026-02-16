@@ -100,6 +100,25 @@ def estimate_asset_size_bytes(asset_name: str) -> int:
     return int(ASSET_SIZE_ESTIMATES_MB.get(asset_name, 0) * 1024 * 1024)
 
 
+def calculate_directory_stats(path: Path) -> tuple[int, int]:
+    """Return total size and file count for a directory."""
+    total_bytes = 0
+    total_files = 0
+    if not path.exists():
+        return 0, 0
+
+    for root, _, files in os.walk(path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            try:
+                total_bytes += os.path.getsize(file_path)
+            except (OSError, IOError):
+                continue
+            total_files += 1
+
+    return total_bytes, total_files
+
+
 class DownloadSource(Enum):
     """Download source types"""
 
@@ -425,6 +444,7 @@ class ImprovedDownloader:
             # Create target directory
             target_dir = self.cache_dir / (local_dir_name or model_name)
             target_dir.mkdir(parents=True, exist_ok=True)
+            baseline_bytes, baseline_files = calculate_directory_stats(target_dir)
 
             # Start progress monitoring thread
             self.cancel_event.clear()
@@ -442,7 +462,7 @@ class ImprovedDownloader:
                     # Update every 0.5 seconds
                     if current_time - last_update_time >= 0.5:
                         current_size = 0
-                        downloaded_files = 0
+                        current_file_count = 0
 
                         if target_dir.exists():
                             for root, dirs, files in os.walk(target_dir):
@@ -450,18 +470,20 @@ class ImprovedDownloader:
                                     filepath = os.path.join(root, file)
                                     try:
                                         current_size += os.path.getsize(filepath)
-                                        downloaded_files += 1
+                                        current_file_count += 1
                                     except (OSError, IOError):
                                         pass
 
-                        progress_data["downloaded_bytes"] = current_size
+                        downloaded_bytes = max(current_size - baseline_bytes, 0)
+                        downloaded_files = max(current_file_count - baseline_files, 0)
+                        progress_data["downloaded_bytes"] = downloaded_bytes
 
                         # Calculate speed and ETA
                         elapsed = current_time - start_time
-                        if elapsed > 0 and current_size > 0:
-                            speed = current_size / elapsed
+                        if elapsed > 0 and downloaded_bytes > 0:
+                            speed = downloaded_bytes / elapsed
                             if speed > 0:
-                                remaining_bytes = max(total_bytes - current_size, 0)
+                                remaining_bytes = max(total_bytes - downloaded_bytes, 0)
                                 eta = remaining_bytes / speed if total_bytes > 0 else 0
                             else:
                                 eta = 0
@@ -472,7 +494,7 @@ class ImprovedDownloader:
                         # Calculate progress
                         if total_bytes > 0:
                             progress_percent = min(
-                                100, (current_size / total_bytes) * 100
+                                100, (downloaded_bytes / total_bytes) * 100
                             )
                         else:
                             progress_percent = 0
@@ -484,7 +506,7 @@ class ImprovedDownloader:
                                 current_file=f"{downloaded_files}/{total_files} files",
                                 total_files=total_files,
                                 downloaded_files=downloaded_files,
-                                downloaded_bytes=current_size,
+                                downloaded_bytes=downloaded_bytes,
                                 total_bytes=total_bytes,
                                 speed_bytes_per_sec=speed,
                                 eta_seconds=eta,
@@ -552,7 +574,8 @@ class ImprovedDownloader:
                 monitor_thread.join(timeout=2.0)
 
             # Emit completion
-            final_size = progress_data["downloaded_bytes"]
+            final_bytes, _ = calculate_directory_stats(target_dir)
+            final_size = final_bytes // (1024 * 1024)
             self.emit_progress(
                 DownloadProgress(
                     stage="complete",

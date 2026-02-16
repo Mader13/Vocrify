@@ -267,14 +267,18 @@ impl TranscriptionManager {
             eprintln!("[INFO] Diarization enabled, running...");
 
             match self.run_diarization(audio_path, options, hf_token).await {
-                Ok((_speaker_turns, speaker_segments)) => {
-                    eprintln!("[INFO] Diarization complete, merging results");
+                Ok((speaker_turns, speaker_segments)) => {
+                    eprintln!("[INFO] Diarization complete with {} speaker_turns and {} speaker_segments", 
+                        speaker_turns.len(), speaker_segments.len());
 
                     // Merge transcription with speaker info
                     let (merged_turns, merged_segments) = self.merge_diarization(
                         &result.segments,
                         &speaker_segments,
                     );
+
+                    eprintln!("[INFO] After merge: {} merged_turns, {} merged_segments", 
+                        merged_turns.len(), merged_segments.len());
 
                     result.speaker_turns = Some(merged_turns);
                     result.speaker_segments = Some(merged_segments);
@@ -613,6 +617,11 @@ impl TranscriptionManager {
     ) -> Result<(Vec<SpeakerTurn>, Vec<TranscriptionSegment>), TranscriptionError> {
         use crate::python_bridge::DiarizationProvider;
 
+        eprintln!("[DIARIZATION DEBUG] options.enable_diarization = {}", options.enable_diarization);
+        eprintln!("[DIARIZATION DEBUG] options.diarization_provider = {:?}", options.diarization_provider);
+        eprintln!("[DIARIZATION DEBUG] options.num_speakers = {}", options.num_speakers);
+        eprintln!("[DIARIZATION DEBUG] python_bridge is Some = {}", self.python_bridge.is_some());
+
         let provider = options.diarization_provider.as_ref()
             .and_then(|p| match p.as_str() {
                 "pyannote" => Some(DiarizationProvider::PyAnnote),
@@ -624,7 +633,7 @@ impl TranscriptionManager {
         let python_bridge = self.python_bridge.as_ref()
             .ok_or(TranscriptionError::Transcription("Python bridge not initialized".to_string()))?;
 
-        eprintln!("[INFO] Running diarization with provider: {:?}", provider);
+        eprintln!("[DIARIZATION DEBUG] Using provider: {:?}", provider);
 
         let speaker_segments = match provider {
             DiarizationProvider::PyAnnote => {
@@ -641,6 +650,8 @@ impl TranscriptionManager {
                 ).await.map_err(|e| TranscriptionError::Transcription(format!("Diarization failed: {}", e)))?
             }
         };
+
+        eprintln!("[DIARIZATION DEBUG] Received {} speaker segments from Python", speaker_segments.len());
 
         // Convert to SpeakerTurn format
         let speaker_turns: Vec<SpeakerTurn> = speaker_segments.iter()

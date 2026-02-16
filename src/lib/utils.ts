@@ -232,3 +232,17 @@ export function getSpeakerCountLabel(count: SpeakerCount): string {
   if (count === "auto") return "Авто";
   return count.toString();
 }
+
+/**
+ * Format date to locale string (DD.MM.YYYY HH:MM)
+ */
+export function formatDateTime(date: Date | string | number): string {
+  const d = new Date(date);
+  return d.toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

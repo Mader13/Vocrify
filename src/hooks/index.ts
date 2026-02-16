@@ -1,4 +1,5 @@
 export { useModelValidation } from "./useModelValidation";
+export { useDropZone } from "./useDropZone";
 
 // Re-export notification hooks for convenience
 export {
