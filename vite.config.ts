@@ -36,4 +36,41 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  // Build optimizations for better code splitting
+  build: {
+    // Enable minification
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+      },
+    },
+    // Enable code splitting
+    rollupOptions: {
+      output: {
+        // Split vendor libraries into separate chunks
+        manualChunks: {
+          // React ecosystem
+          'react-vendor': ['react', 'react-dom'],
+          
+          // WaveSurfer and plugins
+          'wavesurfer': ['wavesurfer.js'],
+          'wavesurfer-regions': ['wavesurfer.js/dist/plugins/regions.js'],
+          
+          // State management
+          'state': ['zustand'],
+          
+          // Animation
+          'framer-motion': ['framer-motion'],
+          
+          // Icons
+          'lucide-react': ['lucide-react'],
+        },
+      },
+    },
+    // Chunk size warning limit (increase to avoid warnings)
+    chunkSizeWarningLimit: 1000,
+  },
 });
