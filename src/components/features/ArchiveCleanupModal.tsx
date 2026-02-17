@@ -90,19 +90,19 @@ export function ArchiveCleanupModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5" />
-            Очистка архива
+            Archive Cleanup
           </DialogTitle>
           <DialogDescription>
-            Освободите место, удалив медиафайлы из архивных задач
+            Free up space by deleting media files from archived tasks
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="bg-muted/50 rounded-lg p-3">
             <div className="flex justify-between text-sm">
-              <span>Выбрано задач:</span>
+              <span>Tasks selected:</span>
               <span className="font-medium">
-                {selectedIds.size} из {tasksWithFiles.length}
+                {selectedIds.size} of {tasksWithFiles.length}
               </span>
             </div>
           </div>
@@ -110,7 +110,7 @@ export function ArchiveCleanupModal({
           <div className="max-h-60 overflow-y-auto space-y-2 border rounded-lg p-2">
             {tasksWithFiles.length === 0 ? (
               <p className="text-center text-muted-foreground py-4">
-                Нет задач с медиафайлами для очистки
+                No tasks with media files to clean up
               </p>
             ) : (
               tasksWithFiles.map((task) => (
@@ -133,10 +133,10 @@ export function ArchiveCleanupModal({
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {task.archiveMode === "text_only"
-                        ? "Только текст"
+                        ? "Text only"
                         : task.videoDeleted
-                        ? "Аудио сохранено"
-                        : "Видео и аудио"}
+                        ? "Audio saved"
+                        : "Video and audio"}
                     </div>
                   </div>
                 </label>
@@ -146,17 +146,17 @@ export function ArchiveCleanupModal({
 
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={selectAll}>
-              Выбрать все
+              Select all
             </Button>
             <Button variant="outline" size="sm" onClick={deselectAll}>
-              Снять выбор
+              Deselect all
             </Button>
           </div>
         </div>
 
         <div className="flex justify-end gap-2 pt-4 border-t">
           <Button variant="outline" onClick={onClose}>
-            Отмена
+            Cancel
           </Button>
           <Button
             onClick={handleDelete}
@@ -166,12 +166,12 @@ export function ArchiveCleanupModal({
             {isDeleting ? (
               <>
                 <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                Удаление...
+                Deleting...
               </>
             ) : (
               <>
                 <Trash2 className="h-4 w-4" />
-                Удалить выбранные
+                Delete selected
               </>
             )}
           </Button>

@@ -28,12 +28,12 @@ function getDeviceIcon(deviceType: string): React.ReactNode {
 function getPerformanceLabel(deviceType: string): string {
   switch (deviceType) {
     case "cuda":
-      return "⚡ Быстрейший";
+      return "⚡ Fastest";
     case "mps":
-      return "🚀 Быстрый";
+      return "🚀 Fast";
     case "cpu":
     default:
-      return "🐢 Медленный";
+      return "🐢 Slow";
   }
 }
 
@@ -85,7 +85,7 @@ function DeviceCard({ device, isRecommended }: DeviceCardProps) {
             {isRecommended && (
               <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
                 <CheckCircle2 className="h-3 w-3" />
-                Рекомендуется
+                Recommended
               </span>
             )}
           </div>
@@ -94,7 +94,7 @@ function DeviceCard({ device, isRecommended }: DeviceCardProps) {
           </p>
           {device.memoryMb && (
             <p className="text-xs text-muted-foreground mt-1">
-              Память: {device.memoryMb} MB
+              Memory: {device.memoryMb} MB
             </p>
           )}
         </div>
@@ -120,17 +120,17 @@ export function DeviceStep() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Устройства</h3>
+        <h3 className="text-lg font-semibold">Devices</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Доступные устройства для обработки транскрипции
+          Available devices for transcription processing
         </p>
       </div>
 
       {/* Main check card */}
       <CheckCard
-        title="Вычислительные устройства"
+        title="Compute Devices"
         status={deviceCheck?.status ?? "pending"}
-        message={deviceCheck?.message ?? "Поиск устройств..."}
+        message={deviceCheck?.message ?? "Searching for devices..."}
         onRetry={checkDevice}
       />
 
@@ -138,7 +138,7 @@ export function DeviceStep() {
       {deviceCheck && deviceCheck.devices.filter(d => d.available).length > 0 && (
         <div className="space-y-3">
           <h4 className="text-sm font-medium text-muted-foreground">
-            Обнаружено устройств: {deviceCheck.devices.filter(d => d.available).length}
+            Devices found: {deviceCheck.devices.filter(d => d.available).length}
           </h4>
           <div className="grid gap-3">
             {deviceCheck.devices
@@ -158,7 +158,7 @@ export function DeviceStep() {
       {deviceCheck && deviceCheck.devices.filter(d => d.available).length === 0 && (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4">
           <p className="text-sm text-yellow-600 dark:text-yellow-400">
-            Не удалось обнаружить устройства. Будет использоваться CPU.
+            No devices detected. CPU will be used.
           </p>
         </div>
       )}
@@ -167,7 +167,7 @@ export function DeviceStep() {
       {isChecking && !deviceCheck && (
         <div className="flex items-center justify-center py-8">
           <div className="animate-pulse text-muted-foreground">
-            Поиск устройств...
+            Searching for devices...
           </div>
         </div>
       )}
@@ -176,11 +176,11 @@ export function DeviceStep() {
       {deviceCheck && deviceCheck.devices.length > 1 && (
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
           <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">Приоритет устройств:</span>{" "}
+            <span className="font-medium text-foreground">Device priority:</span>{" "}
             CUDA (NVIDIA GPU) → MPS (Apple Silicon) → CPU
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            Рекомендуемое устройство выбирается автоматически для максимальной производительности.
+            Recommended device is selected automatically for maximum performance.
           </p>
         </div>
       )}
@@ -203,7 +203,7 @@ export function DeviceStepFooter({ onBack, onNext }: DeviceStepFooterProps) {
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onBack}>
-          Назад
+          Back
         </Button>
         {deviceCheck?.status === "error" && (
           <Button
@@ -211,12 +211,12 @@ export function DeviceStepFooter({ onBack, onNext }: DeviceStepFooterProps) {
             onClick={() => checkDevice()}
             disabled={isChecking}
           >
-            Повторить
+            Retry
           </Button>
         )}
       </div>
       <Button onClick={onNext} disabled={isChecking}>
-        Продолжить
+        Continue
       </Button>
     </div>
   );

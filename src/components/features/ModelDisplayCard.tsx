@@ -41,7 +41,7 @@ export function ModelDisplayCard({
   gradient = "blue",
   switchControl,
 }: ModelDisplayCardProps) {
-  const isEmpty = !value || value === "Не выбрана" || value === "Не выбран" || value === "Disabled" || value.toLowerCase().includes("no speaker");
+  const isEmpty = !value || value === "Not Selected" || value === "Disabled" || value.toLowerCase().includes("no speaker");
 
   return (
     <div
@@ -98,7 +98,7 @@ export function ModelDisplayCard({
               !isEmpty && "group-hover:text-transparent group-hover:bg-gradient-to-r group-hover:from-foreground group-hover:to-foreground/70 group-hover:bg-clip-text"
             )}
           >
-            {value || "Не выбрана"}
+            {value || "Not Selected"}
           </p>
 
           {description && !isEmpty && (
@@ -135,7 +135,7 @@ export function TranscriptionModelDisplay({
   return (
     <ModelDisplayCard
       icon="🐍"
-      title="Модель транскрипции"
+      title="Transcription Model"
       value={modelName}
       description={sizeText}
       size={size}
@@ -157,7 +157,7 @@ export function DiarizationModelDisplay({
   return (
     <ModelDisplayCard
       icon="🎤"
-      title="Модель диаризации"
+      title="Diarization Model"
       value={providerName}
       description={providerInfo?.description}
       size={size}

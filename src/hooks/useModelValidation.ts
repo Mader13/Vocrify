@@ -25,8 +25,8 @@ export function useModelValidation(): UseModelValidationReturn {
     if (!selectedTranscriptionModel) {
       setModelError({
         open: true,
-        title: "Модель не выбрана",
-        message: "Для начала транскрипции необходимо выбрать модель. Перейдите в раздел \"Модели\" и установите нужную модель."
+        title: "No Model Selected",
+        message: "You need to select a model to start transcription. Go to the \"Models\" section and install the desired model."
       });
       return false;
     }
@@ -36,8 +36,8 @@ export function useModelValidation(): UseModelValidationReturn {
     if (!selectedModel || !selectedModel.installed) {
       setModelError({
         open: true,
-        title: "Модель не установлена",
-        message: `Выбранная модель "${selectedTranscriptionModel}" не установлена или была удалена. Перейдите в раздел \"Модели\" и установите нужную модель.`
+        title: "Model Not Installed",
+        message: `The selected model "${selectedTranscriptionModel}" is not installed or has been deleted. Go to the "Models" section and install the desired model.`
       });
       return false;
     }

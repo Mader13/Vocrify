@@ -26,8 +26,8 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
       await archiveTaskWithMode(task.id, mode);
 
       notifySuccess(
-        "Заархивировано",
-        `Видео "${task.fileName}" перемещено в архив`
+        "Archived",
+        `Video "${task.fileName}" has been moved to archive`
       );
     } catch (error) {
       console.error("Archive failed:", error);
@@ -48,7 +48,7 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         )}
       >
         <Check className="h-4 w-4" />
-        {!iconOnly && <span>В архиве</span>}
+        {!iconOnly && <span>Archived</span>}
       </button>
     );
   }
@@ -70,7 +70,7 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         ) : (
           <Archive className="h-4 w-4" />
         )}
-        {!iconOnly && <span>В архив</span>}
+        {!iconOnly && <span>Archive</span>}
       </button>
       <ArchiveModal
         task={task}

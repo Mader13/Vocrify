@@ -47,3 +47,13 @@ export async function getArchiveDir(): Promise<CommandResult<string>> {
     return { success: false, error: String(error) };
   }
 }
+
+export async function openArchiveFolder(): Promise<CommandResult<void>> {
+  try {
+    await invoke("open_archive_folder_command");
+    return { success: true };
+  } catch (error) {
+    logger.error("Failed to open archive folder", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}

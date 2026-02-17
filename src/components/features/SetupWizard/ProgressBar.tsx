@@ -83,7 +83,7 @@ export function ProgressBar({
 
       {/* Screen reader text */}
       <div className="sr-only">
-        Шаг {currentStepIndex + 1} из {totalSteps}: {stepNames[currentStepIndex]}
+        Step {currentStepIndex + 1} of {totalSteps}: {stepNames[currentStepIndex]}
       </div>
     </div>
   );

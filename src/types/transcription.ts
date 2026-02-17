@@ -3,7 +3,7 @@ import type { DeviceType } from "./devices";
 import type { DiarizationProvider, ArchiveMode } from "./settings";
 import type { ProgressStage, ProgressMetrics, ProgressEvent } from "./progress";
 
-export type TaskStatus = "queued" | "processing" | "completed" | "failed" | "cancelled";
+export type TaskStatus = "queued" | "processing" | "completed" | "failed" | "cancelled" | "interrupted";
 
 export type Language = "auto" | "en" | "ru" | "es" | "fr" | "de" | "zh" | "ja" | "ko";
 
@@ -62,6 +62,7 @@ export interface TranscriptionTask {
   audioPath?: string;
   archiveSize?: number;
   videoDeleted?: boolean;
+  lastProgressUpdate?: number;
 }
 
 export interface SegmentEvent {

@@ -110,7 +110,7 @@ export async function initializeNotifications(): Promise<void> {
         id: (n as any).id ?? crypto.randomUUID(),
         type: (n as any).type ?? "info",
         priority: (n as any).priority ?? "low",
-        title: (n as any).title ?? "Уведомление",
+        title: (n as any).title ?? "Notification",
         message: (n as any).message,
         actionLink: (n as any).actionLink,
         actionLabel: (n as any).actionLabel,

@@ -1,8 +1,6 @@
-import { Settings, RotateCcw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Settings } from "lucide-react";
 import { useTasks } from "@/stores";
 import type { ArchiveMode } from "@/types";
-import { DEFAULT_ARCHIVE_SETTINGS } from "@/types";
 import { cn } from "@/lib/utils";
 
 export function ArchiveSettingsPanel() {
@@ -17,29 +15,25 @@ export function ArchiveSettingsPanel() {
     setArchiveSettings({ [key]: !archiveSettings[key] });
   };
 
-  const handleReset = () => {
-    setArchiveSettings(DEFAULT_ARCHIVE_SETTINGS);
-  };
-
   return (
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <Settings className="h-5 w-5" />
-          Настройки архивации
+          Archive Settings
         </h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Настройте поведение по умолчанию при архивации транскрипций
+          Configure default behavior for archiving transcriptions
         </p>
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm font-medium">Режим архивации по умолчанию:</label>
+        <label className="text-sm font-medium">Default Archive Mode:</label>
         <div className="grid grid-cols-1 gap-2">
           {[
-            { value: "keep_all", label: "Оставить всё", desc: "Не удалять никакие файлы" },
-            { value: "delete_video", label: "Удалить видео", desc: "Удалить видео, оставить аудио" },
-            { value: "text_only", label: "Только текст", desc: "Удалить все медиафайлы" },
+            { value: "keep_all", label: "Keep All", desc: "Don't delete any files" },
+            { value: "delete_video", label: "Delete Video", desc: "Delete video, keep audio" },
+            { value: "text_only", label: "Text Only", desc: "Delete all media files" },
           ].map((option) => (
             <button
               key={option.value}
@@ -77,9 +71,9 @@ export function ArchiveSettingsPanel() {
             className="rounded"
           />
           <div>
-            <div className="text-sm font-medium">Запоминать выбор</div>
+            <div className="text-sm font-medium">Remember Choice</div>
             <div className="text-xs text-muted-foreground">
-              Использовать выбранный режим для всех будущих архиваций
+              Use selected mode for all future archives
             </div>
           </div>
         </label>
@@ -91,18 +85,13 @@ export function ArchiveSettingsPanel() {
             className="rounded"
           />
           <div>
-            <div className="text-sm font-medium">Показывать размер файлов</div>
+            <div className="text-sm font-medium">Show File Sizes</div>
             <div className="text-xs text-muted-foreground">
-              Отображать размер файла и потенциальную экономию места
+              Display file size and potential space savings
             </div>
           </div>
         </label>
       </div>
-
-      <Button variant="outline" onClick={handleReset} className="gap-2">
-        <RotateCcw className="h-4 w-4" />
-        Сбросить настройки
-      </Button>
     </div>
   );
 }

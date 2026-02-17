@@ -4,18 +4,24 @@ import { cn } from "@/lib/utils";
 export interface SwitchProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
   checked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
+  switchSize?: 'default' | 'lg';
 }
 
 export const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
-  ({ className, checked, onCheckedChange, disabled, ...props }, ref) => {
+  ({ className, checked, onCheckedChange, disabled, switchSize = 'default', ...props }, ref) => {
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       onCheckedChange?.(e.target.checked);
     };
 
+    const sizeClasses = switchSize === 'lg' 
+      ? { container: 'h-7 w-12', thumb: 'h-6 w-6', translate: 'translate-x-6' }
+      : { container: 'h-5 w-9', thumb: 'h-4 w-4', translate: 'translate-x-5' };
+
     return (
       <label className={cn(
-        "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
+        "relative inline-flex items-center rounded-full transition-colors",
         "cursor-pointer peer",
+        sizeClasses.container,
         checked ? "bg-primary" : "bg-input",
         disabled && "opacity-50 cursor-not-allowed",
         className
@@ -30,8 +36,9 @@ export const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
           {...props}
         />
         <span className={cn(
-          "inline-block h-4 w-4 transform rounded-full bg-white shadow-lg transition-transform",
-          checked ? "translate-x-5" : "translate-x-0.5"
+          "inline-block transform rounded-full bg-white shadow-lg transition-transform",
+          sizeClasses.thumb,
+          checked ? sizeClasses.translate : "translate-x-0.5"
         )} />
       </label>
     );

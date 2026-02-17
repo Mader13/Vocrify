@@ -1,11 +1,12 @@
 import { useState, useMemo } from "react";
-import { Archive, Trash2, Search, Calendar, ArrowUpDown, X, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { Archive, Trash2, Search, Calendar, ArrowUpDown, X, ChevronLeft, ChevronRight, Sparkles, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatFileSize, formatDateTime } from "@/lib/utils";
 import { useArchivedTasks, useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask } from "@/types";
 import { ExportMenu } from "@/components/features/ExportMenu";
 import { ArchiveCleanupModal } from "./ArchiveCleanupModal";
+import { openArchiveFolder } from "@/services/tauri";
 
 type SortOption = "date-desc" | "date-asc" | "name-asc" | "name-desc";
 
@@ -69,14 +70,14 @@ export function ArchiveView() {
     [archivedTasks]
   );
 
-  // Пагинация
+  // Pagination
   const totalPages = Math.ceil(filteredAndSortedTasks.length / itemsPerPage);
   const paginatedTasks = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredAndSortedTasks.slice(start, start + itemsPerPage);
   }, [filteredAndSortedTasks, currentPage, itemsPerPage]);
 
-  // Сброс страницы при изменении фильтров
+  // Reset page when filters change
   const handleFilterChange = (setter: (value: string) => void) => (value: string) => {
     setter(value);
     setCurrentPage(1);
@@ -87,16 +88,23 @@ export function ArchiveView() {
     setCurrentView("transcription");
   };
 
+  const handleOpenArchiveFolder = async () => {
+    const result = await openArchiveFolder();
+    if (!result.success) {
+      console.error("Failed to open archive folder:", result.error);
+    }
+  };
+
   if (archivedTasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center p-8">
         <div className="rounded-full bg-muted p-4 mb-4">
           <Archive className="h-8 w-8 text-muted-foreground" />
         </div>
-        <h2 className="text-lg font-semibold mb-2">Архив пуст</h2>
+        <h2 className="text-lg font-semibold mb-2">Archive is Empty</h2>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Архивированные транскрипции будут появляться здесь. Нажмите на иконку архива
-          рядом с результатом транскрипции, чтобы переместить её в архив.
+          Archived transcriptions will appear here. Click the archive icon
+          next to a transcription result to move it to the archive.
         </p>
       </div>
     );
@@ -104,35 +112,46 @@ export function ArchiveView() {
 
   return (
     <div className="space-y-4 p-4 overflow-y-auto h-full">
-      {/* Заголовок и количество */}
+      {/* Header and count */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex flex-col gap-1">
           <p className="text-sm font-medium text-muted-foreground">
-            {filteredAndSortedTasks.length.toLocaleString()} видео в архиве
+            {filteredAndSortedTasks.length.toLocaleString()} videos in archive
           </p>
           <p className="text-sm text-muted-foreground">
-            Занимают на устройстве: <span className="font-medium text-foreground">{formatFileSize(totalArchivedSize)}</span>
+            Storage used: <span className="font-medium text-foreground">{formatFileSize(totalArchivedSize)}</span>
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setIsCleanupModalOpen(true)}
-          className="gap-1.5"
-        >
-          <Sparkles className="h-4 w-4" />
-          Почистить
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenArchiveFolder}
+            className="gap-1.5"
+          >
+            <FolderOpen className="h-4 w-4" />
+            Open Archive Folder
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsCleanupModalOpen(true)}
+            className="gap-1.5"
+          >
+            <Sparkles className="h-4 w-4" />
+            Cleanup
+          </Button>
+        </div>
       </div>
 
-      {/* Панель фильтров и сортировки */}
+      {/* Filters and sorting panel */}
       <div className="flex flex-col gap-3 p-3 bg-muted/50 rounded-lg">
-        {/* Поиск */}
+        {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Поиск по названию..."
+            placeholder="Search by name..."
             value={searchQuery}
             onChange={(e) => handleFilterChange(setSearchQuery)(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-background border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -147,9 +166,9 @@ export function ArchiveView() {
           )}
         </div>
 
-        {/* Фильтры по дате и сортировка */}
+        {/* Date filters and sorting */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Фильтр по дате от */}
+          {/* Date from filter */}
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
             <input
@@ -157,11 +176,11 @@ export function ArchiveView() {
               value={dateFrom}
               onChange={(e) => handleFilterChange(setDateFrom)(e.target.value)}
               className="w-[130px] px-2 py-1.5 bg-background border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-              title="С даты"
+              title="From date"
             />
           </div>
 
-          {/* Фильтр по дате до */}
+          {/* Date to filter */}
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-sm">—</span>
             <input
@@ -169,11 +188,11 @@ export function ArchiveView() {
               value={dateTo}
               onChange={(e) => handleFilterChange(setDateTo)(e.target.value)}
               className="w-[130px] px-2 py-1.5 bg-background border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-              title="По дату"
+              title="To date"
             />
           </div>
 
-          {/* Сортировка */}
+          {/* Sorting */}
           <div className="flex items-center gap-2">
             <ArrowUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
             <select
@@ -184,31 +203,31 @@ export function ArchiveView() {
               }}
               className="h-8 px-2 py-1 bg-background border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 w-auto min-w-[180px]"
             >
-              <option value="date-desc">Сначала новые</option>
-              <option value="date-asc">Сначала старые</option>
-              <option value="name-asc">По названию А→Я</option>
-              <option value="name-desc">По названию Я→А</option>
+              <option value="date-desc">Newest First</option>
+              <option value="date-asc">Oldest First</option>
+              <option value="name-asc">Name A→Z</option>
+              <option value="name-desc">Name Z→A</option>
             </select>
           </div>
         </div>
       </div>
 
-      {/* Таблица архивированных задач */}
+      {/* Archived tasks table */}
       <div className="border rounded-lg overflow-hidden bg-background">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 border-b">
             <tr>
-              <th className="text-left py-3 px-4 font-medium text-muted-foreground">Файл</th>
-              <th className="text-left py-3 px-4 font-medium text-muted-foreground w-24">Размер</th>
-              <th className="text-left py-3 px-4 font-medium text-muted-foreground w-36">Дата</th>
-              <th className="text-right py-3 px-4 font-medium text-muted-foreground w-24">Действия</th>
+              <th className="text-left py-3 px-4 font-medium text-muted-foreground">File</th>
+              <th className="text-left py-3 px-4 font-medium text-muted-foreground w-24">Size</th>
+              <th className="text-left py-3 px-4 font-medium text-muted-foreground w-36">Date</th>
+              <th className="text-right py-3 px-4 font-medium text-muted-foreground w-24">Actions</th>
             </tr>
           </thead>
           <tbody>
             {paginatedTasks.length === 0 ? (
               <tr>
                 <td colSpan={4} className="py-8 text-center text-muted-foreground">
-                  Ничего не найдено по заданным фильтрам
+                  No results found for the specified filters
                 </td>
               </tr>
             ) : (
@@ -240,7 +259,7 @@ export function ArchiveView() {
                           e.stopPropagation();
                           removeTask(task.id);
                         }}
-                        title="Удалить"
+                        title="Delete"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -253,12 +272,12 @@ export function ArchiveView() {
         </table>
       </div>
 
-      {/* Пагинация */}
+      {/* Pagination */}
       {filteredAndSortedTasks.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-          {/* Количество элементов на странице */}
+          {/* Items per page */}
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>Показывать:</span>
+            <span>Show:</span>
             <select
               value={itemsPerPage}
               onChange={(e) => {
@@ -273,10 +292,10 @@ export function ArchiveView() {
                 </option>
               ))}
             </select>
-            <span>на странице</span>
+            <span>per page</span>
           </div>
 
-          {/* Навигация по страницам */}
+          {/* Page navigation */}
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -289,7 +308,7 @@ export function ArchiveView() {
             </Button>
 
             <span className="text-sm text-muted-foreground px-2">
-              {currentPage} из {totalPages || 1}
+              {currentPage} of {totalPages || 1}
             </span>
 
             <Button
@@ -303,12 +322,12 @@ export function ArchiveView() {
             </Button>
           </div>
 
-          {/* Информация о записях */}
+          {/* Records info */}
           <div className="text-sm text-muted-foreground">
             {filteredAndSortedTasks.length > 0 && (
               <>
                 {(currentPage - 1) * itemsPerPage + 1}–
-                {Math.min(currentPage * itemsPerPage, filteredAndSortedTasks.length)} из{" "}
+                {Math.min(currentPage * itemsPerPage, filteredAndSortedTasks.length)} of{" "}
                 {filteredAndSortedTasks.length}
               </>
             )}

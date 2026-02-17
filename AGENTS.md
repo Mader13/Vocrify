@@ -568,6 +568,8 @@ cargo build --features rust-transcribe
 - Setup Installer may validate system Python via `py` launcher; runtime resolver must also consider `py` (not only `python`) or setup can report success while `check_python_environment`/`check_ffmpeg_status` fail in production.
 - Production bundles must include `ai-engine` runtime files in Tauri resources. Use `bun run prepare:tauri-resources` before `tauri build` (now wired into scripts/config); otherwise setup checks fail because `main.py` is missing at runtime.
 - Setup Installer must reject unsupported system Python versions (3.13+). If it accepts Python 3.14 because `torch` is installed, wizard gets stuck in a false-success state and never installs portable 3.12.
+- On some Windows systems `nvidia-smi` is not on PATH for Tauri process (despite NVIDIA GPU present). Python installer should probe common NVSMI paths / fallback GPU detection, otherwise it mis-detects target as CPU and installs `torch+cpu`.
+- If embeddable Python already has `torch` installed, do not assume it is correct: on NVIDIA systems check `torch.version.cuda`; if missing, upgrade existing CPU-only wheel to CUDA wheel during setup repair/reinstall.
 
 ### Logging System
 

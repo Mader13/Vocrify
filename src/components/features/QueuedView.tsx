@@ -24,23 +24,23 @@ export function QueuedView({ task }: QueuedViewProps) {
         </div>
 
         <div className="w-full max-w-md space-y-4 text-center">
-          <h3 className="text-lg font-medium">В очереди</h3>
+          <h3 className="text-lg font-medium">In Queue</h3>
           <p className="text-sm text-muted-foreground">
-            Задача ожидает начала обработки. Она будет запущена автоматически, когда освободятся ресурсы.
+            The task is waiting to be processed. It will start automatically when resources become available.
           </p>
-          
+
           <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
-            <span>Ожидание...</span>
+            <span>Waiting...</span>
           </div>
         </div>
 
         <div className="flex items-center gap-4 text-xs text-muted-foreground bg-muted/50 px-4 py-2 rounded-lg">
-          <span>Модель: {task.options.model}</span>
+          <span>Model: {task.options.model}</span>
           <span className="w-px h-3 bg-border" />
-          <span>Устройство: {task.options.device === "cuda" ? "GPU" : "CPU"}</span>
+          <span>Device: {task.options.device === "cuda" ? "GPU" : "CPU"}</span>
           <span className="w-px h-3 bg-border" />
-          <span>Язык: {task.options.language}</span>
+          <span>Language: {task.options.language}</span>
         </div>
       </CardContent>
     </Card>

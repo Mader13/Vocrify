@@ -87,7 +87,7 @@ export function HuggingFaceTokenCard({
                       d="M5 13l4 4L19 7"
                     />
                   </svg>
-                  Настроен
+                  Configured
                 </span>
               ) : isRequired ? (
                 <span className="flex items-center gap-1 text-amber-600">
@@ -104,10 +104,10 @@ export function HuggingFaceTokenCard({
                       d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
                     />
                   </svg>
-                  Требуется для PyAnnote
+                  Required for PyAnnote
                 </span>
               ) : (
-                "Необходим для моделей PyAnnote"
+                "Required for PyAnnote models"
               )}
             </p>
           </div>
@@ -119,7 +119,7 @@ export function HuggingFaceTokenCard({
                 onClick={() => setIsEditing(true)}
                 className="text-xs px-2 py-1 rounded bg-secondary hover:bg-secondary/80 transition-colors"
               >
-                Изменить
+                Edit
               </button>
             )}
             {isConfigured && (
@@ -127,7 +127,7 @@ export function HuggingFaceTokenCard({
                 onClick={handleDelete}
                 className="text-xs px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
               >
-                Удалить
+                Delete
               </button>
             )}
           </div>
@@ -138,7 +138,7 @@ export function HuggingFaceTokenCard({
         <div className="mt-4 space-y-3">
           <div>
             <label className="text-xs font-medium mb-1 block">
-              Введите ваш HuggingFace токен
+              Enter your HuggingFace token
             </label>
             <input
               type="password"
@@ -149,7 +149,7 @@ export function HuggingFaceTokenCard({
             />
             {tempToken && !isValidFormat && (
               <p className="text-xs text-amber-600 mt-1">
-                Токен должен начинаться с "hf_" и содержать минимум 20 символов
+                Token must start with "hf_" and be at least 20 characters
               </p>
             )}
           </div>
@@ -159,13 +159,13 @@ export function HuggingFaceTokenCard({
               disabled={!isValidFormat && tempToken.length > 0}
               className="flex-1 px-3 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              Сохранить
+              Save
             </button>
             <button
               onClick={handleCancel}
               className="px-3 py-2 text-sm font-medium border rounded-lg hover:bg-muted transition-colors"
             >
-              Отмена
+              Cancel
             </button>
           </div>
         </div>
@@ -181,7 +181,7 @@ export function HuggingFaceTokenCard({
                 onClick={() => setIsEditing(true)}
                 className="w-full px-3 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
               >
-                {isRequired ? "Настроить токен" : "Добавить токен"}
+                {isRequired ? "Configure Token" : "Add Token"}
               </button>
             </div>
           )}
@@ -206,14 +206,14 @@ export function HuggingFaceTokenCard({
               d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          Как получить токен HuggingFace?
+          How to get a HuggingFace token?
         </button>
 
         {showHelp && (
           <div className="mt-2 p-3 rounded-lg bg-muted/50 text-xs space-y-2">
             <ol className="list-decimal list-inside space-y-1 text-muted-foreground">
               <li>
-                Перейдите на{" "}
+                Go to{" "}
                 <a
                   href="https://huggingface.co/settings/tokens"
                   target="_blank"
@@ -223,13 +223,13 @@ export function HuggingFaceTokenCard({
                   huggingface.co/settings/tokens
                 </a>
               </li>
-              <li>Войдите в аккаунт или зарегистрируйтесь (бесплатно)</li>
-              <li>Нажмите "New token"</li>
-              <li>Выберите тип "Write"</li>
-              <li>Скопируйте токен (начинается с hf_)</li>
+              <li>Log in or create an account (free)</li>
+              <li>Click "New token"</li>
+              <li>Select type "Write"</li>
+              <li>Copy the token (starts with hf_)</li>
             </ol>
             <p className="text-amber-600">
-              Токен хранится локально на вашем устройстве.
+              The token is stored locally on your device.
             </p>
           </div>
         )}

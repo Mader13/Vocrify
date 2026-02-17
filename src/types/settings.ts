@@ -30,16 +30,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
 export const ENGINE_PREFERENCES: Record<EnginePreference, { name: string; description: string }> = {
   auto: {
-    name: "Auto (рекомендуется)",
-    description: "Rust transcribe-rs с автоматическим fallback на Python",
+    name: "Auto (Recommended)",
+    description: "Rust transcribe-rs with automatic fallback to Python",
   },
   rust: {
-    name: "Rust только",
-    description: "Только Rust transcribe-rs, ошибка при недоступности",
+    name: "Rust Only",
+    description: "Rust transcribe-rs only, error if unavailable",
   },
   python: {
-    name: "Python только",
-    description: "Только Python движок (для отладки)",
+    name: "Python Only",
+    description: "Python engine only (for debugging)",
   },
 };
 
@@ -76,4 +76,26 @@ export const DEFAULT_ARCHIVE_SETTINGS: ArchiveSettings = {
   defaultMode: "delete_video",
   rememberChoice: true,
   showFileSizes: true,
+};
+
+/**
+ * Performance configuration for controlling feature flags
+ * These settings control various performance optimizations in the application
+ */
+export interface PerformanceConfig {
+  /** Enable fast setup check (skip full readiness evaluation if recently verified) */
+  fastSetupCheckEnabled: boolean;
+  /** Enable lazy TranscriptionManager initialization */
+  lazyManagerInitEnabled: boolean;
+  /** Enable deferred device detection (only detect when needed) */
+  deferDeviceDetectionEnabled: boolean;
+  /** Number of days setup cache is considered valid */
+  setupCacheTtlDays: number;
+}
+
+export const DEFAULT_PERFORMANCE_CONFIG: PerformanceConfig = {
+  fastSetupCheckEnabled: true,
+  lazyManagerInitEnabled: true,
+  deferDeviceDetectionEnabled: true,
+  setupCacheTtlDays: 7,
 };

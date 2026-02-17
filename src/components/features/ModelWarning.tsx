@@ -15,10 +15,10 @@ export function ModelWarning({ onGoToModels, className }: ModelWarningProps) {
       <div className="flex flex-col gap-3">
         <div className="space-y-1">
           <AlertTitle className="text-amber-800 dark:text-amber-200">
-            Модель не выбрана
+            No Model Selected
           </AlertTitle>
           <AlertDescription className="text-amber-700 dark:text-amber-300">
-            Выберите модель в разделе «Модели», чтобы начать транскрипцию
+            Select a model in the "Models" section to start transcription
           </AlertDescription>
         </div>
         {onGoToModels && (
@@ -29,7 +29,7 @@ export function ModelWarning({ onGoToModels, className }: ModelWarningProps) {
             className="w-full border-amber-500/50 hover:bg-amber-100 dark:hover:bg-amber-900/30"
           >
             <Settings className="h-4 w-4 mr-2" />
-            Перейти к моделям
+            Go to Models
           </Button>
         )}
       </div>

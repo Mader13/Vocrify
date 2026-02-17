@@ -16,17 +16,17 @@ export interface DevicesResponse {
 }
 
 export const DEVICE_NAMES: Record<DeviceType, string> = {
-  auto: "Auto (рекомендуется)",
-  cpu: "CPU (медленно)",
+  auto: "Auto (Recommended)",
+  cpu: "CPU (Slow)",
   cuda: "NVIDIA GPU (CUDA)",
   mps: "Apple Silicon (MPS)",
   vulkan: "GPU (Vulkan - AMD/Intel)",
 };
 
 export const DEVICE_DESCRIPTIONS: Record<DeviceType, string> = {
-  auto: "Автоматический выбор лучшего устройства",
-  cpu: "Только процессор, работает везде, но медленно",
-  cuda: "NVIDIA видеокарта с CUDA, максимальная скорость",
-  mps: "Apple Silicon M1/M2/M3, хорошая производительность на Mac",
-  vulkan: "AMD/Intel видеокарта через Vulkan, хорошее ускорение",
+  auto: "Automatically select the best device",
+  cpu: "CPU only, works everywhere but slow",
+  cuda: "NVIDIA GPU with CUDA, maximum speed",
+  mps: "Apple Silicon M1/M2/M3, good performance on Mac",
+  vulkan: "AMD/Intel GPU via Vulkan, good acceleration",
 };

@@ -80,6 +80,7 @@ interface TasksState {
   updateSettings: (settings: Partial<AppSettings>) => void;
   updateLastDiarizationProvider: (provider: DiarizationProvider) => void;
   addTask: (path: string, name: string, size: number, options: TranscriptionOptions) => Promise<void>;
+  retryTask: (taskId: string) => Promise<void>;
   cancelTask: (taskId: string) => Promise<void>;
   setSpeakerSegments: (taskId: string, speakerSegments: TranscriptionSegment[], speakerTurns: SpeakerTurn[]) => void;
 }
@@ -227,14 +228,19 @@ export const useTasks = create<TasksState>()(
       },
 
       updateTaskStatus: (taskId, status, result, error) => {
-        logger.transcriptionInfo("Status update", { taskId, status, error });
+        logger.transcriptionInfo("Status update", { taskId, status, error, hasResult: !!result });
         set((state) => {
+          const taskExists = state.tasks.some((t) => t.id === taskId);
+          if (!taskExists) {
+            logger.transcriptionError("Task not found in store", { taskId, availableTasks: state.tasks.map(t => t.id) });
+          }
           const tasks = state.tasks.map((task) => {
             if (task.id !== taskId) return task;
             const updatedTask: TranscriptionTask = {
               ...task,
               status,
               progress: status === "completed" ? 100 : task.progress,
+              stage: status === "completed" ? undefined : task.stage,
               ...(result && { result }),
               ...(error !== undefined && { error }),
               ...(status === "processing" && !task.startedAt && { startedAt: new Date() }),
@@ -575,6 +581,19 @@ export const useTasks = create<TasksState>()(
         }
       },
 
+      retryTask: async (taskId) => {
+        const task = get().tasks.find((t) => t.id === taskId);
+        if (!task) {
+          logger.transcriptionError("Task not found for retry", { taskId });
+          return;
+        }
+
+        logger.transcriptionInfo("Retrying task", { taskId, fileName: task.fileName });
+
+        // Reset the existing task to queued state
+        get().updateTaskStatus(taskId, "queued", undefined, null);
+      },
+
       cancelTask: async (taskId) => {
         logger.transcriptionInfo("Cancelling task", { taskId });
         const { cancelTranscription } = await import("@/services/tauri");
@@ -598,12 +617,18 @@ export const useTasks = create<TasksState>()(
         const typedPersisted = persistedState as Partial<TasksState> | undefined;
         const persistedTasks = Array.isArray(typedPersisted?.tasks) ? typedPersisted.tasks : [];
 
-        const { tasks: recoveredTasks, recoveredCount } = recoverInterruptedTasks(persistedTasks);
+        const { tasks: recoveredTasks, recoveredCount, hasActiveProcessing } = recoverInterruptedTasks(persistedTasks);
 
         if (recoveredCount > 0) {
-          logger.transcriptionWarn("Recovered interrupted transcription tasks after app restart", {
-            recoveredCount,
-          });
+          if (hasActiveProcessing) {
+            logger.transcriptionInfo("Found processing tasks after app restart - will sync with backend", {
+              recoveredCount,
+            });
+          } else {
+            logger.transcriptionWarn("Recovered interrupted transcription tasks after app restart", {
+              recoveredCount,
+            });
+          }
         }
 
         return {

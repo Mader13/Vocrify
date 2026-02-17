@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
 
 import {
   ChevronDown,
@@ -24,7 +24,7 @@ interface CompletedViewProps {
   task: TranscriptionTask;
 }
 
-export function CompletedView({ task }: CompletedViewProps) {
+export const CompletedView = React.memo(function CompletedView({ task }: CompletedViewProps) {
   const displayMode = useUIStore((s) => s.displayMode);
   const setDisplayMode = useUIStore((s) => s.setDisplayMode);
   
@@ -255,7 +255,7 @@ export function CompletedView({ task }: CompletedViewProps) {
                           "transition-colors",
                           highlightedSearchIndex >= 0 ? "text-primary font-semibold" : ""
                         )}>
-                            {highlightedSearchIndex >= 0 ? `${highlightedSearchIndex + 1}` : '0'}/{matchingSegmentsCount}
+                          {highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/{matchingSegmentsCount}
                         </span>
                       ) : (
                         <span className="text-muted-foreground">0/0</span>
@@ -331,4 +331,4 @@ export function CompletedView({ task }: CompletedViewProps) {
       </Card>
     </div>
   );
-}
+});

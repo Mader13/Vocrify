@@ -37,7 +37,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
   availableDiarizationProviders,
   lastUsedProvider,
 }) => {
-  const { setCurrentView } = useUIStore();
+  const setCurrentView = useUIStore((s) => s.setCurrentView);
   const [filesWithSettings, setFilesWithSettings] = useState<FileWithSettings[]>([]);
   const [rememberChoice, setRememberChoice] = useState(false);
 
@@ -100,15 +100,21 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
   };
 
   const hasProviders = availableDiarizationProviders.length > 0;
+  const activeFile = filesWithSettings[0];
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 overflow-hidden shadow-2xl">
         {/* Header */}
         <DialogHeader className="px-7 pt-6 pb-5 border-b border-border/40">
-          <DialogTitle className="text-lg font-semibold text-foreground">
-            Диаризация
+          <DialogTitle className="text-lg font-semibold text-foreground truncate">
+            {activeFile?.name ?? "Diarization"}
           </DialogTitle>
+          {activeFile && (
+            <p className="text-sm text-muted-foreground mt-1">
+              {formatFileSize(activeFile.size)}
+            </p>
+          )}
         </DialogHeader>
 
         {/* Content */}
@@ -127,23 +133,11 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
               >
                 <div className="p-4">
                   {/* File Header */}
-                  <div className="flex items-start justify-between gap-4">
-                    {/* File Info */}
-                    <div className="flex-1 min-w-0 pr-4">
-                      <p className={cn(
-                        "font-medium truncate transition-colors",
-                        file.enableDiarization
-                          ? "text-foreground"
-                          : "text-muted-foreground"
-                      )}>
-                        {file.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground/80 mt-1">
-                        {formatFileSize(file.size)}
-                      </p>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
+                      Diarization Settings
                     </div>
 
-                    {/* Toggle */}
                     <div className="flex items-center gap-3 shrink-0">
                       <Switch
                         checked={file.enableDiarization}
@@ -151,16 +145,17 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                           handleToggleDiarization(file.id, checked)
                         }
                         disabled={!hasProviders}
+                        switchSize="lg"
                       />
                       <span className={cn(
-                        "text-sm font-medium transition-colors whitespace-nowrap",
+                        "text-base font-medium transition-colors whitespace-nowrap",
                         !hasProviders
                           ? "text-muted-foreground"
                           : file.enableDiarization
                             ? "text-foreground"
                             : "text-muted-foreground"
                       )}>
-                        Диаризация
+                        Diarization
                       </span>
                     </div>
                   </div>
@@ -172,7 +167,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                         {/* Provider Selection */}
                         <div className="space-y-2">
                           <label className="text-[15px] font-medium text-foreground/90 flex items-center gap-1.5">
-                            Провайдер
+                            Provider
                           </label>
                           <div className="relative">
                             <select
@@ -183,13 +178,19 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                               }}
                               disabled={availableDiarizationProviders.length === 1}
                               className={cn(
-                                "w-full h-10 px-3.5 rounded-lg border bg-background text-sm transition-all duration-200",
+                                "w-full h-10 px-3.5 rounded-lg border bg-background text-sm transition-all duration-200 appearance-none pr-10",
                                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:border-primary/50",
                                 "hover:border-border/80",
                                 availableDiarizationProviders.length === 1
                                   ? "cursor-not-allowed bg-muted/30 opacity-60"
                                   : "cursor-pointer border-border/60"
                               )}
+                              style={{
+                                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+                                backgroundRepeat: 'no-repeat',
+                                backgroundPosition: 'right 0.75rem center',
+                                backgroundSize: '1rem'
+                              }}
                             >
                               {availableDiarizationProviders.map((provider) => (
                                 <option key={provider} value={provider}>
@@ -203,7 +204,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                         {/* Speaker Count Selection */}
                         <div className="space-y-2">
                           <label className="text-[15px] font-medium text-foreground/90 flex items-center gap-1.5">
-                            Количество спикеров
+                            Number of Speakers
                           </label>
                           <select
                             value={file.numSpeakers}
@@ -221,10 +222,10 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                               backgroundSize: '1rem'
                             }}
                           >
-                            <option value="auto">Авто</option>
+                            <option value="auto">Auto</option>
                             {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
                               <option key={num} value={num}>
-                                {num} {num === 1 ? 'спикер' : num > 1 && num < 5 ? 'спикера' : 'спикеров'}
+                                {num} {num === 1 ? 'speaker' : 'speakers'}
                               </option>
                             ))}
                           </select>
@@ -246,10 +247,10 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                 </div>
                 <div className="flex-1">
                   <p className="text-sm text-amber-900 dark:text-amber-100 font-medium">
-                    Модель диаризации не установлена
+                    Diarization model not installed
                   </p>
                   <p className="text-sm text-amber-700/80 dark:text-amber-200/70 mt-1">
-                    Для использования функции разделения по спикерам необходимо установить модель диаризации.
+                    To use the speaker separation feature, you need to install a diarization model.
                   </p>
                   <button
                     onClick={() => {
@@ -258,7 +259,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
                     }}
                     className="mt-2.5 text-sm text-amber-700 dark:text-amber-300 font-medium hover:text-amber-900 dark:hover:text-amber-100 transition-colors underline underline-offset-2"
                   >
-                    Перейти к управлению моделями →
+                    Go to model management →
                   </button>
                 </div>
               </div>
@@ -272,7 +273,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
             <div className="flex items-start gap-2.5 p-3 rounded-lg bg-muted/40 border border-border/40">
               <Info className="w-4 h-4 text-primary/70 shrink-0 mt-0.5" />
               <p className="text-[15px] text-muted-foreground leading-relaxed">
-                Для качественного разделения по спикерам настоятельно рекомендуется указывать точное количество спикеров
+                For quality speaker separation, it is highly recommended to specify the exact number of speakers
               </p>
             </div>
           </div>
@@ -288,7 +289,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
               className="w-4 h-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 transition-all cursor-pointer"
             />
             <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-              Запомнить выбор
+              Remember choice
             </span>
           </label>
 
@@ -298,14 +299,14 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
               onClick={onClose}
               className="h-9 px-4 border-border/60 hover:border-border hover:bg-muted/40 transition-all duration-200"
             >
-              Отмена
+              Cancel
             </Button>
             <Button
               onClick={handleConfirm}
               className="h-9 px-4 bg-primary hover:bg-primary/90 transition-all duration-200 shadow-sm hover:shadow"
             >
               <Check className="w-4 h-4 mr-1.5" />
-              Добавить в очередь
+              Add to queue
             </Button>
           </div>
         </DialogFooter>

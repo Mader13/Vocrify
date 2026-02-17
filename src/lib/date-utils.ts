@@ -13,74 +13,48 @@ const TIME_UNITS = {
 };
 
 /**
- * Format distance to now in Russian
+ * Format distance to now in English
  * @param date - The date to format
- * @returns Formatted string like "5 минут назад"
+ * @returns Formatted string like "5 minutes ago"
  */
 export function formatDistanceToNow(date: Date): string {
   const now = new Date();
   const diff = now.getTime() - new Date(date).getTime();
 
   if (diff < TIME_UNITS.second) {
-    return "только что";
+    return "just now";
   }
 
   if (diff < TIME_UNITS.minute) {
     const seconds = Math.floor(diff / TIME_UNITS.second);
-    return formatPlural(seconds, ["секунду", "секунды", "секунд"], "назад");
+    return `${seconds} ${seconds === 1 ? "second" : "seconds"} ago`;
   }
 
   if (diff < TIME_UNITS.hour) {
     const minutes = Math.floor(diff / TIME_UNITS.minute);
-    return formatPlural(minutes, ["минуту", "минуты", "минут"], "назад");
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
   }
 
   if (diff < TIME_UNITS.day) {
     const hours = Math.floor(diff / TIME_UNITS.hour);
-    return formatPlural(hours, ["час", "часа", "часов"], "назад");
+    return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
   }
 
   if (diff < TIME_UNITS.week) {
     const days = Math.floor(diff / TIME_UNITS.day);
-    return formatPlural(days, ["день", "дня", "дней"], "назад");
+    return `${days} ${days === 1 ? "day" : "days"} ago`;
   }
 
   if (diff < TIME_UNITS.month) {
     const weeks = Math.floor(diff / TIME_UNITS.week);
-    return formatPlural(weeks, ["неделю", "недели", "недель"], "назад");
+    return `${weeks} ${weeks === 1 ? "week" : "weeks"} ago`;
   }
 
   if (diff < TIME_UNITS.year) {
     const months = Math.floor(diff / TIME_UNITS.month);
-    return formatPlural(months, ["месяц", "месяца", "месяцев"], "назад");
+    return `${months} ${months === 1 ? "month" : "months"} ago`;
   }
 
   const years = Math.floor(diff / TIME_UNITS.year);
-  return formatPlural(years, ["год", "года", "лет"], "назад");
-}
-
-/**
- * Format plural forms for Russian language
- */
-function formatPlural(
-  value: number,
-  forms: [one: string, few: string, many: string],
-  suffix: string
-): string {
-  const lastTwo = value % 100;
-  const lastOne = value % 10;
-
-  let form: string;
-
-  if (lastTwo >= 11 && lastTwo <= 19) {
-    form = forms[2];
-  } else if (lastOne === 1) {
-    form = forms[0];
-  } else if (lastOne >= 2 && lastOne <= 4) {
-    form = forms[1];
-  } else {
-    form = forms[2];
-  }
-
-  return `${value} ${form} ${suffix}`;
+  return `${years} ${years === 1 ? "year" : "years"} ago`;
 }

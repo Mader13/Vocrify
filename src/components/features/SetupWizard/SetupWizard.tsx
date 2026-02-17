@@ -7,6 +7,7 @@ import { FFmpegStep, FFmpegStepFooter } from "./steps/FFmpegStep";
 import { DeviceStep, DeviceStepFooter } from "./steps/DeviceStep";
 
 import { OptionalStep, OptionalStepFooter } from "./steps/OptionalStep";
+import { SummaryStep, SummaryStepFooter } from "./steps/SummaryStep";
 import { useSetupStore } from "@/stores/setupStore";
 import { cn } from "@/lib/utils";
 import type { SetupStep } from "@/types/setup";
@@ -17,14 +18,15 @@ import type { SetupStep } from "@/types/setup";
 const STEP_NAMES: string[] = [
   "Python",
   "FFmpeg",
-  "Устройства",
-  "Опции",
+  "Devices",
+  "Options",
+  "Start",
 ];
 
 /**
  * Step order for navigation
  */
-const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "optional"];
+const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "optional", "summary"];
 
 /**
  * Props for SetupWizard component
@@ -45,27 +47,22 @@ export interface SetupWizardProps {
 export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps) {
   const {
     currentStep,
-    isComplete,
     error,
     checkAll,
+    fetchDevices,
     nextStep,
     prevStep,
     completeSetup,
     skipSetup,
   } = useSetupStore();
 
-  // Run checks on mount - run only once
+  // Run Python/FFmpeg checks on mount, and fetch devices on-demand
   useEffect(() => {
     checkAll();
+    fetchDevices(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Handle setup completion
-  useEffect(() => {
-    if (isComplete) {
-      onComplete?.();
-    }
-  }, [isComplete, onComplete]);
 
   // Get current step index
   const currentStepIndex = STEPS.indexOf(currentStep);
@@ -87,6 +84,8 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   // Handle complete setup
   const handleComplete = async () => {
     await completeSetup();
+    // Call onComplete immediately after completeSetup resolves, before Guard re-renders
+    onComplete?.();
   };
 
   // Handle skip
@@ -106,6 +105,8 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
         return <DeviceStep />;
       case "optional":
         return <OptionalStep />;
+      case "summary":
+        return <SummaryStep />;
       default:
         return null;
     }
@@ -138,6 +139,13 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
         return (
           <OptionalStepFooter
             onBack={handleBack}
+            onNext={handleNext}
+          />
+        );
+      case "summary":
+        return (
+          <SummaryStepFooter
+            onBack={handleBack}
             onComplete={handleComplete}
           />
         );
@@ -165,10 +173,10 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
           </div>
           <div>
             <h1 id="setup-wizard-title" className="text-lg font-semibold">
-              Первичная настройка
+              Initial Setup
             </h1>
             <p className="text-sm text-muted-foreground">
-              Шаг {currentStepIndex + 1} из {STEPS.length}
+              Step {currentStepIndex + 1} of {STEPS.length}
             </p>
           </div>
         </div>
@@ -176,7 +184,7 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
           <button
             onClick={handleSkip}
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            aria-label="Пропустить настройку"
+            aria-label="Skip setup"
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -219,13 +227,32 @@ export interface SetupWizardGuardProps extends SetupWizardProps {
 
 export function SetupWizardGuard({ children, ...wizardProps }: SetupWizardGuardProps) {
   const { isComplete } = useSetupStore();
+  const [showMainContent, setShowMainContent] = React.useState(false);
 
-  // Show wizard if setup is not complete
-  if (!isComplete) {
+  // Reset transition state when unmounting
+  React.useEffect(() => {
+    return () => {
+      setShowMainContent(false);
+    };
+  }, []);
+
+  // Start transition when setup completes
+  React.useEffect(() => {
+    if (isComplete) {
+      // Small delay to allow UI to update before switching views
+      const timer = setTimeout(() => {
+        setShowMainContent(true);
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isComplete]);
+
+  // Show wizard if setup is not complete or during transition
+  if (!showMainContent) {
     return <SetupWizard {...wizardProps} />;
   }
 
-  // Show main content if setup is complete
+  // Show main content after transition is complete
   return <>{children}</>;
 }
 

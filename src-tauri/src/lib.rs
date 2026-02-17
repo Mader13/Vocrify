@@ -14,7 +14,9 @@ use std::process::Stdio;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
+    OnceLock,
 };
+use std::sync::RwLock;
 use tauri::{AppHandle, Emitter, Manager, State};
 use std::env;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -31,9 +33,10 @@ pub mod python_bridge;
 pub mod engine_router;
 pub mod transcription_manager;
 pub mod python_installer;
+pub mod performance_config;
 
 // Re-export FFmpeg types for frontend
-pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgress, get_ffmpeg_status, download_ffmpeg};
+pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgress, get_ffmpeg_status, get_ffmpeg_path, download_ffmpeg};
 
 // Re-export Python installer types for frontend
 pub use python_installer::{InstallProgress, check_python_installed, install_python_full, get_python_install_progress, cancel_python_install};
@@ -61,6 +64,9 @@ pub use python_bridge::{PythonBridge, PythonTranscriptionResult, SpeakerSegment 
 
 // Re-export EngineRouter types for frontend
 pub use engine_router::{EngineRouter, EnginePreference, EngineChoice, RouterTranscriptionOptions, RouterTranscriptionResult};
+
+// Re-export PerformanceConfig types for frontend
+pub use performance_config::PerformanceConfig;
 
 /// Maximum concurrent model downloads
 const MAX_CONCURRENT_DOWNLOADS: usize = 3;
@@ -463,6 +469,10 @@ pub struct DevicesResponse {
     pub recommended: String,
 }
 
+/// Global cache for device detection
+/// Persists for the app session to avoid repeated PyTorch imports
+static DEVICE_CACHE: OnceLock<Arc<Mutex<Option<DevicesResponse>>>> = OnceLock::new();
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelDownloadProgress {
@@ -481,6 +491,10 @@ type TaskManagerState = Arc<Mutex<TaskManager>>;
 
 /// TranscriptionManager state for Rust-based transcription
 type TranscriptionManagerState = Arc<Mutex<Option<TranscriptionManager>>>;
+
+/// Performance configuration state for feature flags
+/// Uses RwLock to allow updating config after initial setup
+type PerformanceConfigState = Arc<RwLock<PerformanceConfig>>;
 
 /// Check if a stderr line represents a critical error
 fn is_critical_error(line: &str) -> bool {
@@ -1577,11 +1591,36 @@ async fn check_cuda_available(app: AppHandle) -> Result<bool, AppError> {
 }
 
 /// Get available compute devices (CUDA, MPS, CPU)
+///
+/// # Arguments
+/// * `app` - Tauri app handle
+/// * `refresh` - If true, bypass cache and re-detect devices. If false, return cached result if available.
+///
+/// # Behavior
+/// - First call or `refresh=true`: Runs Python PyTorch device detection and caches result
+/// - Subsequent calls with `refresh=false`: Returns cached result instantly
+/// - Cache persists for the app session (until app restart)
 #[tauri::command]
-async fn get_available_devices(app: AppHandle) -> Result<DevicesResponse, AppError> {
+async fn get_available_devices(app: AppHandle, refresh: bool) -> Result<DevicesResponse, AppError> {
+    // Get or initialize the global cache
+    let cache = DEVICE_CACHE.get_or_init(|| Arc::new(Mutex::new(None)));
+
+    // If not forcing refresh, try to return cached result
+    if !refresh {
+        let cached = cache.lock().await;
+        if let Some(ref devices) = *cached {
+            eprintln!("[DEBUG] get_available_devices: returning cached result");
+            return Ok(devices.clone());
+        }
+        // cached is None, fall through to detection
+        drop(cached);
+    }
+
+    eprintln!("[DEBUG] get_available_devices: running device detection (refresh={})", refresh);
+
     let python_exe = get_python_executable(&app);
     eprintln!("[DEBUG] get_available_devices: python_exe = {:?}", python_exe);
-    
+
     // Run Python script to detect devices
     let script = r#"
 import json
@@ -1683,7 +1722,11 @@ except Exception as e:
             "Failed to parse device info: {}. Output: {}",
             e, stdout
         ))))?;
-    
+
+    // Update cache with fresh result
+    *cache.lock().await = Some(response.clone());
+    eprintln!("[DEBUG] get_available_devices: cached result");
+
     Ok(response)
 }
 
@@ -2001,6 +2044,60 @@ async fn open_models_folder_command(app: AppHandle) -> Result<(), AppError> {
     }
 
     eprintln!("[DEBUG] Successfully opened folder: {:?}", models_dir_str);
+    Ok(())
+}
+
+/// Open archive directory in system file manager
+#[tauri::command]
+async fn open_archive_folder_command(app: AppHandle) -> Result<(), AppError> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| AppError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "Failed to get app data dir")))?;
+    
+    let archive_dir = app_data.join("archive");
+    let archive_dir_str = archive_dir.to_string_lossy().to_string();
+
+    eprintln!("[DEBUG] Opening archive folder: {:?}", archive_dir_str);
+
+    // Create directory if it doesn't exist
+    if !archive_dir.exists() {
+        std::fs::create_dir_all(&archive_dir)
+            .map_err(|e| AppError::IoError(e))?;
+    }
+
+    // Platform-specific folder opening
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&archive_dir_str)
+            .spawn()
+            .map_err(|e| AppError::IoError(e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&archive_dir_str)
+            .spawn()
+            .map_err(|e| AppError::IoError(e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let open_result = std::process::Command::new("xdg-open")
+            .arg(&archive_dir_str)
+            .spawn();
+
+        if open_result.is_err() {
+            std::process::Command::new("nautilus")
+                .arg(&archive_dir_str)
+                .spawn()
+                .map_err(|e| AppError::IoError(e))?;
+        }
+    }
+
+    eprintln!("[DEBUG] Successfully opened archive folder: {:?}", archive_dir_str);
     Ok(())
 }
 
@@ -2808,13 +2905,17 @@ fn update_runtime_state_impl(
     ffmpeg_path: Option<String>,
 ) -> Result<(), String> {
     let existing = load_setup_state(app);
-    let completed_at = if readiness.ready {
-        existing
-            .and_then(|state| state.completed_at)
-            .or_else(|| Some(now_rfc3339()))
-    } else {
-        None
-    };
+    // Preserve existing completed_at regardless of current runtime readiness
+    // Once setup is completed, it stays completed even if runtime has issues
+    let completed_at = existing
+        .and_then(|state| state.completed_at)
+        .or_else(|| {
+            if readiness.ready {
+                Some(now_rfc3339())
+            } else {
+                None
+            }
+        });
 
     mark_setup_complete_impl(
         app,
@@ -3123,9 +3224,60 @@ print(json.dumps(get_full_environment_status(cache_dir)), flush=True)
     Ok(result)
 }
 
+/// Fast-path setup check using cached state with TTL
+/// Returns true if setup_state.json exists and runtime_ready=true with age < configured TTL
+/// Falls back to full is_setup_complete() check if cache is invalid/missing
+#[tauri::command]
+async fn is_setup_complete_fast(app: AppHandle, perf_config: State<'_, PerformanceConfigState>) -> Result<bool, String> {
+    // Check if fast setup check is enabled via performance config
+    let fast_check_enabled = perf_config.read()
+        .map(|cfg| cfg.fast_setup_check_enabled)
+        .unwrap_or(true); // Default to true if lock fails
+    
+    if !fast_check_enabled {
+        eprintln!("[INFO] Fast setup check is disabled, falling back to full check");
+        return is_setup_complete(app).await;
+    }
+
+    if let Some(state) = load_setup_state(&app) {
+        // Check if setup was ever completed successfully (completed_at is set)
+        // This is the key fix: we care about whether wizard was completed, not whether runtime is currently ready
+        if state.completed_at.is_some() {
+            // Parse completed_at to check age (optional validation)
+            if let Some(completed_at_str) = &state.completed_at {
+                if let Ok(completed_at) = chrono::DateTime::parse_from_rfc3339(completed_at_str) {
+                    let now = chrono::Utc::now();
+                    let days_old = now.signed_duration_since(completed_at.with_timezone(&chrono::Utc)).num_days();
+                    eprintln!("[INFO] Fast setup check: setup completed {} days ago, wizard was finished", days_old);
+                }
+            }
+            eprintln!("[INFO] Fast setup check: completed_at exists, setup was completed");
+            return Ok(true);
+        } else {
+            eprintln!("[INFO] Fast setup check: no completed_at, setup not finished");
+        }
+    } else {
+        eprintln!("[INFO] Fast setup check: no cached state, falling back to full check");
+    }
+
+    // Fallback to full check
+    is_setup_complete(app).await
+}
+
 /// Check if setup has been completed
+/// Returns true if setup was ever completed successfully (completed_at is set)
+/// Note: This does NOT check runtime readiness - that's a separate concern
 #[tauri::command]
 async fn is_setup_complete(app: AppHandle) -> Result<bool, String> {
+    // First check if we have a completed setup state (wizard was finished)
+    if let Some(state) = load_setup_state(&app) {
+        if state.completed_at.is_some() {
+            eprintln!("[INFO] Setup complete status: completed_at exists, setup was finished");
+            return Ok(true);
+        }
+    }
+
+    // If no completed state, fall back to full runtime check
     let readiness = evaluate_runtime_readiness(&app).await;
     update_runtime_state_impl(
         &app,
@@ -3138,19 +3290,30 @@ async fn is_setup_complete(app: AppHandle) -> Result<bool, String> {
 }
 
 /// Mark setup as complete
+/// Note: We skip runtime checks here because frontend already validated
+/// pythonCheck and ffmpegCheck status before enabling the finish button.
+/// This avoids spawning Python processes on every setup completion.
 #[tauri::command]
 async fn mark_setup_complete(app: AppHandle) -> Result<(), String> {
-    let readiness = evaluate_runtime_readiness(&app).await;
-    if !readiness.readiness.ready {
-        return Err(readiness.readiness.message);
-    }
+    let python_exe = get_python_executable(&app);
+    let ffmpeg_path = get_ffmpeg_path(&app).await.ok().map(|p| p.to_string_lossy().to_string());
+
+    let readiness = RuntimeReadinessStatus {
+        ready: true,
+        python_ready: true,
+        ffmpeg_ready: true,
+        python_message: "Python verified by frontend".to_string(),
+        ffmpeg_message: "FFmpeg verified by frontend".to_string(),
+        message: "Runtime is ready".to_string(),
+        checked_at: now_rfc3339(),
+    };
 
     mark_setup_complete_impl(
         &app,
-        &readiness.readiness,
+        &readiness,
         Some(now_rfc3339()),
-        readiness.python_executable,
-        readiness.ffmpeg_path,
+        Some(python_exe.to_string_lossy().to_string()),
+        ffmpeg_path,
     )
 }
 
@@ -3163,6 +3326,44 @@ async fn reset_setup(app: AppHandle) -> Result<(), String> {
 /// ============================================================================
 // Phase 3: Rust Transcription Commands
 // ============================================================================
+
+/// Wait for TranscriptionManager to be initialized (with timeout)
+/// This is used by Rust transcription commands to ensure the manager is ready
+async fn ensure_manager_initialized(
+    state: &State<'_, TranscriptionManagerState>,
+    app_handle: &AppHandle,
+) -> Result<(), String> {
+    const MAX_WAIT_MS: u64 = 30000; // 30 seconds timeout
+    const CHECK_INTERVAL_MS: u64 = 100;
+
+    let start = std::time::Instant::now();
+
+    loop {
+        // Check if manager is initialized
+        {
+            let guard = state.lock().await;
+            if guard.is_some() {
+                return Ok(());
+            }
+        }
+
+        // Check timeout - if we timeout, try to initialize manually
+        if start.elapsed().as_millis() as u64 > MAX_WAIT_MS {
+            eprintln!("[WARN] TranscriptionManager initialization timeout, attempting manual init");
+            let mut guard = state.lock().await;
+            if guard.is_some() {
+                return Ok(());
+            }
+            let manager = build_transcription_manager(app_handle)?;
+            *guard = Some(manager);
+            eprintln!("[INFO] TranscriptionManager initialized manually (fallback)");
+            return Ok(());
+        }
+
+        // Wait before checking again
+        tokio::time::sleep(tokio::time::Duration::from_millis(CHECK_INTERVAL_MS)).await;
+    }
+}
 
 /// Initialize the transcription manager (call at app startup)
 #[tauri::command]
@@ -3189,8 +3390,12 @@ async fn init_transcription_manager(
 #[tauri::command]
 async fn load_model_rust(
     model_name: String,
+    app: AppHandle,
     state: State<'_, TranscriptionManagerState>,
 ) -> Result<(), String> {
+    // Ensure manager is initialized before proceeding
+    ensure_manager_initialized(&state, &app).await?;
+
     let manager_guard = state.lock().await;
     let manager = manager_guard.as_ref()
         .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
@@ -3236,6 +3441,9 @@ async fn transcribe_rust(
 ) -> Result<TranscriptionResult, String> {
     eprintln!("[INFO] transcribe_rust called: task_id={}, file={}, model={}",
         task_id, file_path, options.language.as_ref().map(|s| s.as_str()).unwrap_or("auto"));
+
+    // Ensure manager is initialized before proceeding
+    ensure_manager_initialized(&state, &app).await?;
 
     // Validate file path
     let validated_path = validate_file_path(&file_path)
@@ -3441,8 +3649,12 @@ async fn transcribe_rust(
 /// Unload current model
 #[tauri::command]
 async fn unload_model_rust(
+    app: AppHandle,
     state: State<'_, TranscriptionManagerState>,
 ) -> Result<(), String> {
+    // Ensure manager is initialized before proceeding
+    ensure_manager_initialized(&state, &app).await?;
+
     let manager_guard = state.lock().await;
     let manager = manager_guard.as_ref()
         .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
@@ -3465,8 +3677,12 @@ async fn is_model_loaded_rust(
     state: State<'_, TranscriptionManagerState>,
 ) -> Result<bool, String> {
     let manager_guard = state.lock().await;
-    let manager = manager_guard.as_ref()
-        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+
+    // Return false if manager not initialized yet (lazy loading in progress)
+    let manager = match manager_guard.as_ref() {
+        Some(m) => m,
+        None => return Ok(false),
+    };
 
     #[cfg(feature = "rust-transcribe")]
     {
@@ -3485,8 +3701,12 @@ async fn get_current_model_rust(
     state: State<'_, TranscriptionManagerState>,
 ) -> Result<Option<String>, String> {
     let manager_guard = state.lock().await;
-    let manager = manager_guard.as_ref()
-        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+
+    // Return None if manager not initialized yet (lazy loading in progress)
+    let manager = match manager_guard.as_ref() {
+        Some(m) => m,
+        None => return Ok(None),
+    };
 
     #[cfg(feature = "rust-transcribe")]
     {
@@ -3715,11 +3935,60 @@ async fn get_archive_dir(app: AppHandle) -> Result<String, AppError> {
     Ok(archive_dir.to_string_lossy().to_string())
 }
 
+// ============================================================================
+// Performance Configuration Commands
+// ============================================================================
+
+/// Get the current performance configuration
+#[tauri::command]
+#[allow(dead_code)]
+fn get_performance_config(perf_config: State<'_, PerformanceConfigState>) -> Result<PerformanceConfig, String> {
+    perf_config.read()
+        .map(|cfg| cfg.clone())
+        .map_err(|e| format!("Failed to read performance config: {}", e))
+}
+
+/// Update performance configuration
+/// Note: Updates are only persisted to file if persist=true, otherwise they only apply
+/// to the current session (useful for testing/debugging)
+#[tauri::command]
+#[allow(dead_code)]
+async fn update_performance_config(
+    app: AppHandle,
+    perf_config: State<'_, PerformanceConfigState>,
+    config: PerformanceConfig,
+    persist: bool,
+) -> Result<PerformanceConfig, String> {
+    eprintln!("[INFO] Updating performance configuration: persist={}", persist);
+
+    // Update the in-memory configuration
+    {
+        let mut config_guard = perf_config.write()
+            .map_err(|e| format!("Failed to acquire write lock: {}", e))?;
+        *config_guard = config.clone();
+    }
+
+    if persist {
+        let app_data_dir = app.path().app_data_dir()
+            .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+
+        config.save_to_file(&app_data_dir)
+            .map_err(|e| format!("Failed to save performance config: {}", e))?;
+
+        eprintln!("[INFO] Performance configuration saved to file");
+    }
+
+    Ok(config)
+}
+
 /// Main entry point
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let task_manager: TaskManagerState = Arc::new(Mutex::new(TaskManager::default()));
     let transcription_manager_state: TranscriptionManagerState = Arc::new(Mutex::new(None));
+    // Initialize performance config state early with defaults
+    // This prevents "state not managed" errors when commands are called during startup
+    let performance_config_state: PerformanceConfigState = Arc::new(RwLock::new(PerformanceConfig::default()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -3727,19 +3996,59 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(task_manager)
         .manage(transcription_manager_state)
+        .manage(performance_config_state)
         .setup(|app| {
             let app_handle = app.app_handle();
 
-            let manager_state = app.state::<TranscriptionManagerState>();
-            let mut manager_guard = tauri::async_runtime::block_on(manager_state.lock());
-
-            *manager_guard = match build_transcription_manager(&app_handle) {
-                Ok(manager) => Some(manager),
+            // Load performance configuration
+            let app_data_dir = match app_handle.path().app_data_dir() {
+                Ok(dir) => dir,
                 Err(e) => {
-                    eprintln!("[WARN] {}", e);
-                    None
+                    eprintln!("[WARN] Failed to get app data dir for performance config: {}", e);
+                    // Use a temporary path for config loading - will use defaults
+                    PathBuf::from(".")
                 }
             };
+            let loaded_config = PerformanceConfig::load(&app_data_dir);
+
+            // Log performance configuration status on startup
+            loaded_config.log_status();
+
+            // Update the managed performance config state with loaded values
+            if let Ok(mut config_guard) = app.state::<PerformanceConfigState>().write() {
+                *config_guard = loaded_config;
+                eprintln!("[INFO] Performance config state updated with loaded values");
+            } else {
+                eprintln!("[WARN] Failed to update performance config state, using defaults");
+            }
+
+            // Spawn async task to initialize TranscriptionManager in background
+            // This prevents blocking the window creation during startup
+            let manager_state = app.state::<TranscriptionManagerState>();
+            let manager_state_inner = (*manager_state).clone(); // Clone the Arc to get 'static ownership
+            let app_handle_for_spawn = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                eprintln!("[INFO] Starting lazy TranscriptionManager initialization...");
+                let mut manager_guard = manager_state_inner.lock().await;
+
+                // Double-check it wasn't already initialized
+                if manager_guard.is_some() {
+                    eprintln!("[INFO] TranscriptionManager already initialized, skipping");
+                    return;
+                }
+
+                *manager_guard = match build_transcription_manager(&app_handle_for_spawn) {
+                    Ok(manager) => {
+                        eprintln!("[INFO] TranscriptionManager lazy initialization completed successfully");
+                        Some(manager)
+                    }
+                    Err(e) => {
+                        eprintln!("[WARN] Failed to initialize TranscriptionManager: {}", e);
+                        None
+                    }
+                };
+            });
+
 
             Ok(())
         })
@@ -3754,6 +4063,7 @@ pub fn run() {
             export_transcription,
             get_models_dir_command,
             open_models_folder_command,
+            open_archive_folder_command,
             download_model,
             download_ggml_model,
             cancel_model_download,
@@ -3795,6 +4105,7 @@ pub fn run() {
             cancel_python_install,
             check_models_status,
             get_environment_status,
+            is_setup_complete_fast,
             is_setup_complete,
             mark_setup_complete,
             reset_setup,

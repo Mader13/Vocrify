@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { FileText, XCircle } from "lucide-react";
+import { AlertTriangle, FileText, RefreshCw, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { useTasks, useUIStore } from "@/stores";
 
 import { CompletedView } from "./CompletedView";
@@ -10,19 +11,16 @@ import { QueuedView } from "./QueuedView";
 
 export function TranscriptionView() {
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
-  const task = useTasks((s) => s.tasks.find((t) => t.id === selectedTaskId));
-  const [showCompleted, setShowCompleted] = useState(false);
+  const retryTask = useTasks((s) => s.retryTask);
+  const tasks = useTasks((s) => s.tasks);
 
-  useEffect(() => {
-    if (task?.status === "completed" && task.result) {
-      const timer = setTimeout(() => {
-        setShowCompleted(true);
-      }, 800);
-      return () => clearTimeout(timer);
-    } else {
-      setShowCompleted(false);
-    }
-  }, [task?.status, task?.result]);
+  const task = tasks.find((t) => t.id === selectedTaskId);
+
+  // Derived state - no useEffect needed
+  const showCompleted = useMemo(
+    () => task?.status === "completed" && !!task?.result,
+    [task?.status, task?.result]
+  );
 
   if (!selectedTaskId || !task) {
     return (
@@ -30,10 +28,10 @@ export function TranscriptionView() {
         <div className="rounded-full bg-muted p-4 mb-4">
           <FileText className="h-8 w-8 text-muted-foreground" />
         </div>
-        <h2 className="text-lg font-semibold mb-2">Нет выбранной задачи</h2>
+        <h2 className="text-lg font-semibold mb-2">No Task Selected</h2>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Выберите задачу из списка слева, чтобы просмотреть результат транскрипции.
-          Загрузите видео или аудио файл для создания новой задачи.
+          Select a task from the list on the left to view the transcription result.
+          Upload a video or audio file to create a new task.
         </p>
       </div>
     );
@@ -53,8 +51,12 @@ export function TranscriptionView() {
         <CardHeader>
           <CardTitle className="text-lg">{task.fileName}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <p className="text-destructive">Error: {task.error}</p>
+          <Button onClick={() => retryTask(task.id)}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Retry
+          </Button>
         </CardContent>
       </Card>
     );
@@ -66,11 +68,34 @@ export function TranscriptionView() {
         <div className="rounded-full bg-destructive/10 p-4 mb-4">
           <XCircle className="h-8 w-8 text-destructive" />
         </div>
-        <h2 className="text-lg font-semibold mb-2">Транскрипция отменена</h2>
+        <h2 className="text-lg font-semibold mb-2">Transcription Cancelled</h2>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Задача была отменена пользователем. Вы можете удалить её из списка
-          или загрузить файл заново для повторной обработки.
+          The task was cancelled by the user. You can remove it from the list
+          or re-upload the file for reprocessing.
         </p>
+        <Button onClick={() => retryTask(task.id)} className="mt-4">
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
+  if (task.status === "interrupted") {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-8">
+        <div className="rounded-full bg-orange-500/10 p-4 mb-4">
+          <AlertTriangle className="h-8 w-8 text-orange-500" />
+        </div>
+        <h2 className="text-lg font-semibold mb-2">Transcription Interrupted</h2>
+        <p className="text-sm text-muted-foreground max-w-sm">
+          The application closed during processing. You can remove this task or
+          re-upload the file to restart transcription.
+        </p>
+        <Button onClick={() => retryTask(task.id)} className="mt-4">
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Retry
+        </Button>
       </div>
     );
   }
@@ -86,25 +111,26 @@ export function TranscriptionView() {
   }
 
   return (
-    <AnimatePresence mode="wait">
+    <AnimatePresence mode="wait" initial={false}>
       {!showCompleted ? (
         <motion.div
           key="processing"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0, scale: 0.98 }}
-          transition={{ duration: 0.3 }}
-          className="h-full"
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="h-full will-change-transform"
         >
           <ProcessingView task={task} />
         </motion.div>
       ) : (
         <motion.div
           key="completed"
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.3 }}
-          className="h-full"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="h-full will-change-transform"
         >
           <CompletedView task={task} />
         </motion.div>

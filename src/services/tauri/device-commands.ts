@@ -3,12 +3,13 @@ import type { DevicesResponse } from "@/types";
 import { logger } from "@/lib/logger";
 import type { CommandResult } from "./core";
 
-export async function getAvailableDevices(): Promise<CommandResult<DevicesResponse>> {
+export async function getAvailableDevices(refresh = false): Promise<CommandResult<DevicesResponse>> {
   try {
-    const response = await invoke<DevicesResponse>("get_available_devices");
+    const response = await invoke<DevicesResponse>("get_available_devices", { refresh });
     logger.info("Detected compute devices", {
       devices: response.devices.map(d => `${d.name} (${d.deviceType})`).join(", "),
       recommended: response.recommended,
+      cached: !refresh,
     });
     return { success: true, data: response };
   } catch (error) {

@@ -172,15 +172,15 @@ export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {
 };
 
 export const AVAILABLE_MODELS: AvailableModel[] = [
-  { name: "whisper-tiny", sizeMb: 74, modelType: "whisper", description: "Самый быстрый, минимальная точность", installed: false },
-  { name: "whisper-base", sizeMb: 139, modelType: "whisper", description: "Баланс скорости и точности", installed: false },
-  { name: "whisper-small", sizeMb: 466, modelType: "whisper", description: "Хорошая точность, средняя скорость", installed: false },
-  { name: "whisper-medium", sizeMb: 1505, modelType: "whisper", description: "Высокая точность", installed: false },
-  { name: "whisper-large-v3", sizeMb: 2960, modelType: "whisper", description: "Максимальная точность, медленный", installed: false },
-  { name: "parakeet-tdt-0.6b-v3", sizeMb: 640, modelType: "parakeet", description: "Многоязычная, включая русский", installed: false },
-  { name: "parakeet-tdt-1.1b", sizeMb: 2490, modelType: "parakeet", description: "Английский, высокая точность", installed: false },
-  { name: "pyannote-diarization", sizeMb: 463, modelType: "diarization", description: "PyAnnote модель диаризации", installed: false },
-  { name: "sherpa-onnx-diarization", sizeMb: 45, modelType: "diarization", description: "Sherpa-ONNX модель диаризации", installed: false },
+  { name: "whisper-tiny", sizeMb: 74, modelType: "whisper", description: "Fastest, minimal accuracy", installed: false },
+  { name: "whisper-base", sizeMb: 139, modelType: "whisper", description: "Balance of speed and accuracy", installed: false },
+  { name: "whisper-small", sizeMb: 466, modelType: "whisper", description: "Good accuracy, medium speed", installed: false },
+  { name: "whisper-medium", sizeMb: 1505, modelType: "whisper", description: "High accuracy", installed: false },
+  { name: "whisper-large-v3", sizeMb: 2960, modelType: "whisper", description: "Maximum accuracy, slow", installed: false },
+  { name: "parakeet-tdt-0.6b-v3", sizeMb: 640, modelType: "parakeet", description: "Multilingual including Russian", installed: false },
+  { name: "parakeet-tdt-1.1b", sizeMb: 2490, modelType: "parakeet", description: "English, high accuracy", installed: false },
+  { name: "pyannote-diarization", sizeMb: 463, modelType: "diarization", description: "PyAnnote diarization model", installed: false },
+  { name: "sherpa-onnx-diarization", sizeMb: 45, modelType: "diarization", description: "Sherpa-ONNX diarization model", installed: false },
 ];
 
 export const MODEL_DISPLAY_NAMES: Record<string, string> = {

@@ -53,7 +53,7 @@ function getStatusIcon(status: CheckStatus, progress?: number): React.ReactNode 
         <div className="relative flex items-center justify-center">
           <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
           {progress !== undefined && (
-            <span className="absolute text-[10px] font-bold" aria-label={`Прогресс: ${progress}%`}>
+            <span className="absolute text-[10px] font-bold" aria-label={`Progress: ${progress}%`}>
               {progress}
             </span>
           )}
@@ -65,22 +65,22 @@ function getStatusIcon(status: CheckStatus, progress?: number): React.ReactNode 
 }
 
 /**
- * Get status label in Russian
+ * Get status label in English
  */
 function getStatusLabel(status: CheckStatus): string {
   switch (status) {
     case "pending":
-      return "Ожидание";
+      return "Pending";
     case "checking":
-      return "Проверка...";
+      return "Checking...";
     case "ok":
-      return "Готово";
+      return "Ready";
     case "warning":
-      return "Внимание";
+      return "Warning";
     case "error":
-      return "Ошибка";
+      return "Error";
     case "installing":
-      return "Установка...";
+      return "Installing...";
     default:
       return "";
   }
@@ -164,7 +164,7 @@ export function CheckCard({
                 <div
                   className="h-full bg-primary transition-all duration-300"
                   style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
-                  aria-label={`Прогресс установки: ${progress}%`}
+                  aria-label={`Installation progress: ${progress}%`}
                 />
               </div>
             </div>
@@ -178,10 +178,10 @@ export function CheckCard({
               onClick={onRetry}
               disabled={isLoading}
               className="mt-3"
-              aria-label="Повторить проверку"
+              aria-label="Retry check"
             >
               <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
-              Повторить
+              Retry
             </Button>
           )}
         </div>

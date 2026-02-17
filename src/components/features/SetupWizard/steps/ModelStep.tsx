@@ -66,17 +66,17 @@ export function ModelStep() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">AI Модели</h3>
+        <h3 className="text-lg font-semibold">AI Models</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Проверка установленных моделей для транскрипции
+          Checking installed models for transcription
         </p>
       </div>
 
       {/* Main check card */}
       <CheckCard
-        title="AI Модели"
+        title="AI Models"
         status={modelCheck?.status ?? "pending"}
-        message={modelCheck?.message ?? "Проверка моделей..."}
+        message={modelCheck?.message ?? "Checking models..."}
         onRetry={checkModel}
       />
 
@@ -84,7 +84,7 @@ export function ModelStep() {
       {hasModels && (
         <div className="space-y-3">
           <h4 className="text-sm font-medium text-muted-foreground">
-            Установлено моделей: {modelCheck.installedModels.length}
+            Models installed: {modelCheck.installedModels.length}
           </h4>
           <div className="grid gap-2">
             {modelCheck.installedModels.map((model, index) => (
@@ -98,25 +98,25 @@ export function ModelStep() {
       {modelCheck && !hasModels && (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4 space-y-3">
           <h4 className="font-medium text-yellow-600 dark:text-yellow-400">
-            Модели не найдены
+            No models found
           </h4>
           <p className="text-sm text-muted-foreground">
-            Для транскрипции необходимо установить хотя бы одну модель Whisper или Parakeet.
+            You need to install at least one Whisper or Parakeet model for transcription.
           </p>
           <div className="text-sm space-y-2">
-            <p className="font-medium text-foreground">Рекомендуемые модели:</p>
+            <p className="font-medium text-foreground">Recommended models:</p>
             <ul className="list-disc list-inside space-y-1 ml-2 text-muted-foreground">
               <li>
-                <span className="font-medium">whisper-base</span> — быстрая, для простых задач (~{getModelSizeLabel("whisper-base")})
+                <span className="font-medium">whisper-base</span> — fast, for simple tasks (~{getModelSizeLabel("whisper-base")})
               </li>
               <li>
-                <span className="font-medium">whisper-small</span> — сбалансированная (~{getModelSizeLabel("whisper-small")})
+                <span className="font-medium">whisper-small</span> — balanced (~{getModelSizeLabel("whisper-small")})
               </li>
               <li>
-                <span className="font-medium">whisper-medium</span> — качественная (~{getModelSizeLabel("whisper-medium")})
+                <span className="font-medium">whisper-medium</span> — high quality (~{getModelSizeLabel("whisper-medium")})
               </li>
               <li>
-                <span className="font-medium">whisper-large-v3</span> — лучшее качество (~{getModelSizeLabel("whisper-large-v3")})
+                <span className="font-medium">whisper-large-v3</span> — best quality (~{getModelSizeLabel("whisper-large-v3")})
               </li>
             </ul>
           </div>
@@ -125,11 +125,11 @@ export function ModelStep() {
 
       {/* Info about models */}
       <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
-        <h4 className="text-sm font-medium mb-2">О моделях</h4>
+        <h4 className="text-sm font-medium mb-2">About Models</h4>
         <p className="text-xs text-muted-foreground">
-          Модели Whisper от OpenAI обеспечивают высокое качество транскрипции.
-          Модели Parakeet от NVIDIA оптимизированы для реального времени.
-          Модели загружаются автоматически при первом использовании или через настройки приложения.
+          Whisper models from OpenAI provide high-quality transcription.
+          Parakeet models from NVIDIA are optimized for real-time processing.
+          Models are downloaded automatically on first use or through the application settings.
         </p>
       </div>
 
@@ -137,7 +137,7 @@ export function ModelStep() {
       {isChecking && !modelCheck && (
         <div className="flex items-center justify-center py-8">
           <div className="animate-pulse text-muted-foreground">
-            Проверка моделей...
+            Checking models...
           </div>
         </div>
       )}
@@ -162,7 +162,7 @@ export function ModelStepFooter({ onBack, onNext }: ModelStepFooterProps) {
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onBack}>
-          Назад
+          Back
         </Button>
         {modelCheck?.status === "error" && (
           <Button
@@ -170,13 +170,13 @@ export function ModelStepFooter({ onBack, onNext }: ModelStepFooterProps) {
             onClick={() => checkModel()}
             disabled={isChecking}
           >
-            Повторить
+            Retry
           </Button>
         )}
       </div>
       <div className="flex items-center gap-2">
         <Button onClick={onNext} disabled={isChecking}>
-          {hasModels ? "Продолжить" : "Пропустить"}
+          {hasModels ? "Continue" : "Skip"}
         </Button>
       </div>
     </div>

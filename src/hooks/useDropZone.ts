@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useUIStore } from "@/stores";
 import { logger } from "@/lib/logger";
 import { isMediaFile } from "@/lib/utils";
@@ -19,9 +20,89 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
   const isDraggingGlobal = useUIStore((s) => s.isDragging);
   const setDraggingGlobal = useUIStore((s) => s.setDragging);
   const { validateModelSelection } = useModelValidation();
+  const isDropEnabled = currentView === "transcription" || currentView === "archive";
+
+  const processFiles = useCallback(
+    (files: SelectedFile[], source: "document" | "tauri") => {
+      if (!isDropEnabled) {
+        logger.uploadDebug("[Drag] Drop ignored - drop is disabled for current view", { currentView, source });
+        return;
+      }
+
+      const validFiles = files.filter((file) => isMediaFile(file.name || file.path));
+
+      if (validFiles.length === 0) {
+        logger.uploadDebug("[Drag] No valid media files found", { source, total: files.length });
+        return;
+      }
+
+      if (!validateModelSelection()) {
+        return;
+      }
+
+      logger.uploadInfo("Files dropped", {
+        source,
+        count: validFiles.length,
+        files: validFiles.map((f) => f.name),
+      });
+
+      onFilesDropped(validFiles);
+    },
+    [isDropEnabled, currentView, validateModelSelection, onFilesDropped],
+  );
 
   useEffect(() => {
-    if (currentView !== "transcription") return;
+    if (!isDropEnabled) return;
+
+    let unlistenNativeDrop: (() => void) | undefined;
+
+    const setupNativeDrop = async () => {
+      try {
+        const window = getCurrentWindow();
+        unlistenNativeDrop = await window.onDragDropEvent((event) => {
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setDraggingGlobal(true);
+            return;
+          }
+
+          if (event.payload.type === "leave") {
+            setDraggingGlobal(false);
+            return;
+          }
+
+          if (event.payload.type === "drop") {
+            setDraggingGlobal(false);
+
+            const droppedFiles: SelectedFile[] = event.payload.paths.map((path) => {
+              const fileName = path.split(/[/\\]/).pop() || path;
+              return {
+                path,
+                name: fileName,
+                size: 0,
+              };
+            });
+
+            processFiles(droppedFiles, "tauri");
+          }
+        });
+
+        logger.uploadDebug("[Drag] Native Tauri drop listener attached");
+      } catch (error) {
+        logger.uploadWarn("[Drag] Failed to attach native Tauri drop listener", { error: String(error) });
+      }
+    };
+
+    setupNativeDrop();
+
+    return () => {
+      if (unlistenNativeDrop) {
+        unlistenNativeDrop();
+      }
+    };
+  }, [isDropEnabled, processFiles, setDraggingGlobal]);
+
+  useEffect(() => {
+    if (!isDropEnabled) return;
 
     const handleDocumentDragOver = (e: DragEvent) => {
       e.preventDefault();
@@ -43,32 +124,14 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
       logger.uploadDebug("[Drag] Document drop");
       setDraggingGlobal(false);
 
-      const files = Array.from(e.dataTransfer?.files || []);
-      logger.uploadDebug("[Drag] Dropped files count:", { count: files.length });
+      const droppedFiles: SelectedFile[] = Array.from(e.dataTransfer?.files || []).map((file) => ({
+        path: (file as { path?: string }).path || file.name,
+        name: file.name,
+        size: file.size,
+      }));
 
-      if (files.length > 0) {
-        const validFiles: SelectedFile[] = [];
-
-        files.forEach((file) => {
-          logger.uploadDebug("[Drag] Processing file:", { fileName: file.name });
-          if (isMediaFile(file.name)) {
-            const filePath = (file as { path?: string }).path || file.name;
-            validFiles.push({
-              path: filePath,
-              name: file.name,
-              size: file.size,
-            });
-          }
-        });
-
-        if (validFiles.length > 0) {
-          if (!validateModelSelection()) {
-            return;
-          }
-          logger.uploadDebug("[Drag] Adding valid files:", { files: validFiles.map(f => f.name) });
-          onFilesDropped(validFiles);
-        }
-      }
+      logger.uploadDebug("[Drag] Dropped files count:", { count: droppedFiles.length });
+      processFiles(droppedFiles, "document");
     };
 
     logger.uploadDebug("[Drag] Adding global document drag handlers");
@@ -82,14 +145,14 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
       document.removeEventListener('dragleave', handleDocumentDragLeave);
       document.removeEventListener('drop', handleDocumentDrop);
     };
-  }, [currentView, setDraggingGlobal, onFilesDropped, validateModelSelection]);
+  }, [isDropEnabled, setDraggingGlobal, processFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (currentView !== "transcription") {
-      logger.uploadDebug("[Drag] DragOver ignored - not on transcription view");
+    if (!isDropEnabled) {
+      logger.uploadDebug("[Drag] DragOver ignored - drop is disabled for current view", { currentView });
       return;
     }
 
@@ -101,13 +164,13 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
         setDraggingGlobal(true);
       }
     }
-  }, [currentView, isDraggingGlobal, setDraggingGlobal]);
+  }, [isDropEnabled, currentView, isDraggingGlobal, setDraggingGlobal]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (currentView !== "transcription") return;
+    if (!isDropEnabled) return;
 
     logger.uploadDebug("[Drag] DragEnter triggered");
 
@@ -116,7 +179,7 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
         setDraggingGlobal(true);
       }
     }
-  }, [currentView, isDraggingGlobal, setDraggingGlobal]);
+  }, [isDropEnabled, isDraggingGlobal, setDraggingGlobal]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -139,54 +202,25 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
     logger.uploadDebug("[Drag] Drop triggered");
     setDraggingGlobal(false);
 
-    if (currentView !== "transcription") {
-      logger.uploadDebug("[Drag] Drop ignored - not on transcription view");
+    if (!isDropEnabled) {
+      logger.uploadDebug("[Drag] Drop ignored - drop is disabled for current view", { currentView });
       return;
     }
 
     logger.uploadDebug("[Drag] DataTransfer", {
       types: e.dataTransfer.types,
       itemsCount: e.dataTransfer.items.length,
-      filesCount: e.dataTransfer.files.length
+      filesCount: e.dataTransfer.files.length,
     });
 
-    const files = Array.from(e.dataTransfer.files);
-    logger.uploadInfo("Files dropped globally", { count: files.length });
+    const droppedFiles: SelectedFile[] = Array.from(e.dataTransfer.files).map((file) => ({
+      path: (file as { path?: string }).path || file.name,
+      name: file.name,
+      size: file.size,
+    }));
 
-    const validFiles: SelectedFile[] = [];
-    const invalidFiles: string[] = [];
-
-    files.forEach((file, index) => {
-      logger.uploadDebug(`[Drag] File ${index}`, { name: file.name, type: file.type, size: file.size });
-      if (isMediaFile(file.name)) {
-        const filePath = (file as { path?: string }).path || file.name;
-        validFiles.push({
-          path: filePath,
-          name: file.name,
-          size: file.size,
-        });
-        logger.uploadDebug("Valid file", { fileName: file.name, size: file.size });
-      } else {
-        invalidFiles.push(file.name);
-        logger.uploadWarn("Invalid file type", { fileName: file.name });
-      }
-    });
-
-    if (invalidFiles.length > 0) {
-      logger.uploadInfo("Some files were skipped", { invalidFiles, validCount: validFiles.length });
-    }
-
-    if (validFiles.length > 0) {
-      if (!validateModelSelection()) {
-        return;
-      }
-
-      logger.uploadInfo("Files added to selection", { count: validFiles.length, files: validFiles.map((f) => f.name) });
-      onFilesDropped(validFiles);
-    } else {
-      logger.uploadDebug("[Drag] No valid files to add");
-    }
-  }, [currentView, setDraggingGlobal, validateModelSelection, onFilesDropped]);
+    processFiles(droppedFiles, "document");
+  }, [isDropEnabled, currentView, setDraggingGlobal, processFiles]);
 
   return {
     isDraggingGlobal,

@@ -102,7 +102,7 @@ export function NotificationCenterPanel({
         className={cn("cursor-pointer", triggerClassName)}
         role="button"
         tabIndex={0}
-        aria-label="Открыть центр уведомлений"
+        aria-label="Open notification center"
         aria-expanded={isOpen}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -126,13 +126,13 @@ export function NotificationCenterPanel({
           )}
           role="dialog"
           aria-modal="false"
-          aria-label="Центр уведомлений"
+          aria-label="Notification Center"
         >
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b">
             <div className="flex items-center gap-2">
               <Bell className="h-5 w-5 text-muted-foreground" />
-              <h3 className="font-semibold">Уведомления</h3>
+              <h3 className="font-semibold">Notifications</h3>
               {unreadCount > 0 && (
                 <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
                   {unreadCount}
@@ -150,7 +150,7 @@ export function NotificationCenterPanel({
                     handleClearAll();
                   }}
                   disabled={isOperating}
-                  aria-label="Очистить все уведомления"
+                  aria-label="Clear all notifications"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -163,7 +163,7 @@ export function NotificationCenterPanel({
                   e.stopPropagation();
                   close();
                 }}
-                aria-label="Закрыть"
+                aria-label="Close"
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -177,9 +177,9 @@ export function NotificationCenterPanel({
                 <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
                   <Bell className="h-8 w-8 text-muted-foreground" />
                 </div>
-                <h4 className="font-medium mb-1">Нет уведомлений</h4>
+                <h4 className="font-medium mb-1">No notifications</h4>
                 <p className="text-sm text-muted-foreground">
-                  Здесь будут отображаться ваши уведомления
+                  Your notifications will appear here
                 </p>
               </div>
             ) : (
@@ -212,7 +212,7 @@ export function NotificationCenterPanel({
                 disabled={isOperating}
               >
                 <Check className="h-4 w-4" />
-                Отметить все как прочитанные
+                Mark all as read
               </Button>
             </div>
           )}

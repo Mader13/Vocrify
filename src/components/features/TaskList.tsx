@@ -1,17 +1,14 @@
-import React from "react";
 import {
   Clock,
   Loader2,
-  CheckCircle2,
-  XCircle,
+  Check,
+  AlertTriangle,
   Trash2,
   X,
   Archive,
 } from "lucide-react";
 
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-
 import { ProgressEnhanced } from "@/components/ui/progress-enhanced";
 import { cn, formatFileSize, formatDateTime } from "@/lib/utils";
 import { useTasks, useTasksByView, useUIStore } from "@/stores";
@@ -19,32 +16,43 @@ import type { TranscriptionTask, TaskStatus } from "@/types";
 
 const statusConfig: Record<
   TaskStatus,
-  { icon: React.ElementType; color: string; label: string }
+  { icon: React.ElementType; borderColor: string; color: string; label: string }
 > = {
   queued: {
     icon: Clock,
-    color: "text-status-queued",
+    borderColor: "border-slate-400",
+    color: "text-amber-500",
     label: "In queue",
   },
   processing: {
     icon: Loader2,
-    color: "text-status-processing",
+    borderColor: "border-blue-500",
+    color: "text-blue-500",
     label: "Processing",
   },
   completed: {
-    icon: CheckCircle2,
-    color: "text-status-completed",
+    icon: Check,
+    borderColor: "border-emerald-500",
+    color: "text-emerald-500",
     label: "Completed",
   },
   failed: {
-    icon: XCircle,
-    color: "text-status-failed",
+    icon: X,
+    borderColor: "border-red-500",
+    color: "text-red-500",
     label: "Failed",
   },
   cancelled: {
     icon: X,
-    color: "text-muted-foreground",
+    borderColor: "border-gray-400",
+    color: "text-gray-500",
     label: "Cancelled",
+  },
+  interrupted: {
+    icon: AlertTriangle,
+    borderColor: "border-orange-500",
+    color: "text-orange-500",
+    label: "Interrupted",
   },
 };
 
@@ -57,7 +65,8 @@ function TaskItem({ task, compact }: TaskItemProps) {
   const removeTask = useTasks((s) => s.removeTask);
   const cancelTask = useTasks((s) => s.cancelTask);
   const archiveTask = useTasks((s) => s.archiveTask);
-  const { selectedTaskId, setSelectedTask } = useUIStore();
+  const selectedTaskId = useUIStore((s) => s.selectedTaskId);
+  const setSelectedTask = useUIStore((s) => s.setSelectedTask);
 
   const config = statusConfig[task.status];
   const StatusIcon = config.icon;
@@ -67,20 +76,18 @@ function TaskItem({ task, compact }: TaskItemProps) {
     return (
       <div
         className={cn(
-          "cursor-pointer rounded-lg border p-2 transition-all hover:bg-muted group",
-          isSelected && "border-primary bg-primary/10"
+          "cursor-pointer rounded-lg p-2 transition-all hover:bg-muted group relative",
         )}
         onClick={() => setSelectedTask(task.id)}
         title={task.fileName}
       >
-        {/* Status icon container */}
+        {isSelected && (
+          <div className="absolute left-0 top-2 bottom-2 w-1 bg-primary rounded-full" />
+        )}
         <div className="relative w-full aspect-square flex items-center justify-center">
-          {/* Status icon - centered */}
           {task.status === "processing" ? (
             <div className="relative">
-              {/* Circular progress background - transparent */}
               <div className="w-10 h-10 rounded-full border-2 border-border/50 bg-transparent" />
-              {/* Progress ring */}
               <svg 
                 className="absolute inset-0 w-10 h-10 -rotate-90" 
                 viewBox="0 0 40 40"
@@ -97,7 +104,6 @@ function TaskItem({ task, compact }: TaskItemProps) {
                   strokeLinecap="round"
                 />
               </svg>
-              {/* Percentage */}
               <div className="absolute inset-0 flex items-center justify-center">
                 <span className="text-[9px] font-bold text-foreground">
                   {Math.round(task.progress)}%
@@ -105,19 +111,19 @@ function TaskItem({ task, compact }: TaskItemProps) {
               </div>
             </div>
           ) : task.status === "queued" ? (
-            <div className="w-9 h-9 rounded-full border border-amber-500/50 flex items-center justify-center">
-              <StatusIcon className="h-4 w-4 text-amber-500 animate-pulse" />
+            <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
+              <StatusIcon className={cn("h-4 w-4 animate-pulse", config.color)} />
             </div>
           ) : task.status === "completed" ? (
-            <div className="w-9 h-9 rounded-full border border-emerald-500/50 flex items-center justify-center">
-              <StatusIcon className="h-4 w-4 text-emerald-500" />
+            <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
+              <StatusIcon className={cn("h-4 w-4", config.color)} />
             </div>
-          ) : task.status === "failed" ? (
-            <div className="w-9 h-9 rounded-full border border-red-500/50 flex items-center justify-center">
-              <StatusIcon className="h-4 w-4 text-red-500" />
+          ) : task.status === "failed" || task.status === "interrupted" ? (
+            <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
+              <StatusIcon className={cn("h-4 w-4", config.color)} />
             </div>
           ) : (
-            <div className="w-9 h-9 rounded-full border border-muted-foreground/40 flex items-center justify-center">
+            <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
               <StatusIcon className={cn("h-4 w-4", config.color)} />
             </div>
           )}
@@ -127,40 +133,34 @@ function TaskItem({ task, compact }: TaskItemProps) {
   }
 
   return (
-    <Card
+    <div
       className={cn(
-        "cursor-pointer transition-all hover:shadow-md",
-        isSelected && "ring-2 ring-primary"
+        "w-full rounded-lg border-2 bg-card text-card-foreground shadow-sm cursor-pointer transition-all hover:shadow-md overflow-hidden relative",
+        config.borderColor
       )}
       onClick={() => setSelectedTask(task.id)}
+      title={config.label}
     >
-      <CardContent className="p-3 sm:p-4">
-        {/* Верхняя строка: иконка, название, статус */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <p className="font-medium truncate text-sm" title={task.fileName}>{task.fileName}</p>
+      {isSelected && (
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />
+      )}
+      <div className="p-3 sm:p-4">
+        <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
+          <div className="min-w-0 overflow-hidden">
+            <p className="font-medium truncate text-sm" title={task.fileName}>
+              {task.fileName}
+            </p>
             <p className="text-xs text-muted-foreground">
               {formatFileSize(task.fileSize)} · {formatDateTime(task.createdAt)}
             </p>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            {task.status !== "completed" && (
-              <div className={cn("flex items-center gap-1", config.color)} title={config.label}>
-                <StatusIcon
-                  className={cn(
-                    "h-4 w-4 sm:h-5 sm:w-5",
-                    task.status === "processing" && "animate-spin"
-                  )}
-                />
-              </div>
-            )}
-
             {task.status === "processing" && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 sm:h-8 sm:w-8"
+                className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
                 onClick={(e) => {
                   e.stopPropagation();
                   cancelTask(task.id);
@@ -170,24 +170,24 @@ function TaskItem({ task, compact }: TaskItemProps) {
               </Button>
             )}
 
-            {(task.status === "completed" || task.status === "failed" || task.status === "cancelled") && (
+            {(task.status === "completed" || task.status === "failed" || task.status === "cancelled" || task.status === "interrupted") && (
               <>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 sm:h-8 sm:w-8"
+                  className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
                     archiveTask(task.id);
                   }}
-                  title="В архив"
+                  title="Archive"
                 >
                   <Archive className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 sm:h-8 sm:w-8"
+                  className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
                     removeTask(task.id);
@@ -200,7 +200,6 @@ function TaskItem({ task, compact }: TaskItemProps) {
           </div>
         </div>
 
-        {/* Прогресс бар под текстом */}
         {task.status === "processing" && (
           <ProgressEnhanced
             value={task.progress}
@@ -208,16 +207,19 @@ function TaskItem({ task, compact }: TaskItemProps) {
             className="mt-2 h-1.5"
           />
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
 interface TaskListProps {
   compact?: boolean;
+  queuedCount?: number;
+  activeCount?: number;
+  completedCount?: number;
 }
 
-export function TaskList({ compact }: TaskListProps) {
+export function TaskList({ compact, queuedCount, activeCount, completedCount }: TaskListProps) {
   const tasks = useTasksByView("transcription");
 
   if (tasks.length === 0) {
@@ -226,7 +228,7 @@ export function TaskList({ compact }: TaskListProps) {
 
   if (compact) {
     return (
-      <div className="flex-1 w-full">
+      <div className="flex-1 w-full min-w-0">
         <div className="text-[10px] text-center text-muted-foreground mb-1">
           {tasks.length}
         </div>
@@ -240,11 +242,23 @@ export function TaskList({ compact }: TaskListProps) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="w-full space-y-3 min-w-0">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Транскрипции ({tasks.length})</h2>
+        <h2 className="text-lg font-semibold">Transcriptions ({tasks.length})</h2>
       </div>
-      <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="inline-flex items-center rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          Queue {queuedCount}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          <span className={cn("h-1.5 w-1.5 rounded-full", activeCount && activeCount > 0 ? "bg-primary" : "bg-muted-foreground/40")} />
+          Running {activeCount}
+        </span>
+        <span className="inline-flex items-center rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          Done {completedCount}
+        </span>
+      </div>
+      <div className="w-full space-y-2 min-w-0">
         {tasks.map((task) => (
           <TaskItem key={task.id} task={task} />
         ))}

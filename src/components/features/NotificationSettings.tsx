@@ -35,8 +35,8 @@ export function NotificationSettings() {
 
   const handleTestNotification = () => {
     addNotification({
-      title: "Тестовое уведомление",
-      message: "Это пример того, как будут выглядеть ваши уведомления",
+      title: "Test Notification",
+      message: "This is an example of how your notifications will look",
       type: "success",
       category: "info",
     });
@@ -44,7 +44,7 @@ export function NotificationSettings() {
 
   // Convert duration back to slider value
   const sliderValue = settings.duration === "infinite" ? 0 : ((settings.duration as number) - 2) / 8 * 100;
-  const durationDisplay = settings.duration === "infinite" ? "До закрытия" : `${Math.round(settings.duration as number)} с`;
+  const durationDisplay = settings.duration === "infinite" ? "Until dismissed" : `${Math.round(settings.duration as number)}s`;
 
   return (
     <div className="space-y-6">
@@ -55,9 +55,9 @@ export function NotificationSettings() {
             <Bell className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h3 className="font-medium">Уведомления</h3>
+            <h3 className="font-medium">Notifications</h3>
             <p className="text-sm text-muted-foreground">
-              {settings.enabled ? "Уведомления включены" : "Уведомления отключены"}
+              {settings.enabled ? "Notifications enabled" : "Notifications disabled"}
             </p>
           </div>
         </div>
@@ -69,7 +69,7 @@ export function NotificationSettings() {
 
       {/* Position Settings */}
       <div className={cn("space-y-3 transition-all", !settings.enabled && "opacity-50 pointer-events-none")}>
-        <label className="text-sm font-medium">Позиция уведомлений</label>
+        <label className="text-sm font-medium">Notification Position</label>
         <Select
           value={settings.position}
           onChange={handlePositionChange}
@@ -83,13 +83,13 @@ export function NotificationSettings() {
           )}
         </Select>
         <p className="text-xs text-muted-foreground">
-          Выберите, где отображать уведомления на экране
+          Choose where to display notifications on screen
         </p>
       </div>
 
       {/* Duration Settings */}
       <div className={cn("space-y-3 transition-all", !settings.enabled && "opacity-50 pointer-events-none")}>
-        <label className="text-sm font-medium">Длительность отображения</label>
+        <label className="text-sm font-medium">Display Duration</label>
         <Slider
           value={sliderValue}
           onValueChange={handleDurationChange}
@@ -101,8 +101,8 @@ export function NotificationSettings() {
         />
         <p className="text-xs text-muted-foreground">
           {settings.duration === "infinite"
-            ? "Уведомления будут отображаться до ручного закрытия"
-            : `Уведомления автоматически скрываются через ${settings.duration} секунд`}
+            ? "Notifications will stay until manually dismissed"
+            : `Notifications auto-hide after ${settings.duration} seconds`}
         </p>
       </div>
 
@@ -112,9 +112,9 @@ export function NotificationSettings() {
           <div className="flex items-center gap-3">
             <Volume2 className="h-5 w-5 text-muted-foreground" />
             <div>
-              <label className="text-sm font-medium">Звук уведомлений</label>
+              <label className="text-sm font-medium">Notification Sound</label>
               <p className="text-xs text-muted-foreground">
-                Воспроизводить звук при появлении уведомлений
+                Play sound when notifications appear
               </p>
             </div>
           </div>
@@ -131,9 +131,9 @@ export function NotificationSettings() {
           <div className="flex items-center gap-3">
             <Monitor className="h-5 w-5 text-muted-foreground" />
             <div>
-              <label className="text-sm font-medium">Системные уведомления</label>
+              <label className="text-sm font-medium">System Notifications</label>
               <p className="text-xs text-muted-foreground">
-                Использовать нативные уведомления операционной системы
+                Use native operating system notifications
               </p>
             </div>
           </div>
@@ -146,7 +146,7 @@ export function NotificationSettings() {
 
       {/* Category Toggles */}
       <div className={cn("space-y-3 transition-all", !settings.enabled && "opacity-50 pointer-events-none")}>
-        <label className="text-sm font-medium">Категории уведомлений</label>
+        <label className="text-sm font-medium">Notification Categories</label>
         <div className="space-y-2">
           {(Object.entries(NOTIFICATION_CATEGORY_LABELS) as [NotificationCategory, string][]).map(
             ([category, label]) => {
@@ -173,7 +173,7 @@ export function NotificationSettings() {
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          Выберите, для каких событий показывать уведомления
+          Choose which events should show notifications
         </p>
       </div>
 
@@ -185,10 +185,10 @@ export function NotificationSettings() {
           className="w-full"
         >
           <Play className="h-4 w-4 mr-2" />
-          Проверить уведомление
+          Test Notification
         </Button>
         <p className="text-xs text-muted-foreground mt-2 text-center">
-          Показать тестовое уведомление с текущими настройками
+          Show a test notification with current settings
         </p>
       </div>
     </div>

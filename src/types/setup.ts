@@ -11,12 +11,14 @@ import type { DeviceInfo, LocalModel } from "./index";
  * - ffmpeg: Check FFmpeg installation
  * - device: Check available compute devices (GPU/CPU)
  * - optional: Optional components (HuggingFace token)
+ * - summary: Final getting-started instructions before first transcription
  */
 export type SetupStep =
   | "python"
   | "ffmpeg"
   | "device"
-  | "optional";
+  | "optional"
+  | "summary";
 
 /**
  * Status of a setup check

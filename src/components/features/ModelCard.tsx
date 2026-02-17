@@ -82,7 +82,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
       const totalSeconds = Math.round(etaS);
       const minutes = Math.floor(totalSeconds / 60);
       const seconds = totalSeconds % 60;
-      return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
+      return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
     };
 
     const [hasEntered, setHasEntered] = React.useState(false);
@@ -148,7 +148,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                                 d="M5 13l4 4L19 7"
                               />
                             </svg>
-                            Установлено
+                            Installed
                           </>
                         ) : (
                           <>
@@ -165,7 +165,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                               />
                             </svg>
-                            Не установлено
+                            Not Installed
                           </>
                         )}
                       </span>
@@ -192,10 +192,10 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                         {/* Tooltip */}
                         <div className="absolute bottom-full right-0 mb-2 w-56 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/90 border border-amber-200 dark:border-amber-700 shadow-lg opacity-0 invisible group-hover/icon:opacity-100 group-hover/icon:visible transition-all duration-200 z-50">
                           <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
-                            Требуется HuggingFace токен
+                            HuggingFace Token Required
                           </p>
                           <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                            Добавьте токен в настройках приложения
+                            Add your token in app settings
                           </p>
                         </div>
                       </div>
@@ -211,7 +211,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                   {/* Show current stage info for multi-stage downloads */}
                   {download.currentStage && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-medium">Этап: {download.currentStage === "segmentation" ? "Сегментация" : "Голосовые отпечатки"}</span>
+                      <span className="font-medium">Stage: {download.currentStage === "segmentation" ? "Segmentation" : "Voice Embeddings"}</span>
                       {download.stages?.segmentation?.completed && (
                         <span className="text-success">✓</span>
                       )}
@@ -221,7 +221,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">
                       {formatSize(download.currentMb)} / {formatSize(download.totalMb)}
-                      {download.totalEstimated ? " (оценочно)" : ""}
+                      {download.totalEstimated ? " (estimated)" : ""}
                     </span>
                     <span className="font-medium">{download.progress.toFixed(0)}%</span>
                   </div>
@@ -232,7 +232,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                       {download.stages.segmentation && (
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Сегментация</span>
+                            <span>Segmentation</span>
                             <span>{download.stages.segmentation.completed ? "✓" : `${download.stages.segmentation.progress.toFixed(0)}%`}</span>
                           </div>
                           {!download.stages.segmentation.completed && (
@@ -243,7 +243,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                       {download.stages.embedding && (download.stages.segmentation?.completed || download.currentStage === "embedding") && (
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
-                            <span>Голосовые отпечатки</span>
+                            <span>Voice Embeddings</span>
                             <span>{download.stages.embedding.completed ? "✓" : `${download.stages.embedding.progress.toFixed(0)}%`}</span>
                           </div>
                           {!download.stages.embedding.completed && (
@@ -256,15 +256,15 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
 
                   <div className="flex items-center justify-between gap-4">
                     <p className="text-xs text-muted-foreground">
-                      {download.speedMbS && download.speedMbS !== "0" ? `${download.speedMbS} MB/s` : "Считаем скорость..."}
-                      {formatEta(download.etaS) ? ` • осталось ~${formatEta(download.etaS)}` : ""}
+                      {download.speedMbS && download.speedMbS !== "0" ? `${download.speedMbS} MB/s` : "Calculating speed..."}
+                      {formatEta(download.etaS) ? ` • ~${formatEta(download.etaS)} left` : ""}
                     </p>
                     {onDownloadCancel && (
                       <button
                         onClick={onDownloadCancel}
                         className="ml-auto rounded-lg bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-all duration-150 hover:bg-destructive/20"
                       >
-                        Отмена
+                        Cancel
                       </button>
                     )}
                   </div>
@@ -300,7 +300,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                             d="M5 13l4 4L19 7"
                           />
                         </svg>
-                        Выбрано
+                        Selected
                       </>
                     ) : (
                       <>
@@ -317,7 +317,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                             d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
                           />
                         </svg>
-                        Выбрать
+                        Select
                       </>
                     )}
                   </button>
@@ -325,7 +325,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                 <button
                   onClick={onDownload}
                   disabled={needsToken}
-                  title={needsToken ? "Требуется HuggingFace токен" : undefined}
+                  title={needsToken ? "HuggingFace Token Required" : undefined}
                   className={cn(
                     "inline-flex h-10 min-w-36 items-center justify-center rounded-lg bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground transition-all duration-150 hover:bg-secondary/80 hover:shadow-sm active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                   )}
@@ -343,7 +343,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                       d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                     />
                   </svg>
-                  Переустановить
+                  Reinstall
                 </button>
                 <button
                   onClick={onDelete}
@@ -368,7 +368,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
               <button
                 onClick={onDownload}
                 disabled={isDownloading || needsToken}
-                title={needsToken ? "Требуется HuggingFace токен" : undefined}
+                title={needsToken ? "HuggingFace Token Required" : undefined}
                 className="inline-flex h-10 min-w-40 items-center justify-center rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 hover:shadow-sm active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <svg
@@ -384,7 +384,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                   />
                 </svg>
-                {isDownloading ? "Загрузка..." : needsToken ? "Требуется токен" : "Скачать"}
+                {isDownloading ? "Downloading..." : needsToken ? "Token Required" : "Download"}
               </button>
             )}
             </div>

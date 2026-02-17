@@ -212,7 +212,8 @@ export const NotificationItem = React.memo(
       const interval = setInterval(() => {
         setTimeLeft((prev) => {
           if (prev <= 100) {
-            onDismiss(id);
+            // Schedule dismiss in microtask to avoid updating state during render
+            queueMicrotask(() => onDismiss(id));
             return 0;
           }
           return prev - 100;

@@ -39,35 +39,35 @@ const EXPORT_FORMATS: ExportFormatConfig[] = [
   {
     value: "txt",
     label: "Plain Text",
-    description: "Простой текстовый файл",
+    description: "Plain text file",
     icon: <FileType className="h-5 w-5" />,
     supportsPlainText: true,
   },
   {
     value: "md",
     label: "Markdown",
-    description: "Язык разметки",
+    description: "Markdown markup language",
     icon: <FileText className="h-5 w-5" />,
     supportsPlainText: true,
   },
   {
     value: "srt",
     label: "SubRip (SRT)",
-    description: "Формат субтитров",
+    description: "Subtitle format",
     icon: <Subtitles className="h-5 w-5" />,
     supportsPlainText: false,
   },
   {
     value: "vtt",
     label: "WebVTT",
-    description: "Формат субтитров для веб-видео",
+    description: "Web video subtitle format",
     icon: <Subtitles className="h-5 w-5" />,
     supportsPlainText: false,
   },
   {
     value: "json",
     label: "JSON",
-    description: "Структурированные данные",
+    description: "Structured data",
     icon: <FileJson className="h-5 w-5" />,
     supportsPlainText: false,
   },
@@ -193,7 +193,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
 
       setExportStatus({
         type: "success",
-        message: `Экспортировано в ${selectedFormat.toUpperCase()} успешно`,
+        message: `Exported to ${selectedFormat.toUpperCase()} successfully`,
       });
 
       // Close modal on success after a short delay
@@ -210,7 +210,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
       });
       setExportStatus({
         type: "error",
-        message: `Ошибка экспорта: ${errorMessage}`,
+        message: `Export error: ${errorMessage}`,
       });
     } finally {
       setIsExporting(false);
@@ -227,7 +227,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
       <button
         onClick={() => setIsOpen(true)}
         disabled={isExporting}
-        title="Экспорт"
+        title="Export"
         className={cn(
           "h-8 rounded-md transition-all duration-150 flex items-center justify-center",
           iconOnly ? "w-8 px-0" : "px-2 gap-1.5 text-xs font-medium",
@@ -255,16 +255,16 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Экспорт транскрипции</DialogTitle>
+            <DialogTitle>Export Transcription</DialogTitle>
             <DialogDescription>
-              Выберите формат и параметры экспорта для вашей транскрипции
+              Select the format and export options for your transcription
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 py-4">
             {/* Format Selection */}
             <div className="space-y-3">
-              <label className="text-sm font-medium">Формат экспорта</label>
+              <label className="text-sm font-medium">Export Format</label>
               <div className="grid grid-cols-1 gap-2">
                 {EXPORT_FORMATS.map((format) => (
                   <button
@@ -304,7 +304,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
             {/* Export Mode Toggle - only for formats that support it */}
             {supportsPlainText && (
               <div className="space-y-3">
-                <label className="text-sm font-medium">Формат текста</label>
+                <label className="text-sm font-medium">Text Format</label>
                 <div className="flex gap-2 p-1 bg-muted rounded-lg">
                   <button
                     onClick={() => setExportMode("with_timestamps")}
@@ -316,7 +316,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
                     )}
                   >
                     <Clock className="h-4 w-4" />
-                    <span>С отметками времени</span>
+                    <span>With Timestamps</span>
                   </button>
                   <button
                     onClick={() => setExportMode("plain_text")}
@@ -328,13 +328,13 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
                     )}
                   >
                     <Type className="h-4 w-4" />
-                    <span>Только текст</span>
+                    <span>Plain Text Only</span>
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {exportMode === "plain_text"
-                    ? "Экспортируется как непрерывный текст без отметок времени и меток спикеров"
-                    : "Включает отметки времени и метки спикеров (если обнаружено несколько спикеров)"}
+                    ? "Exports as continuous text without timestamps or speaker labels"
+                    : "Includes timestamps and speaker labels (if multiple speakers detected)"}
                 </p>
               </div>
             )}
@@ -342,7 +342,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
             {/* Preview of what will be exported */}
             <div className="space-y-2">
               <label className="text-sm font-medium">
-                Предварительный просмотр
+                Preview
               </label>
               <div className="p-3 bg-muted rounded-lg text-xs text-muted-foreground font-mono">
                 {selectedFormat === "txt" && exportMode === "plain_text" && (
@@ -394,7 +394,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
               onClick={() => setIsOpen(false)}
               className="px-4 py-2 text-sm font-medium rounded-md hover:bg-muted transition-colors"
             >
-              Отмена
+              Cancel
             </button>
             <button
               onClick={handleExport}
@@ -413,7 +413,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
               ) : (
                 <>
                   <Download className="h-4 w-4" />
-                  Экспорт как {selectedFormat.toUpperCase()}
+                  Export as {selectedFormat.toUpperCase()}
                 </>
               )}
             </button>

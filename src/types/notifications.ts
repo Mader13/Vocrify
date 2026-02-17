@@ -46,19 +46,19 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
 };
 
 export const NOTIFICATION_POSITION_LABELS: Record<NotificationPosition, string> = {
-  "top-right": "Сверху справа",
-  "top-left": "Сверху слева",
-  "bottom-right": "Снизу справа",
-  "bottom-left": "Снизу слева",
-  "top-center": "По центру сверху",
-  "bottom-center": "По центру снизу",
+  "top-right": "Top Right",
+  "top-left": "Top Left",
+  "bottom-right": "Bottom Right",
+  "bottom-left": "Bottom Left",
+  "top-center": "Top Center",
+  "bottom-center": "Bottom Center",
 };
 
 export const NOTIFICATION_CATEGORY_LABELS: Record<NotificationCategory, string> = {
-  download: "Загрузка моделей",
-  transcription: "Транскрибация",
-  error: "Ошибки",
-  info: "Информация",
+  download: "Model Download",
+  transcription: "Transcription",
+  error: "Errors",
+  info: "Information",
 };
 
 export const NOTIFICATION_CATEGORY_ICONS: Record<NotificationCategory, string> = {

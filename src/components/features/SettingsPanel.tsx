@@ -46,7 +46,7 @@ function SystemStatusCard({ title, icon, status, details, onRetry, isLoading }: 
     ok: {
       bg: "bg-green-500/5",
       border: "border-green-500/20",
-      label: "Готово",
+      label: "Ready",
       color: "text-green-600 dark:text-green-400",
       bgBadge: "bg-green-500/10",
       dot: "bg-green-500",
@@ -54,7 +54,7 @@ function SystemStatusCard({ title, icon, status, details, onRetry, isLoading }: 
     error: {
       bg: "bg-red-500/5",
       border: "border-red-500/20",
-      label: "Ошибка",
+      label: "Error",
       color: "text-red-600 dark:text-red-400",
       bgBadge: "bg-red-500/10",
       dot: "bg-red-500",
@@ -62,7 +62,7 @@ function SystemStatusCard({ title, icon, status, details, onRetry, isLoading }: 
     warning: {
       bg: "bg-yellow-500/5",
       border: "border-yellow-500/20",
-      label: "Внимание",
+      label: "Warning",
       color: "text-yellow-600 dark:text-yellow-400",
       bgBadge: "bg-yellow-500/10",
       dot: "bg-yellow-500",
@@ -116,7 +116,7 @@ function SystemStatusCard({ title, icon, status, details, onRetry, isLoading }: 
           className="mt-3 h-7 text-xs w-full"
         >
           <RefreshCw className={`h-3 w-3 mr-1.5 ${isLoading ? "animate-spin" : ""}`} />
-          Проверить
+          Check
         </Button>
       )}
     </div>
@@ -132,18 +132,23 @@ export function SettingsPanel() {
   const resetSettings = useTasks((s) => s.resetSettings);
 
   const resetSetupState = useSetupStore((s) => s.resetSetupState);
-  
+
   const setupStore = useSetupStore();
-  const { ffmpegCheck, pythonCheck, deviceCheck, isChecking, checkAll } = setupStore;
+  const { ffmpegCheck, pythonCheck, deviceCheck, isChecking, checkAll, fetchDevices } = setupStore;
 
   const panelRef = useRef<HTMLDivElement>(null);
   const [isRerunSetupDialogOpen, setIsRerunSetupDialogOpen] = useState(false);
 
+  // Check Python/FFmpeg on settings open, and fetch devices on-demand
   useEffect(() => {
-    if (isSettingsOpen && !ffmpegCheck) {
-      checkAll();
+    if (isSettingsOpen) {
+      if (!ffmpegCheck || !pythonCheck) {
+        checkAll();
+      }
+      // Always fetch devices when opening settings (uses cache)
+      fetchDevices(false);
     }
-  }, [isSettingsOpen, ffmpegCheck, checkAll]);
+  }, [isSettingsOpen, ffmpegCheck, pythonCheck, checkAll, fetchDevices]);
 
   const handleClickOutside = useCallback(
     (event: MouseEvent) => {
@@ -227,34 +232,34 @@ export function SettingsPanel() {
           ? "warning"
           : "ok";
 
-  const ffmpegDetails = ffmpegCheck 
+  const ffmpegDetails = ffmpegCheck
     ? [
-        ffmpegCheck.version ? `v${ffmpegCheck.version}` : "Не найден",
-        ffmpegCheck.path || "Путь не определен",
+        ffmpegCheck.version ? `v${ffmpegCheck.version}` : "Not found",
+        ffmpegCheck.path || "Path not defined",
       ]
-    : ["Проверка..."];
+    : ["Checking..."];
 
   const pythonDetails = pythonCheck
     ? [
-        pythonCheck.version ? `Python ${pythonCheck.version}` : "Не найден",
-        pythonCheck.pytorchInstalled 
+        pythonCheck.version ? `Python ${pythonCheck.version}` : "Not found",
+        pythonCheck.pytorchInstalled
           ? `PyTorch ${pythonCheck.pytorchVersion || ""} ${pythonCheck.cudaAvailable ? "(CUDA)" : pythonCheck.mpsAvailable ? "(MPS)" : ""}`.trim()
-          : "PyTorch не установлен",
+          : "PyTorch not installed",
       ]
-    : ["Проверка..."];
+    : ["Checking..."];
 
   const deviceDetails = deviceCheck
     ? availableDevicesCount === 0
-      ? ["Ускорение недоступно", "Будет использован CPU"]
+      ? ["No acceleration available", "CPU will be used"]
       : [
           availableDevices.map(d => (d.deviceType || "cpu").toUpperCase()).join(", ") || "CPU",
-          deviceCheck.recommended ? `Рекомендуется: ${deviceCheck.recommended.toUpperCase()}` : "",
+          deviceCheck.recommended ? `Recommended: ${deviceCheck.recommended.toUpperCase()}` : "",
         ].filter(Boolean)
-    : ["Проверка..."];
+    : ["Checking..."];
 
   const getOutputPathDisplay = () => {
     if (!settings.outputDirectory) {
-      return "Рядом с исходным файлом";
+      return "Next to source file";
     }
     return settings.outputDirectory;
   };
@@ -269,9 +274,9 @@ export function SettingsPanel() {
               <Settings2 className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <DialogTitle>Настройки</DialogTitle>
+              <DialogTitle>Settings</DialogTitle>
               <DialogDescription>
-                Управление параметрами и состоянием системы
+                Manage system parameters and status
               </DialogDescription>
             </div>
           </div>
@@ -285,7 +290,7 @@ export function SettingsPanel() {
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold flex items-center gap-2">
                 <HardDrive className="h-4 w-4" />
-                Состояние системы
+                System Status
               </h3>
               <Button
                 variant="ghost"
@@ -295,7 +300,7 @@ export function SettingsPanel() {
                 className="h-7 text-xs"
               >
                 <RefreshCw className={`h-3 w-3 mr-1 ${isChecking ? "animate-spin" : ""}`} />
-                Обновить
+                Refresh
               </Button>
             </div>
             
@@ -317,7 +322,7 @@ export function SettingsPanel() {
                 isLoading={isChecking}
               />
               <SystemStatusCard
-                title="Устройства"
+                title="Devices"
                 icon={<Zap className="h-4 w-4 text-blue-500" />}
                 status={deviceStatus}
                 details={deviceDetails}
@@ -331,7 +336,7 @@ export function SettingsPanel() {
           <div className="space-y-4">
             <h3 className="text-sm font-semibold flex items-center gap-2 pt-2 border-t">
               <Settings2 className="h-4 w-4" />
-              Параметры транскрипции
+              Transcription Settings
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -339,7 +344,7 @@ export function SettingsPanel() {
               <div className="space-y-2">
                 <label htmlFor="device" className="text-sm font-medium flex items-center gap-2">
                   <Cpu className="h-4 w-4 text-muted-foreground" />
-                  Устройство
+                  Device
                 </label>
                 <Select
                   id="device"
@@ -358,7 +363,7 @@ export function SettingsPanel() {
               <div className="space-y-2">
                 <label htmlFor="language" className="text-sm font-medium flex items-center gap-2">
                   <Languages className="h-4 w-4 text-muted-foreground" />
-                  Язык
+                  Language
                 </label>
                 <Select
                   id="language"
@@ -378,7 +383,7 @@ export function SettingsPanel() {
             <div className="space-y-2">
               <label htmlFor="max-concurrent" className="text-sm font-medium flex items-center gap-2">
                 <Layers className="h-4 w-4 text-muted-foreground" />
-                Одновременные задачи
+                Concurrent Tasks
               </label>
               <Select
                 id="max-concurrent"
@@ -398,12 +403,12 @@ export function SettingsPanel() {
             <div className="space-y-3 pt-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                Папка для сохранения
+                Output Directory
               </label>
-              
+
               <div className={`rounded-lg border-2 p-4 transition-all ${
-                settings.outputDirectory 
-                  ? "border-primary/30 bg-primary/5" 
+                settings.outputDirectory
+                  ? "border-primary/30 bg-primary/5"
                   : "border-dashed border-muted-foreground/30 bg-muted/30"
               }`}>
                 <div className="flex items-start justify-between gap-3">
@@ -412,9 +417,9 @@ export function SettingsPanel() {
                       {getOutputPathDisplay()}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {settings.outputDirectory 
-                        ? "Все транскрипции будут сохранены в эту папку"
-                        : "По умолчанию файлы сохраняются рядом с исходным видео"}
+                      {settings.outputDirectory
+                        ? "All transcriptions will be saved to this folder"
+                        : "By default, files are saved next to the source video"}
                     </p>
                   </div>
                   <div className="flex gap-2 shrink-0">
@@ -425,7 +430,7 @@ export function SettingsPanel() {
                         onClick={handleClearOutputDirectory}
                         className="h-8 text-xs"
                       >
-                        По умолчанию
+                        Default
                       </Button>
                     )}
                     <Button
@@ -449,9 +454,9 @@ export function SettingsPanel() {
                 <Sparkles className="h-4 w-4 text-yellow-500" />
               </div>
               <div className="flex-1">
-                <h3 className="text-sm font-medium mb-1">Первичная настройка</h3>
+                <h3 className="text-sm font-medium mb-1">Initial Setup</h3>
                 <p className="text-xs text-muted-foreground mb-3">
-                  Запустите мастер настройки для проверки и настройки системы
+                  Run the setup wizard to check and configure the system
                 </p>
                 <Button
                   variant="outline"
@@ -459,7 +464,7 @@ export function SettingsPanel() {
                   onClick={() => setIsRerunSetupDialogOpen(true)}
                 >
                   <RotateCcw className="h-4 w-4 mr-2" />
-                  Запустить мастер
+                  Run Wizard
                 </Button>
               </div>
             </div>
@@ -473,13 +478,13 @@ export function SettingsPanel() {
 
         <DialogFooter className="flex gap-2 flex-wrap">
           <Button variant="destructive" onClick={handleClearCache} size="sm">
-            Очистить кэш
+            Clear Cache
           </Button>
           <Button variant="outline" onClick={handleReset} size="sm">
-            Сбросить
+            Reset
           </Button>
           <Button onClick={() => setSettingsOpen(false)} size="sm">
-            Готово
+            Done
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -498,13 +503,13 @@ export function SettingsPanel() {
               <div className="rounded-full bg-yellow-500/10 p-2">
                 <AlertTriangle className="h-5 w-5 text-yellow-500" />
               </div>
-              <DialogTitle>Запустить мастер настройки?</DialogTitle>
+              <DialogTitle>Rerun Setup Wizard?</DialogTitle>
             </div>
           </DialogHeader>
           <div className="py-4">
             <p className="text-sm text-muted-foreground">
-              Мастер первоначальной настройки будет запущен при следующем запуске приложения. 
-              Это позволит заново проверить состояние системы и настроить компоненты.
+              The initial setup wizard will run on the next app launch.
+              This will recheck the system status and reconfigure components.
             </p>
           </div>
           <DialogFooter>
@@ -512,11 +517,11 @@ export function SettingsPanel() {
               variant="outline"
               onClick={() => setIsRerunSetupDialogOpen(false)}
             >
-              Отмена
+              Cancel
             </Button>
             <Button onClick={handleRerunSetup}>
               <RotateCcw className="h-4 w-4 mr-2" />
-              Запустить
+              Run
             </Button>
           </DialogFooter>
         </div>

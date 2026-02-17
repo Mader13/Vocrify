@@ -143,3 +143,25 @@ export async function readFileAsBase64(filePath: string): Promise<CommandResult<
     return { success: false, error: String(error) };
   }
 }
+
+export async function readFileAsArrayBuffer(filePath: string): Promise<CommandResult<ArrayBuffer>> {
+  try {
+    // First get as base64, then convert to ArrayBuffer
+    const base64Result = await readFileAsBase64(filePath);
+    if (!base64Result.success || !base64Result.data) {
+      return { success: false, error: base64Result.error || "Failed to read file" };
+    }
+
+    // Convert base64 to ArrayBuffer
+    const binaryString = atob(base64Result.data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    return { success: true, data: bytes.buffer };
+  } catch (error) {
+    logger.error("Failed to read file as ArrayBuffer", { filePath, error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}

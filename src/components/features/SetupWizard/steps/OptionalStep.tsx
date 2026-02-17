@@ -110,11 +110,11 @@ export function OptionalStep() {
 
 export interface OptionalStepFooterProps {
   onBack: () => void;
-  onComplete: () => void;
+  onNext: () => void;
   onGetToken?: () => string | undefined;
 }
 
-export function OptionalStepFooter({ onBack, onComplete }: OptionalStepFooterProps) {
+export function OptionalStepFooter({ onBack, onNext }: OptionalStepFooterProps) {
   const { runtimeReadiness, pythonCheck, ffmpegCheck } = useSetupStore();
   const canComplete =
     runtimeReadiness?.ready === true ||
@@ -130,11 +130,8 @@ export function OptionalStepFooter({ onBack, onComplete }: OptionalStepFooterPro
         Back
       </Button>
       <div className="flex items-center gap-2">
-        <Button variant="outline" onClick={onComplete} disabled={!canComplete}>
-          Skip
-        </Button>
-        <Button onClick={onComplete} disabled={!canComplete}>
-          Finish setup
+        <Button onClick={onNext} disabled={!canComplete}>
+          Continue
         </Button>
       </div>
     </div>

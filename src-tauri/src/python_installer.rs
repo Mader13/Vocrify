@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 use std::process::Command as StdCommand;
@@ -35,6 +36,18 @@ impl TorchInstallTarget {
             TorchInstallTarget::Cpu => "CPU",
         }
     }
+}
+
+fn should_install_or_upgrade_torch(
+    target: TorchInstallTarget,
+    torch_installed: bool,
+    torch_has_cuda_build: bool,
+) -> bool {
+    if !torch_installed {
+        return true;
+    }
+
+    matches!(target, TorchInstallTarget::Cuda) && !torch_has_cuda_build
 }
 
 #[allow(dead_code)]
@@ -120,46 +133,49 @@ impl Default for InstallProgress {
 
 pub struct PythonInstaller {
     app: AppHandle,
-    progress: InstallProgress,
+    progress: Mutex<InstallProgress>,
 }
 
 impl PythonInstaller {
     pub fn new(app: AppHandle) -> Self {
         Self {
             app,
-            progress: InstallProgress::default(),
+            progress: Mutex::new(InstallProgress::default()),
         }
     }
 
-    fn emit_progress(&mut self, stage: InstallStage, percent: f64, message: &str) {
-        self.progress = InstallProgress {
+    fn emit_progress(&self, stage: InstallStage, percent: f64, message: &str) {
+        let progress = InstallProgress {
             stage: stage.clone(),
             percent,
             message: message.to_string(),
             error: None,
         };
-        let _ = self.app.emit("python-install-progress", &self.progress);
-        eprintln!("[PYTHON INSTALLER] {}: {}% - {}", 
-            format!("{:?}", stage), 
-            percent as i32, 
+        *self.progress.lock().unwrap() = progress.clone();
+        let _ = self.app.emit("python-install-progress", &progress);
+        eprintln!("[PYTHON INSTALLER] {}: {}% - {}",
+            format!("{:?}", stage),
+            percent as i32,
             message
         );
     }
 
     #[allow(dead_code)]
-    fn emit_error(&mut self, error: &str) {
-        self.progress = InstallProgress {
+    fn emit_error(&self, error: &str) {
+        let mut current = self.progress.lock().unwrap();
+        let progress = InstallProgress {
             stage: InstallStage::Error,
-            percent: self.progress.percent,
-            message: self.progress.message.clone(),
+            percent: current.percent,
+            message: current.message.clone(),
             error: Some(error.to_string()),
         };
-        let _ = self.app.emit("python-install-progress", &self.progress);
+        *current = progress.clone();
+        let _ = self.app.emit("python-install-progress", &progress);
         eprintln!("[PYTHON INSTALLER ERROR] {}", error);
     }
 
     pub fn get_progress(&self) -> InstallProgress {
-        self.progress.clone()
+        self.progress.lock().unwrap().clone()
     }
 
     /// Get the Python installation directory
@@ -224,19 +240,96 @@ impl PythonInstaller {
         }
     }
 
+    async fn python_torch_has_cuda_build(&self) -> bool {
+        self.python_code_succeeds(
+            "import torch,sys; sys.exit(0 if getattr(getattr(torch,'version',None),'cuda',None) else 1)",
+        )
+        .await
+    }
+
+    async fn system_python_torch_has_cuda_build(&self, python_cmd: &str) -> bool {
+        match create_hidden_command(python_cmd)
+            .arg("-c")
+            .arg("import torch,sys; sys.exit(0 if getattr(getattr(torch,'version',None),'cuda',None) else 1)")
+            .output()
+            .await
+        {
+            Ok(output) => output.status.success(),
+            Err(_) => false,
+        }
+    }
+
+    fn nvidia_smi_candidates() -> Vec<PathBuf> {
+        let mut candidates = vec![PathBuf::from("nvidia-smi")];
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(program_files) = std::env::var("ProgramFiles") {
+                candidates.push(
+                    PathBuf::from(program_files)
+                        .join("NVIDIA Corporation")
+                        .join("NVSMI")
+                        .join("nvidia-smi.exe"),
+                );
+            }
+
+            if let Ok(program_files_x86) = std::env::var("ProgramFiles(x86)") {
+                candidates.push(
+                    PathBuf::from(program_files_x86)
+                        .join("NVIDIA Corporation")
+                        .join("NVSMI")
+                        .join("nvidia-smi.exe"),
+                );
+            }
+
+            candidates.push(
+                PathBuf::from("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"),
+            );
+            candidates.push(PathBuf::from("C:\\Windows\\System32\\nvidia-smi.exe"));
+        }
+
+        candidates
+    }
+
     async fn has_nvidia_gpu(&self) -> bool {
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         {
-            let output = create_hidden_command("nvidia-smi")
-                .arg("--query-gpu=name")
-                .arg("--format=csv,noheader")
-                .output()
-                .await;
+            for candidate in Self::nvidia_smi_candidates() {
+                let output = create_hidden_command(&candidate)
+                    .arg("--query-gpu=name")
+                    .arg("--format=csv,noheader")
+                    .output()
+                    .await;
 
-            if let Ok(output) = output {
+                if let Ok(output) = output {
+                    if output.status.success() {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        if !stdout.trim().is_empty() {
+                            eprintln!(
+                                "[PYTHON INSTALLER] NVIDIA GPU detected via {:?}",
+                                candidate
+                            );
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            if let Ok(output) = create_hidden_command("wmic")
+                .arg("path")
+                .arg("win32_VideoController")
+                .arg("get")
+                .arg("name")
+                .output()
+                .await
+            {
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    return !stdout.trim().is_empty();
+                    let lowered = stdout.to_lowercase();
+                    if lowered.contains("nvidia") {
+                        eprintln!("[PYTHON INSTALLER] NVIDIA GPU detected via WMIC fallback");
+                        return true;
+                    }
                 }
             }
         }
@@ -323,8 +416,9 @@ impl PythonInstaller {
     }
 
     /// Check if system Python is available and has torch
-    pub async fn check_system_python(&mut self) -> Result<Option<PathBuf>, String> {
+    pub async fn check_system_python(&self) -> Result<Option<PathBuf>, String> {
         self.emit_progress(InstallStage::Checking, 0.0, "Проверка системы...");
+        let target = self.detect_torch_install_target().await;
 
         // Try to find system Python
         let python_candidates = vec![
@@ -369,7 +463,20 @@ impl PythonInstaller {
                     if let Ok(torch_output) = torch_check {
                         if torch_output.status.success() {
                             let torch_version = String::from_utf8_lossy(&torch_output.stdout);
-                            eprintln!("[PYTHON INSTALLER] System Python has torch: {}", torch_version);
+                            if matches!(target, TorchInstallTarget::Cuda)
+                                && !self.system_python_torch_has_cuda_build(python_cmd).await
+                            {
+                                eprintln!(
+                                    "[PYTHON INSTALLER] System Python torch is CPU-only, skipping for CUDA target: {}",
+                                    python_cmd
+                                );
+                                continue;
+                            }
+
+                            eprintln!(
+                                "[PYTHON INSTALLER] System Python has torch: {}",
+                                torch_version
+                            );
                             return Ok(Some(PathBuf::from(python_cmd)));
                         }
                     }
@@ -381,7 +488,7 @@ impl PythonInstaller {
     }
 
     /// Install Python using embeddable distribution
-    pub async fn install_python(&mut self) -> Result<(), String> {
+    pub async fn install_python(&self) -> Result<(), String> {
         let python_dir = self.get_python_dir();
 
         // Check if already installed
@@ -408,7 +515,25 @@ impl PythonInstaller {
                 );
             }
 
-            if !self.python_has_module("torch").await {
+            let target = self.detect_torch_install_target().await;
+            let torch_installed = self.python_has_module("torch").await;
+            let torch_has_cuda_build = if torch_installed {
+                self.python_torch_has_cuda_build().await
+            } else {
+                false
+            };
+
+            if should_install_or_upgrade_torch(target, torch_installed, torch_has_cuda_build) {
+                if matches!(target, TorchInstallTarget::Cuda)
+                    && torch_installed
+                    && !torch_has_cuda_build
+                {
+                    self.emit_progress(
+                        InstallStage::InstallingPytorch,
+                        64.0,
+                        "Detected CPU-only PyTorch on NVIDIA system, upgrading to CUDA build...",
+                    );
+                }
                 self.install_pytorch(&python_dir).await?;
             }
 
@@ -440,7 +565,7 @@ impl PythonInstaller {
         Ok(())
     }
 
-    async fn install_embeddable_python(&mut self, python_dir: &PathBuf) -> Result<(), String> {
+    async fn install_embeddable_python(&self, python_dir: &PathBuf) -> Result<(), String> {
         self.emit_progress(InstallStage::DownloadingPython, 10.0, "Скачивание Python...");
 
         // Determine URL based on platform
@@ -528,7 +653,7 @@ impl PythonInstaller {
         Ok(())
     }
 
-    async fn install_pip(&mut self, python_dir: &PathBuf) -> Result<(), String> {
+    async fn install_pip(&self, python_dir: &PathBuf) -> Result<(), String> {
         self.emit_progress(InstallStage::InstallingPip, 50.0, "Установка pip...");
 
         let python_exe = self.get_python_exe();
@@ -600,7 +725,7 @@ impl PythonInstaller {
         Ok(())
     }
 
-    async fn install_pytorch(&mut self, _python_dir: &PathBuf) -> Result<(), String> {
+    async fn install_pytorch(&self, _python_dir: &PathBuf) -> Result<(), String> {
         self.emit_progress(InstallStage::InstallingPytorch, 65.0, "Installing PyTorch...");
 
         let python_exe = self.get_python_exe();
@@ -712,7 +837,7 @@ impl PythonInstaller {
         Ok(())
     }
 
-    async fn install_dependencies(&mut self, python_dir: &PathBuf) -> Result<(), String> {
+    async fn install_dependencies(&self, python_dir: &PathBuf) -> Result<(), String> {
         self.emit_progress(InstallStage::InstallingDependencies, 85.0, "Installing dependencies...");
 
         let python_exe = self.get_python_exe();
@@ -774,8 +899,8 @@ impl PythonInstaller {
 /// Check if Python is available (system or installed)
 #[tauri::command]
 pub async fn check_python_installed(app: AppHandle) -> Result<bool, String> {
-    let mut installer = PythonInstaller::new(app);
-    
+    let installer = PythonInstaller::new(app);
+
     // Check for embeddable Python
     if installer.is_python_installed() {
         return Ok(true);
@@ -800,7 +925,7 @@ pub fn get_python_install_progress(_app: AppHandle) -> Result<InstallProgress, S
 /// Install Python (full installation)
 #[tauri::command]
 pub async fn install_python_full(app: AppHandle) -> Result<(), String> {
-    let mut installer = PythonInstaller::new(app);
+    let installer = PythonInstaller::new(app);
     installer.install_python().await
 }
 
@@ -812,3 +937,40 @@ pub fn cancel_python_install() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{should_install_or_upgrade_torch, TorchInstallTarget};
+
+    #[test]
+    fn cuda_target_upgrades_cpu_only_torch() {
+        let should_upgrade = should_install_or_upgrade_torch(
+            TorchInstallTarget::Cuda,
+            true,
+            false,
+        );
+
+        assert!(should_upgrade);
+    }
+
+    #[test]
+    fn cuda_target_skips_upgrade_when_cuda_build_present() {
+        let should_upgrade = should_install_or_upgrade_torch(
+            TorchInstallTarget::Cuda,
+            true,
+            true,
+        );
+
+        assert!(!should_upgrade);
+    }
+
+    #[test]
+    fn cpu_target_keeps_existing_torch() {
+        let should_upgrade = should_install_or_upgrade_torch(
+            TorchInstallTarget::Cpu,
+            true,
+            false,
+        );
+
+        assert!(!should_upgrade);
+    }
+}

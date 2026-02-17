@@ -45,7 +45,7 @@ export function NotificationCenterButton({
         sizeMap[size],
         className
       )}
-      aria-label={`Уведомления${unreadCount > 0 ? ` (${unreadCount} непрочитанных)` : ""}`}
+      aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
     >
       <Bell className={iconSizeMap[size]} />
 
@@ -60,7 +60,7 @@ export function NotificationCenterButton({
             "transition-all",
             "animate-in zoom-in duration-200"
           )}
-          aria-label={`${unreadCount} непрочитанных уведомлений`}
+          aria-label={`${unreadCount} unread notifications`}
         >
           {unreadCount > 9 ? "9+" : unreadCount}
         </span>

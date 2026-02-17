@@ -7,8 +7,10 @@ export { downloadModel, getLocalModels, saveHuggingFaceToken, getHuggingFaceToke
 export type { ModelDownloadProgress, ModelDownloadStageEvent } from "./tauri/model-commands";
 export { getAvailableDevices, getFFmpegStatus, downloadFFmpeg } from "./tauri/device-commands";
 export type { FFmpegStatus, FFmpegProgress, FFmpegStatusEvent } from "./tauri/device-commands";
-export { getFilesMetadata, selectMediaFiles, selectOutputDirectory, selectExportPath, exportTranscription, getModelsDir, getAssetUrl, readFileAsBase64 } from "./tauri/dialog-commands";
+export { getFilesMetadata, selectMediaFiles, selectOutputDirectory, selectExportPath, exportTranscription, getModelsDir, getAssetUrl, readFileAsBase64, readFileAsArrayBuffer } from "./tauri/dialog-commands";
 export { onProgressUpdate, onTranscriptionComplete, onTranscriptionError, onSegmentUpdate, onModelDownloadProgress, onModelDownloadComplete, onModelDownloadError, onModelDownloadRetrying, onModelDownloadStage, onModelDownloadStageComplete, onBackendLogs, onDevicesDetected, onFFmpegProgress, onFFmpegStatus } from "./tauri/events";
-export { checkPythonEnvironment, checkFFmpegStatus, checkModelsStatus, getEnvironmentStatus, checkRuntimeReadiness, isSetupComplete, markSetupComplete, resetSetup, installPythonFull, checkPythonInstalled, getPythonInstallProgress, cancelPythonInstall, onPythonInstallProgress } from "./tauri/setup-commands";
+export { checkPythonEnvironment, checkFFmpegStatus, checkModelsStatus, getEnvironmentStatus, checkRuntimeReadiness, isSetupComplete, isSetupCompleteFast, markSetupComplete, resetSetup, installPythonFull, checkPythonInstalled, getPythonInstallProgress, cancelPythonInstall, onPythonInstallProgress } from "./tauri/setup-commands";
 export type { InstallProgress } from "./tauri/setup-commands";
-export { getFileSize, deleteFile, convertToMp3, getArchiveDir } from "./tauri/archive-commands";
+export { getFileSize, deleteFile, convertToMp3, getArchiveDir, openArchiveFolder } from "./tauri/archive-commands";
+export { getPerformanceConfig, updatePerformanceConfig } from "./tauri/performance-commands";
+export type { PerformanceConfig } from "@/types/settings";

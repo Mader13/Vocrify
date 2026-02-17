@@ -19,12 +19,11 @@ import type {
 } from "@/types";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
-// UI Notification Store - используется для рендеринга тост-уведомлений
+// UI Notification Store - used for rendering toast notifications
 import { useNotificationStore as useUINotificationStore } from "@/components/ui/notifications";
 
-// Notification Center Store - используется для постоянного хранения уведомлений
+// Notification Center Store - used for persistent storage of notifications
 import { useNotificationCenterStore } from "@/components/ui/notification-center/store";
-import type { NotificationPriority } from "@/components/ui/notification-center/types";
 
 // ============================================================================
 // Notification Settings Store (for NotificationSettings component)
@@ -235,6 +234,8 @@ export class NotificationEmitter {
 
   private onModelDownloadComplete(modelName: string): void {
     const uiStore = useUINotificationStore.getState();
+    const centerStore = useNotificationCenterStore.getState();
+
     uiStore.show({
       type: "success",
       title: "Model Download Complete",
@@ -242,16 +243,32 @@ export class NotificationEmitter {
       duration: 5000,
     });
 
+    centerStore.addNotification({
+      type: "success",
+      priority: "low",
+      title: "Model Download Complete",
+      message: `Model "${modelName}" has been successfully downloaded and is ready to use.`,
+    });
+
     logger.modelInfo("Model download complete notification sent", { modelName });
   }
 
   private onModelDownloadError(modelName: string, error: string): void {
     const uiStore = useUINotificationStore.getState();
+    const centerStore = useNotificationCenterStore.getState();
+
     uiStore.show({
       type: "error",
       title: "Model Download Failed",
       message: `Failed to download model "${modelName}": ${error}`,
       duration: 8000,
+    });
+
+    centerStore.addNotification({
+      type: "error",
+      priority: "high",
+      title: "Model Download Failed",
+      message: `Failed to download model "${modelName}": ${error}`,
     });
 
     logger.modelError("Model download error notification sent", { modelName, error });
@@ -266,11 +283,20 @@ export class NotificationEmitter {
     // Only notify on stage completion (100% progress for that stage)
     if (stage.percent === 100) {
       const uiStore = useUINotificationStore.getState();
+      const centerStore = useNotificationCenterStore.getState();
+
       uiStore.show({
         type: "info",
         title: "Model Download Progress",
         message: `Download stage "${stage.stage}" completed for model "${stage.modelName}".`,
         duration: 3000,
+      });
+
+      centerStore.addNotification({
+        type: "info",
+        priority: "low",
+        title: "Model Download Progress",
+        message: `Download stage "${stage.stage}" completed for model "${stage.modelName}".`,
       });
     }
   }
@@ -291,16 +317,29 @@ export class NotificationEmitter {
     this.lastProgressNotification.set("ffmpeg", now);
 
     const uiStore = useUINotificationStore.getState();
+    const centerStore = useNotificationCenterStore.getState();
+
+    const message = `Downloading FFmpeg: ${progress.percent.toFixed(1)}% (${this.formatBytes(progress.currentBytes)} / ${this.formatBytes(progress.totalBytes)})`;
+
     uiStore.show({
       type: "info",
       title: "FFmpeg Download Progress",
-      message: `Downloading FFmpeg: ${progress.percent.toFixed(1)}% (${this.formatBytes(progress.currentBytes)} / ${this.formatBytes(progress.totalBytes)})`,
+      message,
       duration: 3000,
+    });
+
+    // Progress notifications added to center at lower priority
+    centerStore.addNotification({
+      type: "info",
+      priority: "low",
+      title: "FFmpeg Download Progress",
+      message,
     });
   }
 
   private onFFmpegStatus(status: { status: string; message: string }): void {
     const uiStore = useUINotificationStore.getState();
+    const centerStore = useNotificationCenterStore.getState();
 
     switch (status.status) {
       case "completed":
@@ -309,6 +348,12 @@ export class NotificationEmitter {
           title: "FFmpeg Installed",
           message: "FFmpeg has been successfully downloaded and installed.",
           duration: 5000,
+        });
+        centerStore.addNotification({
+          type: "success",
+          priority: "low",
+          title: "FFmpeg Installed",
+          message: "FFmpeg has been successfully downloaded and installed.",
         });
         break;
 
@@ -319,6 +364,12 @@ export class NotificationEmitter {
           message: status.message || "Failed to download or install FFmpeg.",
           duration: 8000,
         });
+        centerStore.addNotification({
+          type: "error",
+          priority: "high",
+          title: "FFmpeg Installation Failed",
+          message: status.message || "Failed to download or install FFmpeg.",
+        });
         break;
 
       case "extracting":
@@ -327,6 +378,12 @@ export class NotificationEmitter {
           title: "Installing FFmpeg",
           message: "Extracting FFmpeg binaries...",
           duration: 3000,
+        });
+        centerStore.addNotification({
+          type: "info",
+          priority: "low",
+          title: "Installing FFmpeg",
+          message: "Extracting FFmpeg binaries...",
         });
         break;
     }
@@ -357,31 +414,52 @@ export class NotificationEmitter {
     this.lastProgressNotification.set(event.taskId, now);
 
     const uiStore = useUINotificationStore.getState();
+    const centerStore = useNotificationCenterStore.getState();
 
     // Get task info for better context
     const task = this.getTaskById(event.taskId);
     const fileName = task?.fileName ?? "Unknown file";
+    const title = this.getTranscriptionStageTitle(event.stage);
+    const message = `${fileName}: ${event.progress.toFixed(0)}% complete`;
 
     uiStore.show({
       type: "info",
-      title: this.getTranscriptionStageTitle(event.stage),
-      message: `${fileName}: ${event.progress.toFixed(0)}% complete`,
+      title,
+      message,
       duration: 3000,
+    });
+
+    centerStore.addNotification({
+      type: "info",
+      priority: "low",
+      title,
+      message,
     });
   }
 
   private onTranscriptionComplete(taskId: string, result: { segments: any[] }): void {
     const uiStore = useUINotificationStore.getState();
+    const centerStore = useNotificationCenterStore.getState();
 
     const task = this.getTaskById(taskId);
     const fileName = task?.fileName ?? "Unknown file";
     const segmentCount = result.segments?.length ?? 0;
 
+    const title = "Transcription Complete";
+    const message = `Successfully transcribed "${fileName}" with ${segmentCount} segments.`;
+
     uiStore.show({
       type: "success",
-      title: "Transcription Complete",
-      message: `Successfully transcribed "${fileName}" with ${segmentCount} segments.`,
+      title,
+      message,
       duration: 6000,
+    });
+
+    centerStore.addNotification({
+      type: "success",
+      priority: "low",
+      title,
+      message,
     });
 
     logger.transcriptionInfo("Transcription complete notification sent", { taskId, fileName });
@@ -389,6 +467,7 @@ export class NotificationEmitter {
 
   private onTranscriptionError(taskId: string, error: string): void {
     const uiStore = useUINotificationStore.getState();
+    const centerStore = useNotificationCenterStore.getState();
 
     const task = this.getTaskById(taskId);
     if (task?.status === "completed" || task?.status === "cancelled") {
@@ -401,12 +480,21 @@ export class NotificationEmitter {
     }
 
     const fileName = task?.fileName ?? "Unknown file";
+    const title = "Transcription Failed";
+    const message = `Failed to transcribe "${fileName}": ${error}`;
 
     uiStore.show({
       type: "error",
-      title: "Transcription Failed",
-      message: `Failed to transcribe "${fileName}": ${error}`,
+      title,
+      message,
       duration: 10000,
+    });
+
+    centerStore.addNotification({
+      type: "error",
+      priority: "high",
+      title,
+      message,
     });
 
     logger.transcriptionError("Transcription error notification sent", { taskId, fileName, error });
@@ -487,6 +575,15 @@ export function notifySuccess(
   _metadata?: Record<string, unknown>
 ): string {
   const uiStore = useUINotificationStore.getState();
+  const centerStore = useNotificationCenterStore.getState();
+
+  centerStore.addNotification({
+    type: "success",
+    priority: "low",
+    title,
+    message,
+  });
+
   return uiStore.show({
     type: "success",
     title,
@@ -503,6 +600,15 @@ export function notifyError(
   _metadata?: Record<string, unknown>
 ): string {
   const uiStore = useUINotificationStore.getState();
+  const centerStore = useNotificationCenterStore.getState();
+
+  centerStore.addNotification({
+    type: "error",
+    priority: "high",
+    title,
+    message,
+  });
+
   return uiStore.show({
     type: "error",
     title,
@@ -520,6 +626,15 @@ export function notifyWarning(
   _metadata?: Record<string, unknown>
 ): string {
   const uiStore = useUINotificationStore.getState();
+  const centerStore = useNotificationCenterStore.getState();
+
+  centerStore.addNotification({
+    type: "warning",
+    priority: "medium",
+    title,
+    message,
+  });
+
   return uiStore.show({
     type: "warning",
     title,
@@ -536,6 +651,15 @@ export function notifyInfo(
   _metadata?: Record<string, unknown>
 ): string {
   const uiStore = useUINotificationStore.getState();
+  const centerStore = useNotificationCenterStore.getState();
+
+  centerStore.addNotification({
+    type: "info",
+    priority: "low",
+    title,
+    message,
+  });
+
   return uiStore.show({
     type: "info",
     title,

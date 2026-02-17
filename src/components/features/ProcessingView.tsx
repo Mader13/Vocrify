@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 import { motion } from "framer-motion";
 import {
@@ -39,49 +39,49 @@ const stageConfig: Record<
 > = {
   ready: {
     icon: Clock,
-    label: "Подготовка",
+    label: "Preparing",
     accent: "border-muted",
     iconClass: "text-muted-foreground",
   },
   loading: {
     icon: Cpu,
-    label: "Загрузка модели",
+    label: "Loading Model",
     accent: "border-sky-400/40",
     iconClass: "text-sky-400",
   },
   downloading: {
     icon: Download,
-    label: "Скачивание модели",
+    label: "Downloading Model",
     accent: "border-sky-400/40",
     iconClass: "text-sky-400",
   },
   transcribing: {
     icon: Mic2,
-    label: "Распознавание речи",
+    label: "Speech Recognition",
     accent: "border-orange-400/40",
     iconClass: "text-orange-400",
   },
   diarizing: {
     icon: FileText,
-    label: "Разделение спикеров",
+    label: "Speaker Diarization",
     accent: "border-lime-400/40",
     iconClass: "text-lime-400",
   },
   finalizing: {
     icon: Check,
-    label: "Финализация",
+    label: "Finalizing",
     accent: "border-emerald-400/40",
     iconClass: "text-emerald-400",
   },
 };
 
 const stageDescriptions: Record<StageKey, string> = {
-  ready: "Подготавливаем задачу перед запуском обработки.",
-  loading: "Инициализируем движок и подгружаем модель в память.",
-  downloading: "Скачиваем модель. Это бывает только при первом запуске.",
-  transcribing: "Анализируем аудио и собираем сегменты текста.",
-  diarizing: "Определяем спикеров и связываем реплики с голосами.",
-  finalizing: "Сохраняем результат и подготавливаем его к просмотру.",
+  ready: "Preparing the task before processing.",
+  loading: "Initializing the engine and loading the model into memory.",
+  downloading: "Downloading the model. This only happens on first run.",
+  transcribing: "Analyzing audio and collecting text segments.",
+  diarizing: "Identifying speakers and linking utterances to voices.",
+  finalizing: "Saving the result and preparing it for viewing.",
 };
 
 function getDeviceLabel(device: TranscriptionTask["options"]["device"]): string {
@@ -158,7 +158,7 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
                 >
                   {config.label}
                 </p>
-                <p className="text-[11px] text-muted-foreground sm:text-xs">Этап {index + 1}</p>
+                <p className="text-[11px] text-muted-foreground sm:text-xs">Step {index + 1}</p>
               </div>
 
               {isCurrent && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
@@ -170,7 +170,7 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
   );
 }
 
-export function ProcessingView({ task }: ProcessingViewProps) {
+export const ProcessingView = React.memo(function ProcessingView({ task }: ProcessingViewProps) {
   const stage = task.stage ?? (task.status === "completed" ? "finalizing" : "transcribing");
   const normalizedStage: StageKey = stage === "downloading" ? "loading" : stage;
   const config = stageConfig[normalizedStage] ?? stageConfig.transcribing;
@@ -239,7 +239,7 @@ export function ProcessingView({ task }: ProcessingViewProps) {
 
                 <div className="min-w-0">
                   <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground sm:text-xs">
-                    Сейчас выполняется
+                    Currently Running
                   </p>
                   <h3 className="mt-1 text-lg font-semibold leading-tight sm:text-xl">{config.label}</h3>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -251,56 +251,48 @@ export function ProcessingView({ task }: ProcessingViewProps) {
 
             <div className="rounded-2xl border border-border/60 bg-card/80 p-4 sm:p-5 lg:p-6">
               <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground sm:text-xs">
-                Прошло с начала обработки
+                Elapsed Time
               </p>
               <div className="mt-3 flex items-start gap-2.5 sm:items-center sm:gap-3">
-                
                 <div className="flex flex-col">
                   <div className="flex items-baseline gap-0.5 text-3xl font-semibold leading-none tabular-nums sm:gap-1 sm:text-4xl lg:text-5xl">
-                    <motion.span
-                      key={Math.floor(elapsedSeconds / 60)}
-                      initial={{ opacity: 0, y: -6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.25 }}
-                      className="tracking-[0.04em] sm:tracking-[0.08em]"
-                    >
+                    <span className="tracking-[0.04em] sm:tracking-[0.08em]">
                       {String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}
-                    </motion.span>
+                    </span>
                     <span className="text-lg text-muted-foreground sm:text-2xl lg:text-3xl">:</span>
                     <motion.span
                       key={elapsedSeconds % 60}
-                      initial={{ opacity: 0, y: -6 }}
+                      initial={{ opacity: 0.6, y: 0 }}
                       animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.18 }}
+                      transition={{ duration: 0.1 }}
                       className="tracking-[0.04em] sm:tracking-[0.08em]"
                     >
                       {String(elapsedSeconds % 60).padStart(2, "0")}
                     </motion.span>
                   </div>
-                  
                 </div>
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border border-border/60 bg-card p-4">
-                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Прогресс</p>
+                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Progress</p>
                 <p className="mt-2 text-lg font-semibold">
-                  Этап {currentStep} из {stages.length}
+                  Step {currentStep} of {stages.length}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-border/60 bg-card p-4">
-                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Параметры</p>
+                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Settings</p>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
                   <span className="max-w-full truncate rounded-full border border-border/70 px-2.5 py-1">
-                    Модель: {task.options.model}
+                    Model: {task.options.model}
                   </span>
                   <span className="rounded-full border border-border/70 px-2.5 py-1">
-                    Устройство: {getDeviceLabel(task.options.device)}
+                    Device: {getDeviceLabel(task.options.device)}
                   </span>
                   <span className="rounded-full border border-border/70 px-2.5 py-1">
-                    Язык: {task.options.language}
+                    Language: {task.options.language}
                   </span>
                 </div>
               </div>
@@ -308,7 +300,7 @@ export function ProcessingView({ task }: ProcessingViewProps) {
 
             {task.metrics && (
               <div className="rounded-2xl border border-border/60 bg-card p-4">
-                <p className="mb-3 text-xs uppercase tracking-[0.14em] text-muted-foreground">Метрики</p>
+                <p className="mb-3 text-xs uppercase tracking-[0.14em] text-muted-foreground">Metrics</p>
                 <ProgressMetricsDisplay metrics={task.metrics} />
               </div>
             )}
@@ -331,4 +323,4 @@ export function ProcessingView({ task }: ProcessingViewProps) {
       </CardContent>
     </Card>
   );
-}
+});

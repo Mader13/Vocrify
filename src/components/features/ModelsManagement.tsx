@@ -249,20 +249,6 @@ export function ModelsManagement() {
                   ))}
                 </div>
               </div>
-
-              <div className="p-4 rounded-xl border bg-muted/50">
-                <h3 className="font-medium mb-2">Note</h3>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>
-                    - Whisper - open model from OpenAI, supports many languages
-                  </li>
-                  <li>- Parakeet - NVIDIA model, optimized for GPU</li>
-                  <li>
-                    - Models are downloaded to the app directory and available offline
-                  </li>
-                  <li>- GPU is recommended for Parakeet</li>
-                </ul>
-              </div>
             </div>
           </TabsContent>
 
@@ -300,24 +286,6 @@ export function ModelsManagement() {
                     />
                   ))}
                 </div>
-              </div>
-
-              <div className="p-4 rounded-xl border bg-muted/50">
-                <h3 className="font-medium mb-2">About Diarization</h3>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>
-                    - PyAnnote - high accuracy, requires HuggingFace token
-                  </li>
-                  <li>
-                    - Sherpa-ONNX - lightweight, works without token
-                  </li>
-                  <li>
-                    - Diarization identifies different speakers in audio
-                  </li>
-                  <li>
-                    - Works in combination with transcription models
-                  </li>
-                </ul>
               </div>
             </div>
           </TabsContent>

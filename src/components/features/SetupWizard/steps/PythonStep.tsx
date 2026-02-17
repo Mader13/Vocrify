@@ -85,32 +85,32 @@ export function PythonStep() {
       <div>
         <h3 className="text-lg font-semibold">Python Environment</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Проверка Python и необходимых зависимостей
+          Checking Python and required dependencies
         </p>
       </div>
 
       {isInstalling || installProgress ? (
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="font-medium">Установка Python</h4>
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <h4 className="font-medium">Installing Python</h4>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleCancel}
               className="text-muted-foreground hover:text-destructive"
             >
               <X className="h-4 w-4 mr-1" />
-              Отмена
+              Cancel
             </Button>
           </div>
-          
+
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
-              <span>{installProgress?.message || "Подготовка..."}</span>
+              <span>{installProgress?.message || "Preparing..."}</span>
               <span>{Math.round(installProgress?.percent || 0)}%</span>
             </div>
             <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div 
+              <div
                 className="h-full bg-primary transition-all duration-300"
                 style={{ width: `${installProgress?.percent || 0}%` }}
               />
@@ -127,21 +127,21 @@ export function PythonStep() {
           {installProgress?.stage === "complete" && (
             <div className="flex items-center gap-2 text-green-600 text-sm">
               <CheckCircle className="h-4 w-4" />
-              <span>Python успешно установлен!</span>
+              <span>Python successfully installed!</span>
             </div>
           )}
         </div>
       ) : (
         <CheckCard
-          title="Окружение Python"
+          title="Python Environment"
           status={pythonCheck?.status ?? "pending"}
-          message={pythonCheck?.message ?? "Проверка Python..."}
+          message={pythonCheck?.message ?? "Checking Python..."}
           onRetry={checkPython}
         >
           {pythonCheck && (
             <div className="space-y-1">
               <CheckItem
-                label={`Python ${pythonCheck.version ?? "не найден"}`}
+                label={`Python ${pythonCheck.version ?? "not found"}`}
                 sublabel={pythonCheck.executable ?? undefined}
                 status={pythonStatus}
               />
@@ -149,8 +149,8 @@ export function PythonStep() {
               <CheckItem
                 label={
                   pythonCheck.pytorchInstalled
-                    ? `PyTorch ${pythonCheck.pytorchVersion ?? "установлен"}`
-                    : "PyTorch не установлен"
+                    ? `PyTorch ${pythonCheck.pytorchVersion ?? "installed"}`
+                    : "PyTorch not installed"
                 }
                 sublabel={
                   pythonCheck.pytorchInstalled
@@ -162,7 +162,7 @@ export function PythonStep() {
 
               <CheckItem
                 label="Virtual Environment"
-                sublabel={pythonCheck.inVenv ? "Активировано" : "Не обнаружено (рекомендуется)"}
+                sublabel={pythonCheck.inVenv ? "Activated" : "Not detected (recommended)"}
                 status={venvStatus}
               />
             </div>
@@ -173,14 +173,14 @@ export function PythonStep() {
       {needsInstall && !isInstalling && !installProgress && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-3">
           <h4 className="font-medium text-red-600 dark:text-red-400">
-            Требуется установка
+            Installation required
           </h4>
           <p className="text-sm text-muted-foreground">
-            Приложение установит Python и все необходимые зависимости автоматически.
+            The application will install Python and all required dependencies automatically.
           </p>
           <Button onClick={handleInstall} className="w-full">
             <Download className="h-4 w-4 mr-2" />
-            Установить Python
+            Install Python
           </Button>
         </div>
       )}
@@ -189,7 +189,7 @@ export function PythonStep() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleRetry} className="flex-1">
             <RefreshCw className="h-4 w-4 mr-2" />
-            Повторить
+            Retry
           </Button>
         </div>
       )}
@@ -197,7 +197,7 @@ export function PythonStep() {
       {isChecking && !pythonCheck && (
         <div className="flex items-center justify-center py-8">
           <div className="animate-pulse text-muted-foreground">
-            Проверка Python environment...
+            Checking Python environment...
           </div>
         </div>
       )}
@@ -224,13 +224,13 @@ export function PythonStepFooter({ onNext }: PythonStepFooterProps) {
             onClick={() => checkPython()}
             disabled={isChecking}
           >
-            Повторить
+            Retry
           </Button>
         )}
       </div>
       <div className="flex items-center gap-2">
         <Button onClick={onNext} disabled={!canProceed || isChecking}>
-          Продолжить
+          Continue
         </Button>
       </div>
     </div>

@@ -6,7 +6,6 @@
 import { create } from "zustand";
 import type {
   SetupStep,
-  CheckStatus,
   PythonCheckResult,
   FFmpegCheckResult,
   ModelCheckResult,
@@ -18,11 +17,16 @@ import {
   checkPythonEnvironment,
   checkFFmpegStatus,
   checkModelsStatus,
-  checkRuntimeReadiness,
   isSetupComplete,
+  isSetupCompleteFast,
   markSetupComplete,
   resetSetup as apiResetSetup,
   getAvailableDevices,
+  downloadFFmpeg,
+  onFFmpegProgress,
+  onFFmpegStatus,
+  type FFmpegProgress,
+  type FFmpegStatusEvent,
 } from "@/services/tauri";
 
 interface SetupStore {
@@ -38,6 +42,10 @@ interface SetupStore {
   modelCheck: ModelCheckResult | null;
   runtimeReadiness: RuntimeReadinessStatus | null;
 
+  // FFmpeg installation progress
+  ffmpegProgress: FFmpegProgress | null;
+  ffmpegInstallStatus: "idle" | "downloading" | "extracting" | "completed" | "failed";
+
   // Error state
   error: string | null;
 
@@ -47,6 +55,10 @@ interface SetupStore {
   checkFFmpeg: () => Promise<void>;
   checkDevice: () => Promise<void>;
   checkModel: () => Promise<void>;
+  installFFmpeg: () => Promise<void>;
+
+  // Actions - Device Detection (deferred/on-demand)
+  fetchDevices: (forceRefresh?: boolean) => Promise<void>;
 
   // Actions - Navigation
   nextStep: () => void;
@@ -60,9 +72,10 @@ interface SetupStore {
 
   // Actions - Initialization
   initialize: () => Promise<void>;
+  backgroundValidate: () => Promise<void>;
 }
 
-const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "optional"];
+const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "optional", "summary"];
 
 const initialState = {
   currentStep: "python" as SetupStep,
@@ -73,6 +86,8 @@ const initialState = {
   deviceCheck: null as DeviceCheckResult | null,
   modelCheck: null as ModelCheckResult | null,
   runtimeReadiness: null as RuntimeReadinessStatus | null,
+  ffmpegProgress: null as FFmpegProgress | null,
+  ffmpegInstallStatus: "idle" as "idle" | "downloading" | "extracting" | "completed" | "failed",
   error: null as string | null,
 };
 
@@ -151,7 +166,8 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
 
     set({ isChecking: true });
     try {
-      const result = await isSetupComplete();
+      // Use fast-path check with 7-day TTL cache
+      const result = await isSetupCompleteFast();
       if (result.success && result.data) {
         set({ isComplete: true });
       }
@@ -162,6 +178,29 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     }
   },
 
+  backgroundValidate: async () => {
+    const { isComplete } = get();
+
+    // Skip background validation if setup is not complete
+    if (!isComplete) {
+      return;
+    }
+
+    logger.info("Running background setup validation");
+    try {
+      const result = await isSetupComplete();
+      if (result.success && result.data) {
+        logger.info("Background validation: setup still complete");
+      } else {
+        logger.warn("Background validation: setup no longer complete, showing wizard");
+        set({ isComplete: false });
+      }
+    } catch (error) {
+      logger.error("Background validation failed", { error: String(error) });
+      // Don't change state on error - assume still complete
+    }
+  },
+
   checkAll: async () => {
     const { isChecking } = get();
     if (isChecking) {
@@ -169,14 +208,13 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     }
 
     set({ isChecking: true, error: null });
-    logger.info("Running all setup checks");
+    logger.info("Running all setup checks (excluding devices - call fetchDevices separately)");
 
     try {
-      const [pythonResult, ffmpegResult, devicesResult, modelsResult] =
+      const [pythonResult, ffmpegResult, modelsResult] =
         await Promise.all([
           checkPythonEnvironment(),
           checkFFmpegStatus(),
-          getAvailableDevices(),
           checkModelsStatus(),
         ]);
 
@@ -190,16 +228,6 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
           ? ffmpegResult.data
           : failedFFmpegCheck(ffmpegResult.error || "Failed to check FFmpeg");
 
-      const deviceCheck: DeviceCheckResult =
-        devicesResult.success && devicesResult.data
-          ? {
-              status: "ok" as CheckStatus,
-              devices: devicesResult.data.devices,
-              recommended: devicesResult.data.recommended || null,
-              message: `Devices found: ${devicesResult.data.devices.filter((d) => d.available).length}`,
-            }
-          : failedDeviceCheck(devicesResult.error || "Failed to check devices");
-
       const modelCheck: ModelCheckResult =
         modelsResult.success && modelsResult.data
           ? modelsResult.data
@@ -210,7 +238,6 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
       set({
         pythonCheck,
         ffmpegCheck,
-        deviceCheck,
         modelCheck,
         runtimeReadiness,
         isChecking: false,
@@ -219,7 +246,6 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
       logger.info("All setup checks completed", {
         python: pythonCheck.status,
         ffmpeg: ffmpegCheck.status,
-        device: deviceCheck.status,
         model: modelCheck.status,
         runtimeReady: runtimeReadiness.ready,
       });
@@ -267,10 +293,76 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     }
   },
 
-  checkDevice: async () => {
-    logger.info("Checking compute devices");
+  installFFmpeg: async () => {
+    logger.info("Installing FFmpeg automatically");
+    set({ isChecking: true, error: null, ffmpegInstallStatus: "downloading", ffmpegProgress: null });
+
+    // Listen to progress events
+    const unlistenProgress = onFFmpegProgress((progress) => {
+      logger.debug("FFmpeg download progress", progress);
+      set({ ffmpegProgress: progress });
+    });
+
+    // Listen to status events
+    const unlistenStatus = onFFmpegStatus((event) => {
+      logger.debug("FFmpeg status event", event);
+      switch (event.status) {
+        case "downloading":
+          set({ ffmpegInstallStatus: "downloading" });
+          break;
+        case "extracting":
+          set({ ffmpegInstallStatus: "extracting" });
+          break;
+        case "completed":
+          set({ ffmpegInstallStatus: "completed" });
+          break;
+        case "failed":
+          set({
+            ffmpegInstallStatus: "failed",
+            ffmpegCheck: failedFFmpegCheck(event.message),
+            isChecking: false,
+          });
+          break;
+      }
+    });
+
     try {
-      const result = await getAvailableDevices();
+      const result = await downloadFFmpeg();
+      if (result.success) {
+        logger.info("FFmpeg downloaded successfully, verifying...");
+        await get().checkFFmpeg();
+      } else {
+        set({
+          ffmpegCheck: failedFFmpegCheck(result.error || "Download failed"),
+          isChecking: false,
+          ffmpegInstallStatus: "failed",
+        });
+        logger.error("FFmpeg download failed", { error: result.error });
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Install failed";
+      set({
+        ffmpegCheck: failedFFmpegCheck(errorMessage),
+        isChecking: false,
+        ffmpegInstallStatus: "failed",
+      });
+      logger.error("FFmpeg install failed", { error: errorMessage });
+    } finally {
+      // Clean up listeners
+      unlistenProgress.then((f) => f?.()).catch((err) =>
+        logger.error("Failed to unlisten FFmpeg progress", { error: String(err) })
+      );
+      unlistenStatus.then((f) => f?.()).catch((err) =>
+        logger.error("Failed to unlisten FFmpeg status", { error: String(err) })
+      );
+    }
+  },
+
+  checkDevice: async () => {
+    logger.info("Checking compute devices (using cache)");
+    try {
+      const result = await getAvailableDevices(false); // Use cache by default
       if (result.success && result.data) {
         const devices = result.data.devices;
         set({
@@ -311,6 +403,41 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     }
   },
 
+  /**
+   * On-demand device detection
+   * @param forceRefresh - If true, bypass cache and re-detect devices
+   *
+   * Device detection is deferred until the user opens Settings or Setup Wizard.
+   * This avoids expensive PyTorch imports during app initialization.
+   * Results are cached in the Rust backend for the app session.
+   */
+  fetchDevices: async (forceRefresh = false) => {
+    logger.info("Fetching compute devices", { forceRefresh });
+    try {
+      const result = await getAvailableDevices(forceRefresh);
+      if (result.success && result.data) {
+        const devices = result.data.devices;
+        set({
+          deviceCheck: {
+            status: "ok",
+            devices,
+            recommended: result.data.recommended || null,
+            message: `Devices found: ${devices.filter((d) => d.available).length}`,
+          },
+        });
+      } else {
+        set({
+          deviceCheck: failedDeviceCheck(result.error || "Check failed"),
+        });
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Check failed";
+      set({ deviceCheck: failedDeviceCheck(errorMessage) });
+      logger.error("Device detection failed", { error: errorMessage });
+    }
+  },
+
   nextStep: () => {
     const { currentStep } = get();
     const currentIndex = STEPS.indexOf(currentStep);
@@ -334,16 +461,27 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
   completeSetup: async () => {
     logger.info("Completing setup");
     try {
-      const readinessResult = await checkRuntimeReadiness();
-      if (!readinessResult.success || !readinessResult.data) {
+      const { pythonCheck, ffmpegCheck } = get();
+
+      // Use cached check results instead of re-running expensive checks
+      if (!pythonCheck || pythonCheck.status !== "ok") {
         set({
           isComplete: false,
-          error: readinessResult.error || "Failed to verify runtime readiness",
+          error: "Python check not completed or failed",
         });
         return;
       }
 
-      const readiness = readinessResult.data;
+      if (!ffmpegCheck || ffmpegCheck.status !== "ok") {
+        set({
+          isComplete: false,
+          error: "FFmpeg check not completed or failed",
+        });
+        return;
+      }
+
+      // Build runtime readiness from cached results
+      const readiness = buildRuntimeReadiness(pythonCheck, ffmpegCheck);
       set({ runtimeReadiness: readiness });
 
       if (!readiness.ready) {

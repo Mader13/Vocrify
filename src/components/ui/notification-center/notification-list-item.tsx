@@ -99,7 +99,7 @@ export function NotificationListItem({
       onClick={handleClick}
       role="button"
       tabIndex={0}
-      aria-label={`Уведомление: ${notification.title}`}
+      aria-label={`Notification: ${notification.title}`}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -123,7 +123,7 @@ export function NotificationListItem({
           </h4>
           {priorityBadge && (
             <span className={priorityBadge}>
-              {notification.priority === "high" ? "Важно" : "Среднее"}
+              {notification.priority === "high" ? "High" : "Medium"}
             </span>
           )}
         </div>
@@ -140,7 +140,7 @@ export function NotificationListItem({
           </span>
           {!notification.read && (
             <span className="text-xs text-primary font-medium">
-              Новое
+              New
             </span>
           )}
         </div>
@@ -157,7 +157,7 @@ export function NotificationListItem({
           "focus-visible:opacity-100 focus-visible:outline-none",
           "disabled:opacity-50 disabled:cursor-not-allowed"
         )}
-        aria-label="Удалить уведомление"
+        aria-label="Delete notification"
       >
         <X className="h-4 w-4" />
       </button>

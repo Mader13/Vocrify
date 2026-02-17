@@ -16,8 +16,8 @@ export function ModelSelectorModal({
   isOpen,
   onClose,
   onSelect,
-  title = "Выберите модель",
-  description = "Выберите модель для транскрипции:",
+  title = "Select a Model",
+  description = "Choose a model for transcription:",
 }: ModelSelectorModalProps) {
   const { availableModels, selectedTranscriptionModel } = useModelsStore();
 
@@ -62,7 +62,7 @@ export function ModelSelectorModal({
                         <span className="font-medium">{model.name}</span>
                         {model.installed && (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success">
-                            Установлено
+                            Installed
                           </span>
                         )}
                       </div>
@@ -99,7 +99,7 @@ export function ModelSelectorModal({
 
         <div className="flex justify-end gap-2 pt-4 border-t">
           <Button variant="outline" onClick={onClose}>
-            Отмена
+            Cancel
           </Button>
           <Button
             onClick={() => {
@@ -111,7 +111,7 @@ export function ModelSelectorModal({
             }}
             disabled={!selectedTranscriptionModel}
           >
-            Выбрать
+            Select
           </Button>
         </div>
       </DialogContent>

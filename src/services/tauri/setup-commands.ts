@@ -97,6 +97,17 @@ export async function isSetupComplete(): Promise<CommandResult<boolean>> {
   }
 }
 
+export async function isSetupCompleteFast(): Promise<CommandResult<boolean>> {
+  try {
+    const result = await invoke<boolean>("is_setup_complete_fast");
+    logger.info("Fast setup check completed", { isComplete: result });
+    return { success: true, data: result };
+  } catch (error) {
+    logger.error("Failed to check setup status (fast path)", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function markSetupComplete(): Promise<CommandResult<void>> {
   try {
     await invoke("mark_setup_complete");

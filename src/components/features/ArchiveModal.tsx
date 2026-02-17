@@ -25,18 +25,18 @@ interface ArchiveModalProps {
 const ARCHIVE_OPTIONS: { mode: ArchiveMode; label: string; description: string }[] = [
   {
     mode: "keep_all",
-    label: "Оставить всё",
-    description: "Сохранить видео и аудио",
+    label: "Keep All",
+    description: "Keep video and audio",
   },
   {
     mode: "delete_video",
-    label: "Удалить видео",
-    description: "Удалить видео, оставить аудио и транскрипцию",
+    label: "Delete Video",
+    description: "Delete video, keep audio and transcription",
   },
   {
     mode: "text_only",
-    label: "Только текст",
-    description: "Удалить видео и аудио, оставить только транскрипцию",
+    label: "Text Only",
+    description: "Delete video and audio, keep only transcription",
   },
 ];
 
@@ -85,10 +85,10 @@ export function ArchiveModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Archive className="h-5 w-5" />
-            Архивирование: {task.fileName}
+            Archiving: {task.fileName}
           </DialogTitle>
           <DialogDescription>
-            Выберите, что сделать с медиафайлами при архивации
+            Choose what to do with media files when archiving
           </DialogDescription>
         </DialogHeader>
 
@@ -97,15 +97,15 @@ export function ArchiveModal({
             <div className="bg-muted/50 rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Info className="h-4 w-4" />
-                Размер файла
+                File size
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Видео:</span>
+                <span className="text-muted-foreground">Video:</span>
                 <span>{formatFileSize(fileSize)}</span>
               </div>
               {selectedMode !== "keep_all" && estimatedSavings !== null && (
                 <div className="flex justify-between text-sm font-medium text-green-600 border-t pt-2 mt-2">
-                  <span>Освободится:</span>
+                  <span>Space to be freed:</span>
                   <span>~{formatFileSize(estimatedSavings)}</span>
                 </div>
               )}
@@ -113,7 +113,7 @@ export function ArchiveModal({
           )}
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">Что сделать с медиафайлами:</label>
+            <label className="text-sm font-medium">What to do with media files:</label>
             <div className="space-y-2">
               {ARCHIVE_OPTIONS.map((option) => (
                 <button
@@ -154,7 +154,7 @@ export function ArchiveModal({
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-muted transition-colors"
           >
-            Отмена
+            Cancel
           </button>
           <button
             onClick={handleSubmit}
@@ -168,12 +168,12 @@ export function ArchiveModal({
             {isLoading ? (
               <>
                 <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                Архивирование...
+                Archiving...
               </>
             ) : (
               <>
                 <Archive className="h-4 w-4" />
-                В архив
+                Archive
               </>
             )}
           </button>

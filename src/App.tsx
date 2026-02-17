@@ -5,7 +5,6 @@ import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsM
 import { useTasks, useUIStore, useSetupStore } from "@/stores";
 import {
   onProgressUpdate,
-  onTranscriptionComplete,
   onTranscriptionError,
   onSegmentUpdate,
 } from "@/services/tauri";
@@ -17,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { NotificationProvider } from "@/components/ui/notifications";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
-import type { DiarizationProvider, AIModel, DeviceType, Language } from "@/types";
+import type { DiarizationProvider, AIModel, DeviceType, Language, TranscriptionResult } from "@/types";
 import type { FileWithSettings } from "@/components/features/DiarizationOptionsModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useModelValidation, useDropZone } from "@/hooks";
@@ -34,7 +33,7 @@ function LoadingScreen() {
     <div className="flex h-screen items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Проверка состояния...</p>
+        <p className="text-sm text-muted-foreground">Checking status...</p>
       </div>
     </div>
   );
@@ -48,6 +47,7 @@ function MainApplication() {
   const appendStreamingSegment = useTasks((s) => s.appendStreamingSegment);
   const addTask = useTasks((s) => s.addTask);
   const updateLastDiarizationProvider = useTasks((s) => s.updateLastDiarizationProvider);
+  const updateSettings = useTasks((s) => s.updateSettings);
   const currentView = useUIStore((s) => s.currentView);
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
@@ -73,6 +73,12 @@ function MainApplication() {
   useEffect(() => {
     if (currentView === "archive") {
       setSelectedTask(null);
+    } else if (currentView === "transcription") {
+      // Clear selection if the selected task doesn't exist (but allow archived tasks)
+      const task = useTasks.getState().tasks.find((t) => t.id === selectedTaskId);
+      if (selectedTaskId && !task) {
+        setSelectedTask(null);
+      }
     }
   }, [currentView, setSelectedTask]);
 
@@ -97,7 +103,9 @@ function MainApplication() {
       updateTaskProgress(event.taskId, event.progress, event.stage, event.metrics);
     }).then((unlisten) => unsubscribers.push(unlisten));
 
-    onTranscriptionComplete((taskId, result) => {
+    // Listen to CustomEvent from transcription.ts (Rust path)
+    const handleTranscriptionComplete = (e: CustomEvent<{ taskId: string; result: TranscriptionResult }>) => {
+      const { taskId, result } = e.detail;
       logger.transcriptionDebug("Transcription complete", {
         taskId,
         segments: result.segments?.length,
@@ -112,12 +120,14 @@ function MainApplication() {
         logger.transcriptionDebug("Speaker segments", { taskId, speakerSegments: result.speakerSegments.slice(0, 3) });
       }
       updateTaskStatus(taskId, "completed", result);
-    }).then((unlisten) => unsubscribers.push(unlisten));
+    };
+    window.addEventListener("transcription-complete", handleTranscriptionComplete as EventListener);
+    unsubscribers.push(() => window.removeEventListener("transcription-complete", handleTranscriptionComplete as EventListener));
 
     onTranscriptionError((taskId, error) => {
       const existingTask = useTasks.getState().tasks.find((t) => t.id === taskId);
 
-      if (existingTask?.status === "completed" || existingTask?.status === "cancelled") {
+      if (existingTask?.status === "completed" || existingTask?.status === "cancelled" || existingTask?.status === "interrupted") {
         logger.transcriptionWarn("Ignoring late transcription error for finalized task", {
           taskId,
           status: existingTask.status,
@@ -138,6 +148,36 @@ function MainApplication() {
       unsubscribers.forEach((unlisten) => unlisten());
     };
   }, [updateTaskProgress, updateTaskStatus, appendTaskSegment, appendStreamingSegment]);
+
+  useEffect(() => {
+    const STALE_THRESHOLD_MS = 2 * 60 * 1000;
+    const CHECK_INTERVAL_MS = 30 * 1000;
+
+    const checkStaleTasks = () => {
+      const now = Date.now();
+      const tasks = useTasks.getState().tasks;
+
+      tasks.forEach((task) => {
+        if (task.status === "processing") {
+          const lastProgressTime = task.lastProgressUpdate ?? 0;
+          const timeSinceLastUpdate = now - lastProgressTime;
+
+          if (timeSinceLastUpdate > STALE_THRESHOLD_MS && lastProgressTime > 0) {
+            logger.transcriptionWarn("Marking task as interrupted - no progress updates received", {
+              taskId: task.id,
+              timeSinceLastUpdate,
+            });
+            updateTaskStatus(task.id, "interrupted", undefined, "Transcription was interrupted: no progress received from backend. The task may have failed or been terminated.");
+          }
+        }
+      });
+    };
+
+    const intervalId = setInterval(checkStaleTasks, CHECK_INTERVAL_MS);
+    checkStaleTasks();
+
+    return () => clearInterval(intervalId);
+  }, [updateTaskStatus]);
 
   useEffect(() => {
     const processedTasks = new Set<string>();
@@ -202,7 +242,7 @@ function MainApplication() {
     return { valid: true };
   };
 
-  const handleModalConfirm = async (filesWithSettings: FileWithSettings[], _rememberChoice: boolean) => {
+  const handleModalConfirm = async (filesWithSettings: FileWithSettings[], rememberChoice: boolean) => {
     for (const file of filesWithSettings) {
       const validation = validateDiarizationSettings(
         file.enableDiarization,
@@ -223,9 +263,20 @@ function MainApplication() {
       }
     }
 
+    // Save settings if rememberChoice is true
+    if (rememberChoice && filesWithSettings.length > 0) {
+      const firstFile = filesWithSettings[0];
+      if (firstFile.enableDiarization && firstFile.diarizationProvider) {
+        updateLastDiarizationProvider(firstFile.diarizationProvider);
+        updateSettings({ numSpeakers: firstFile.numSpeakers === "auto" ? 2 : firstFile.numSpeakers });
+      }
+    }
+
     for (const file of filesWithSettings) {
       if (file.enableDiarization && file.diarizationProvider) {
-        updateLastDiarizationProvider(file.diarizationProvider);
+        if (!rememberChoice) {
+          updateLastDiarizationProvider(file.diarizationProvider);
+        }
       }
 
       await addTask(file.path, file.name, file.size, {

@@ -229,7 +229,7 @@ export function downloadFile(content: string, filename: string, mimeType: string
  * Get speaker count label for display
  */
 export function getSpeakerCountLabel(count: SpeakerCount): string {
-  if (count === "auto") return "Авто";
+  if (count === "auto") return "Auto";
   return count.toString();
 }
 

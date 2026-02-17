@@ -11,7 +11,7 @@ interface DropZoneProps {
 }
 
 export function DropZone({ className, onFilesSelected }: DropZoneProps) {
-  const { isDragging } = useUIStore();
+  const isDragging = useUIStore((s) => s.isDragging);
 
   const handleBrowseFiles = async (e: React.MouseEvent) => {
     e.stopPropagation();

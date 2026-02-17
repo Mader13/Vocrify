@@ -169,6 +169,31 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   const [playbackRate, setPlaybackRate] = React.useState(1);
   const overlayRef = useRef<HTMLDivElement>(null);
 
+  // Lazy initialization flag - only load waveform when component is visible
+  const [shouldInitializeWaveform, setShouldInitializeWaveform] = React.useState(false);
+
+  // Use Intersection Observer to defer waveform loading until visible
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          // Defer initialization using requestIdleCallback for better performance
+          const initId = requestIdleCallback(() => {
+            setShouldInitializeWaveform(true);
+          });
+          return () => cancelIdleCallback(initId);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   // Expose video element via ref
   useImperativeHandle(forwardedRef, () => internalVideoRef.current!);
 
@@ -377,13 +402,19 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   }, [task.result, colorMode]);
 
   /**
-   * Initialize WaveSurfer.js
+   * Initialize WaveSurfer.js (only when component is visible)
    */
   useEffect(() => {
-    if (!containerRef.current || !task.filePath) {
+    // Defer initialization until component is visible
+    if (!shouldInitializeWaveform) {
+      return;
+    }
+
+    // Use mediaPath which handles both filePath and audioPath for archived tasks
+    if (!containerRef.current || !mediaPath) {
       console.log("[VideoPlayer DEBUG] useEffect early return:", {
         hasContainer: !!containerRef.current,
-        hasFilePath: !!task.filePath
+        hasMediaPath: !!mediaPath
       });
       return;
     }
@@ -396,7 +427,9 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
     console.log("[VideoPlayer DEBUG] Initializing WaveSurfer:", {
       assetUrl,
+      mediaPath,
       filePath: task.filePath,
+      audioPath: task.audioPath,
       hasVideo: !!video
     });
 
@@ -407,13 +440,15 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     isWaveformReadyRef.current = false;
     setIsWaveformReady(false);
 
-    // Check for cached peaks
-    const cachedPeaks = getCachedWaveformPeaks(task.filePath);
-    console.log("[VideoPlayer DEBUG] Cached peaks:", !!cachedPeaks);
+    // Check for cached peaks - use mediaPath for archived tasks
+    const peaksPath = task.archived && task.audioPath ? task.audioPath : task.filePath;
+    const cachedPeaks = getCachedWaveformPeaks(peaksPath || "");
+    console.log("[VideoPlayer DEBUG] Cached peaks:", !!cachedPeaks, "peaksPath:", peaksPath);
 
     const themeColors = getThemeColors();
 
     // Initialize WaveSurfer options (without url - we'll use loadBlob)
+    // Optimized for performance: reduced bar size, minPxPerSec limits detail level
     const wsOptions: any = {
       container,
       height: 120,
@@ -421,9 +456,11 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       waveColor: themeColors.waveColor,
       progressColor: themeColors.progressColor,
       cursorColor: themeColors.progressColor,
-      barWidth: 2,
+      barWidth: 1,        // Reduced from 2 - fewer DOM elements
       barGap: 1,
       barRadius: 2,
+      minPxPerSec: 0.5,   // Limit detail level for performance
+      backend: 'WebAudio', // Use WebAudio for better performance
     };
 
     // Use cached peaks if available
@@ -461,9 +498,9 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
           setIsGenerating(true);
         }
 
-        // Load audio file as Blob (workaround for Tauri asset URL CORS issue)
-        // Use mediaPath which handles archived audioPath correctly
-        console.log("[VideoPlayer DEBUG] Loading audio as Blob from:", mediaPath);
+        // Load audio via base64 - WaveSurfer handles decoding internally
+        console.log("[VideoPlayer DEBUG] Loading audio from:", mediaPath);
+        
         readFileAsBase64(mediaPath)
           .then((result) => {
             if (!ws) return;
@@ -493,36 +530,63 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
           // Cache peaks for next load (only if not already cached)
           if (!cachedPeaks) {
-            // Try to access peaks from the internal waveform data
-            const wsAny = ws as any;
-            const waveformContainer = container.querySelector("wave");
-            if (waveformContainer) {
-              // Get waveform width for peak calculation
-              const waveformWidth = waveformContainer.clientWidth || 1000;
-              // Peaks are stored in the waveform element's dataset or calculated
-              // For WebAudio backend, we can access peaks via getDecodedData
-              if (wsAny.getDecodedData) {
-                try {
-                  const decodedData = wsAny.getDecodedData();
-                  if (decodedData) {
-                    // Calculate peaks from decoded audio data
-                    const channelData = decodedData.getChannelData(0);
-                    const peaks: number[] = [];
-                    const samplesPerPixel = Math.floor(channelData.length / waveformWidth);
-                    for (let i = 0; i < waveformWidth; i++) {
-                      let max = 0;
-                      for (let j = 0; j < samplesPerPixel; j++) {
-                        const sample = Math.abs(channelData[i * samplesPerPixel + j] || 0);
-                        if (sample > max) max = sample;
-                      }
-                      peaks.push(max);
+            // Use requestIdleCallback to defer peak calculation for better performance
+            const calculatePeaks = () => {
+              try {
+                const wsAny = ws as any;
+                const waveformContainer = container.querySelector("wave");
+                if (waveformContainer) {
+                  // Get waveform width for peak calculation
+                  const waveformWidth = waveformContainer.clientWidth || 1000;
+
+                  // For WebAudio backend, we can access peaks via getDecodedData
+                  if (wsAny.getDecodedData) {
+                    const decodedData = wsAny.getDecodedData();
+                    if (decodedData) {
+                      // Calculate peaks from decoded audio data in chunks to avoid blocking
+                      const channelData = decodedData.getChannelData(0);
+                      const samplesPerPixel = Math.floor(channelData.length / waveformWidth);
+                      const peaks: number[] = [];
+
+                      // Process in batches to avoid blocking main thread
+                      const batchSize = 1000;
+                      let processed = 0;
+
+                      const processBatch = () => {
+                        const end = Math.min(processed + batchSize, waveformWidth);
+                        for (let i = processed; i < end; i++) {
+                          let max = 0;
+                          for (let j = 0; j < samplesPerPixel; j++) {
+                            const sample = Math.abs(channelData[i * samplesPerPixel + j] || 0);
+                            if (sample > max) max = sample;
+                          }
+                          peaks.push(max);
+                        }
+                        processed = end;
+
+                        if (processed < waveformWidth) {
+                          // Continue processing in next frame
+                          requestAnimationFrame(processBatch);
+                        } else {
+                          // All peaks calculated, cache them using peaksPath
+                          cacheWaveformPeaks(peaksPath, new Float32Array(peaks));
+                        }
+                      };
+
+                      processBatch();
                     }
-                    cacheWaveformPeaks(task.filePath, new Float32Array(peaks));
                   }
-                } catch (e) {
-                  console.warn("Failed to cache waveform peaks:", e);
                 }
+              } catch (e) {
+                console.warn("Failed to cache waveform peaks:", e);
               }
+            };
+
+            // Use requestIdleCallback if available, otherwise use setTimeout
+            if (typeof requestIdleCallback !== 'undefined') {
+              requestIdleCallback(calculatePeaks);
+            } else {
+              setTimeout(calculatePeaks, 0);
             }
           }
 
@@ -623,7 +687,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       }
       ws?.destroy();
     };
-  }, [generateRegions, onTimeUpdate, task.filePath]);
+  }, [generateRegions, onTimeUpdate, mediaPath, shouldInitializeWaveform]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -641,7 +705,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     return () => {
       observer.disconnect();
     };
-  }, [task.filePath]);
+  }, [mediaPath]);
 
   useEffect(() => {
     const node = overlayRef.current;

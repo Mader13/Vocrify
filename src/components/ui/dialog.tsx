@@ -58,7 +58,14 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
         onClick={handleBackdropClick}
         {...props}
       >
-        <div className="absolute inset-0 bg-black/50" />
+        <div 
+          className="absolute inset-0 bg-black/50" 
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              onOpenChange(false);
+            }
+          }}
+        />
         {children}
       </div>
     );
@@ -70,15 +77,23 @@ interface DialogContentProps extends React.HTMLAttributes<HTMLDivElement>,
   VariantProps<typeof dialogContentVariants> {}
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className, size, children, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn(dialogContentVariants({ size }), className)}
-      {...props}
-    >
-      {children}
-    </div>
-  )
+  ({ className, size, children, onClick, ...props }, ref) => {
+    const handleContentClick = (e: React.MouseEvent<HTMLDivElement>) => {
+      onClick?.(e);
+      e.stopPropagation();
+    };
+
+    return (
+      <div
+        ref={ref}
+        className={cn(dialogContentVariants({ size }), className)}
+        onClick={handleContentClick}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  }
 );
 DialogContent.displayName = "DialogContent";
 

@@ -17,7 +17,7 @@ export function updateTaskProgressPure(
   metrics?: ProgressMetrics
 ): TranscriptionTask[] {
   return tasks.map((task) =>
-    task.id === taskId ? { ...task, progress, ...(stage && { stage }), ...(metrics && { metrics }) } : task
+    task.id === taskId ? { ...task, progress, lastProgressUpdate: Date.now(), ...(stage && { stage }), ...(metrics && { metrics }) } : task
   );
 }
 
@@ -34,6 +34,7 @@ export function updateTaskStatusPure(
       ...task,
       status,
       progress: status === "completed" ? 100 : task.progress,
+      stage: status === "completed" ? undefined : task.stage,
       ...(result && { result }),
       ...(error !== undefined && { error }),
     };
