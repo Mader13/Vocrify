@@ -7,7 +7,6 @@ import { ExternalLink, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckCard, CheckItem } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
-import { cn } from "@/lib/utils";
 
 export function FFmpegStep() {
   const { ffmpegCheck, checkFFmpeg, installFFmpeg, isChecking, ffmpegProgress, ffmpegInstallStatus } = useSetupStore();

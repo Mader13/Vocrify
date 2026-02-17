@@ -26,7 +26,6 @@ import {
   onFFmpegProgress,
   onFFmpegStatus,
   type FFmpegProgress,
-  type FFmpegStatusEvent,
 } from "@/services/tauri";
 
 interface SetupStore {
