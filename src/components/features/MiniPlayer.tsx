@@ -18,7 +18,9 @@ export function MiniPlayer() {
   const [isDragging, setIsDragging] = useState(false);
 
   // Don't render if nothing is playing
-  if (!store.playingTaskId || !store.isPlaying) {
+  const shouldRender = !store.playingTaskId || !store.isPlaying;
+
+  if (!shouldRender) {
     return null;
   }
 
@@ -47,7 +49,7 @@ export function MiniPlayer() {
     const screenWidth = window.innerWidth;
     const screenHeight = window.innerHeight;
 
-    // Determine which quadrant the mouse is in
+    // Determine which quadrant of mouse is in
     const isLeft = e.clientX < screenWidth / 2;
     const isTop = e.clientY < screenHeight / 2;
 
@@ -62,6 +64,11 @@ export function MiniPlayer() {
   }, [isDragging, store]);
 
   const progress = store.duration > 0 ? (store.currentTime / store.duration) * 100 : 0;
+
+  // Don't render if nothing is playing
+  if (!store.playingTaskId || !store.isPlaying) {
+    return null;
+  }
 
   return (
     <div
