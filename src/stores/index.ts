@@ -760,3 +760,6 @@ export { useSetupStore } from "./setupStore";
 
 // Re-export notification store
 export { useNotificationStore } from "@/services/notifications";
+
+// Re-export playback store
+export { usePlaybackStore, type MiniPlayerPosition } from "./playbackStore";
