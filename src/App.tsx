@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Upload, AlertCircle, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout";
-import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar } from "@/components/features";
+import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer } from "@/components/features";
 import { useTasks, useUIStore, useSetupStore } from "@/stores";
 import {
   onProgressUpdate,
@@ -321,6 +321,7 @@ function MainApplication() {
   return (
     <div className="flex h-screen flex-col bg-background">
       <Header />
+      <MiniPlayer />
 
       {currentView === "transcription" || currentView === "archive" ? (
         <main

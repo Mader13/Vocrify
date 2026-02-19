@@ -19,6 +19,7 @@ export { ModelWarning } from "./ModelWarning";
 export { Sidebar } from "./Sidebar";
 export { StageBadges } from "./StageBadges";
 export { ProgressMetricsDisplay } from "./ProgressMetrics";
+export { MiniPlayer } from "./MiniPlayer";
 
 // Setup Wizard
 export { SetupWizard, SetupWizardGuard } from "./SetupWizard";
