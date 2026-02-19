@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, memo } from 'react';
 import { Play, Pause, X, GripVertical, FileAudio } from 'lucide-react';
 import { cn, formatTime } from '@/lib/utils';
 import { usePlaybackStore, type MiniPlayerPosition } from '@/stores/playbackStore';
@@ -11,16 +11,14 @@ const positionClasses: Record<MiniPlayerPosition, string> = {
   'bottom-right': 'bottom-4 right-4',
 };
 
-export function MiniPlayer() {
+function MiniPlayerInner() {
   const store = usePlaybackStore();
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
 
   const [isDragging, setIsDragging] = useState(false);
 
   // Don't render if nothing is playing
-  const shouldRender = !store.playingTaskId || !store.isPlaying;
-
-  if (!shouldRender) {
+  if (!store.playingTaskId || !store.isPlaying) {
     return null;
   }
 
@@ -147,3 +145,6 @@ export function MiniPlayer() {
     </div>
   );
 }
+
+// Memo wrapper to prevent hook ordering issues
+export const MiniPlayer = memo(MiniPlayerInner);
