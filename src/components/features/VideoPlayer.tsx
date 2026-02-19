@@ -9,6 +9,7 @@ import { WaveformControls } from "@/components/features/WaveformControls";
 import { sanitizeSegments } from "@/lib/segment-utils";
 import { getAssetUrl, readFileAsBase64 } from "@/services/tauri";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
+import { usePlaybackSync } from "@/hooks/usePlaybackSync";
 
 /**
  * Convert base64 string to Blob
@@ -168,6 +169,20 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   const [volume, setVolume] = React.useState(1);
   const [playbackRate, setPlaybackRate] = React.useState(1);
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Playback sync with store
+  const {
+    handlePlay: syncHandlePlay,
+    handlePause: syncHandlePause,
+    handleTimeUpdate: syncHandleTimeUpdate,
+    handleDurationChange: syncHandleDurationChange,
+  } = usePlaybackSync({
+    taskId: task.id,
+    fileName: task.fileName,
+    videoRef: internalVideoRef,
+    wavesurferRef: wavesurferRef,
+    isWaveformReady,
+  });
 
   // Lazy initialization flag - only load waveform when component is visible
   const [shouldInitializeWaveform, setShouldInitializeWaveform] = React.useState(false);
@@ -614,6 +629,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
             const wsDuration = ws.getDuration();
             if (Number.isFinite(wsDuration) && wsDuration > 0) {
               setDuration(wsDuration);
+              syncHandleDurationChange(wsDuration);
             }
           }
 
@@ -665,6 +681,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
         ws.on("timeupdate", (time: number) => {
           setCurrentTime(time);
           onTimeUpdate?.(time);
+          syncHandleTimeUpdate(time);
         });
       } catch (error) {
         console.error("[VideoPlayer DEBUG] Failed to create WaveSurfer:", error);
@@ -684,6 +701,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       if (!Number.isFinite(videoDuration) || videoDuration <= 0) return;
 
       setDuration(videoDuration);
+      syncHandleDurationChange(videoDuration);
 
       const ratio = videoEl.currentTime / videoDuration;
       // Skip if ratio is not finite (defensive check)
@@ -692,6 +710,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       ws.seekTo(ratio);
       setCurrentTime(videoEl.currentTime);
       onTimeUpdate?.(videoEl.currentTime);
+      syncHandleTimeUpdate(videoEl.currentTime);
     };
 
     if (video) {
@@ -763,8 +782,14 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
     // For audio-only tasks, use WaveSurfer events
     if (!videoElement && ws) {
-      const handlePlay = () => setIsPlaying(true);
-      const handlePause = () => setIsPlaying(false);
+      const handlePlay = () => {
+        setIsPlaying(true);
+        syncHandlePlay();
+      };
+      const handlePause = () => {
+        setIsPlaying(false);
+        syncHandlePause();
+      };
 
       ws.on("play", handlePlay);
       ws.on("pause", handlePause);
@@ -780,8 +805,14 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
     if (!videoElement) return;
 
-    const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
+    const handlePlay = () => {
+      setIsPlaying(true);
+      syncHandlePlay();
+    };
+    const handlePause = () => {
+      setIsPlaying(false);
+      syncHandlePause();
+    };
 
     videoElement.addEventListener("play", handlePlay);
     videoElement.addEventListener("pause", handlePause);
