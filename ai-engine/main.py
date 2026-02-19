@@ -18,6 +18,11 @@ import sys
 import warnings
 from pathlib import Path
 
+# Embeddable/isolated Python builds may not include the script directory in sys.path.
+ENGINE_DIR = Path(__file__).resolve().parent
+if str(ENGINE_DIR) not in sys.path:
+    sys.path.insert(0, str(ENGINE_DIR))
+
 from commands import (
     handle_check_command,
     handle_cancel_download,

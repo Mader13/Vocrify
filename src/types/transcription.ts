@@ -42,7 +42,7 @@ export interface TranscriptionResult {
 
 export interface TranscriptionTask {
   id: string;
-  filePath: string;
+  filePath?: string;
   fileName: string;
   fileSize: number;
   status: TaskStatus;

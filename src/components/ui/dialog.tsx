@@ -18,7 +18,7 @@ const dialogVariants = cva(
 );
 
 const dialogContentVariants = cva(
-  "relative bg-background border rounded-lg shadow-lg w-full max-w-lg max-h-[85vh] overflow-y-auto p-6",
+  "relative z-50 bg-background border rounded-lg shadow-lg w-full max-w-lg max-h-[85vh] overflow-y-auto p-6",
   {
     variants: {
       size: {
@@ -59,7 +59,7 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
         {...props}
       >
         <div 
-          className="absolute inset-0 bg-black/50" 
+          className="absolute inset-0 z-0 bg-black/50" 
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               onOpenChange(false);

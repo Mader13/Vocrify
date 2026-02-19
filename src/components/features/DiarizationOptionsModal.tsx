@@ -281,12 +281,22 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
 
         {/* Footer */}
         <DialogFooter className="px-7 py-4 border-t border-border/40 bg-muted/20 flex items-center justify-between">
-          <label className="flex items-center gap-2.5 cursor-pointer group hover:opacity-80 transition-opacity">
+          <label className="flex items-center gap-3 cursor-pointer group">
+            <div className={cn(
+              "w-5 h-5 rounded border flex items-center justify-center transition-all duration-200",
+              rememberChoice
+                ? "bg-primary border-primary"
+                : "bg-background border-border/60 group-hover:border-border"
+            )}>
+              {rememberChoice && (
+                <Check className="w-3.5 h-3.5 text-primary-foreground" strokeWidth={3} />
+              )}
+            </div>
             <input
               type="checkbox"
               checked={rememberChoice}
               onChange={(e) => setRememberChoice(e.target.checked)}
-              className="w-4 h-4 rounded border-border text-primary focus:ring-2 focus:ring-primary/20 focus:ring-offset-0 transition-all cursor-pointer"
+              className="sr-only"
             />
             <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
               Remember choice

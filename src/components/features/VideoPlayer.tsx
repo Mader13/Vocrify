@@ -198,15 +198,21 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   useImperativeHandle(forwardedRef, () => internalVideoRef.current!);
 
   // Convert file path to Tauri asset URL for security
-  // Use audioPath if task is archived and has audioPath, otherwise use original file path
+  // Use audioPath if task is archived and has audioPath (delete_video mode)
+  // Use filePath if task is archived with keep_all mode
+  // Otherwise use original file path
   const mediaPath = React.useMemo(() => {
-    // If task is archived and has audioPath (from archive), use that
+    // If task is archived with keep_all mode, use archived filePath
+    if (task.archived && task.archiveMode === "keep_all" && task.filePath) {
+      return task.filePath;
+    }
+    // If task is archived with delete_video mode, use audioPath
     if (task.archived && task.audioPath) {
       return task.audioPath;
     }
     // Otherwise use the original file path
     return task.filePath || "";
-  }, [task.filePath, task.audioPath, task.archived]);
+  }, [task.filePath, task.audioPath, task.archived, task.archiveMode]);
 
   const assetUrl = React.useMemo(() => {
     if (!mediaPath) return "";
@@ -215,11 +221,15 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     return url;
   }, [mediaPath]);
 
-  // Check if video element should be shown (only for original video, not archived/audio-only)
+  // Check if video element should be shown
+  // Show video if: not archived OR archived with keep_all mode (has video file)
   const showVideoElement = React.useMemo(() => {
-    // Show video only if task is NOT archived and has original video file
-    return !task.archived && !!task.filePath && task.filePath.length > 0;
-  }, [task.filePath, task.archived]);
+    if (!task.archived) {
+      return !!task.filePath && task.filePath.length > 0;
+    }
+    // For archived tasks, show video only if keep_all mode (filePath contains archived video)
+    return task.archiveMode === "keep_all" && !!task.filePath && task.filePath.length > 0;
+  }, [task.filePath, task.archived, task.archiveMode]);
 
   /**
    * Generate regions based on color mode and transcription segments
@@ -442,7 +452,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
     // Check for cached peaks - use mediaPath for archived tasks
     const peaksPath = task.archived && task.audioPath ? task.audioPath : task.filePath;
-    const cachedPeaks = getCachedWaveformPeaks(peaksPath || "");
+    const cachedPeaks = getCachedWaveformPeaks(peaksPath ?? "");
     console.log("[VideoPlayer DEBUG] Cached peaks:", !!cachedPeaks, "peaksPath:", peaksPath);
 
     const themeColors = getThemeColors();
@@ -569,7 +579,9 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
                           requestAnimationFrame(processBatch);
                         } else {
                           // All peaks calculated, cache them using peaksPath
-                          cacheWaveformPeaks(peaksPath, new Float32Array(peaks));
+                          if (peaksPath) {
+                            cacheWaveformPeaks(peaksPath, new Float32Array(peaks));
+                          }
                         }
                       };
 
@@ -596,8 +608,16 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
             generateRegions();
           }, 50);
 
-          // Sync waveform cursor with current video position once waveform is ready
+          // Set duration for audio-only tasks (when no video element)
           const videoEl = internalVideoRef.current;
+          if (!videoEl) {
+            const wsDuration = ws.getDuration();
+            if (Number.isFinite(wsDuration) && wsDuration > 0) {
+              setDuration(wsDuration);
+            }
+          }
+
+          // Sync waveform cursor with current video position once waveform is ready
           if (videoEl) {
             const duration = videoEl.duration;
             if (Number.isFinite(duration) && duration > 0) {
@@ -736,9 +756,28 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     }
   }, [colorMode, task.result, isWaveformReady, generateRegions]);
 
-  // Sync playback state with video element
+  // Sync playback state with video element or WaveSurfer (for audio-only)
   useEffect(() => {
+    const ws = wavesurferRef.current;
     const videoElement = internalVideoRef.current;
+
+    // For audio-only tasks, use WaveSurfer events
+    if (!videoElement && ws) {
+      const handlePlay = () => setIsPlaying(true);
+      const handlePause = () => setIsPlaying(false);
+
+      ws.on("play", handlePlay);
+      ws.on("pause", handlePause);
+
+      // Set initial state
+      setIsPlaying(ws.isPlaying());
+
+      return () => {
+        ws.un("play", handlePlay);
+        ws.un("pause", handlePause);
+      };
+    }
+
     if (!videoElement) return;
 
     const handlePlay = () => setIsPlaying(true);
@@ -774,13 +813,34 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   // Playback control handlers
   const handleTogglePlayPause = useCallback(() => {
     const videoElement = internalVideoRef.current;
+    const ws = wavesurferRef.current;
+
+    // For audio-only (archived) tasks, use WaveSurfer directly
+    if (!videoElement && ws) {
+      const wasPlaying = ws.isPlaying();
+      if (wasPlaying) {
+        ws.pause();
+      } else {
+        ws.play();
+      }
+      setIsPlaying(!wasPlaying);
+      return;
+    }
+
     if (!videoElement) return;
 
-    if (videoElement.paused) {
-      videoElement.play();
+    // Update state immediately based on current paused state
+    // paused = true means NOT playing, so isPlaying = !paused
+    const wasPaused = videoElement.paused;
+    if (wasPaused) {
+      videoElement.play().catch((err) => {
+        console.error("[VideoPlayer] Play failed:", err);
+        setIsPlaying(false);
+      });
     } else {
       videoElement.pause();
     }
+    setIsPlaying(!wasPaused);
   }, []);
 
   const handleVolumeChange = useCallback((newVolume: number) => {

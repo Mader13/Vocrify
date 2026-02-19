@@ -16,6 +16,7 @@ import type {
   DiarizationProvider,
   EnginePreference,
   ArchiveMode,
+  ArchiveCompression,
   ArchiveSettings,
 } from "@/types";
 import { logger } from "@/lib/logger";
@@ -74,7 +75,7 @@ interface TasksState {
   deleteTask: (taskId: string) => void;
   removeTask: (taskId: string) => void;
   archiveTask: (taskId: string) => void;
-  archiveTaskWithMode: (taskId: string, mode: ArchiveMode) => Promise<void>;
+  archiveTaskWithMode: (taskId: string, mode: ArchiveMode, compression?: ArchiveCompression) => Promise<void>;
   unarchiveTask: (taskId: string) => void;
   setHuggingFaceToken: (token: string | null) => void;
   updateSettings: (settings: Partial<AppSettings>) => void;
@@ -115,6 +116,7 @@ const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" |
   },
   archiveSettings: {
     defaultMode: "delete_video",
+    compression: "none",
     rememberChoice: true,
     showFileSizes: true,
   },
@@ -388,7 +390,36 @@ export const useTasks = create<TasksState>()(
         set(() => ({ settings: initialState.settings }));
       },
 
-      removeTask: (taskId) => {
+      removeTask: async (taskId) => {
+        const task = get().tasks.find((t) => t.id === taskId);
+
+        // Determine which file to delete based on archive mode
+        // For "keep_all": filePath points to the archived copy
+        // For "delete_video": audioPath is the archived MP3
+        // For "text_only": no file to delete
+        let fileToDelete: string | undefined;
+        
+        if (task?.archiveMode === "keep_all") {
+          fileToDelete = task.filePath;
+        } else if (task?.archiveMode === "delete_video") {
+          fileToDelete = task.audioPath;
+        }
+        // text_only: no file to delete
+
+        if (fileToDelete) {
+          try {
+            const { deleteFile } = await import("@/services/tauri");
+            const result = await deleteFile(fileToDelete);
+            if (result.success) {
+              logger.transcriptionInfo("Archived file deleted", { taskId, filePath: fileToDelete });
+            } else {
+              logger.warn("Failed to delete archived file", { taskId, filePath: fileToDelete, error: result.error });
+            }
+          } catch (error) {
+            logger.error("Error deleting archived file", { taskId, error: String(error) });
+          }
+        }
+
         logger.info("Task removed", { taskId });
         set((state) => ({ tasks: state.tasks.filter((t) => t.id !== taskId) }));
       },
@@ -421,14 +452,14 @@ export const useTasks = create<TasksState>()(
         set((state) => ({ archiveSettings: { ...state.archiveSettings, ...newSettings } }));
       },
 
-      archiveTaskWithMode: async (taskId, mode) => {
+      archiveTaskWithMode: async (taskId, mode, compressionOverride) => {
         const task = get().tasks.find((t) => t.id === taskId);
         if (!task) {
           logger.error("Archive task not found", { taskId });
           return;
         }
 
-        const { convertToMp3, getArchiveDir, getFileSize } = await import("@/services/tauri");
+        const { convertToMp3, getArchiveDir, getFileSize, copyFile, compressMedia } = await import("@/services/tauri");
 
         logger.transcriptionInfo("Task archiving with mode", { taskId, mode, fileName: task.fileName });
 
@@ -456,22 +487,32 @@ export const useTasks = create<TasksState>()(
 
           switch (mode) {
             case "keep_all": {
-              // Copy original file to archive (keep as is - video stays video)
+              // Copy/compress original file to archive for independence from original file location
               if (task.filePath && archiveDirResult.success) {
-                const ext = task.filePath.split(".").pop()?.toLowerCase();
+                const ext = task.filePath.split(".").pop()?.toLowerCase() || "";
+                const compression = compressionOverride ?? get().archiveSettings.compression;
+                const destPath = `${archiveDirResult.data}/${task.id}.${ext}`;
                 
-                // For video files, we keep as-is (original file stays accessible)
-                // For audio files, we can reference them directly
-                const isAudioFile = ext && ["mp3", "wav", "m4a", "flac", "ogg"].includes(ext);
-                if (isAudioFile) {
-                  audioPath = task.filePath;
-                  logger.transcriptionInfo("keep_all: using existing audio file", { taskId, audioPath });
+                if (compression === "none") {
+                  const copyResult = await copyFile(task.filePath, destPath);
+                  if (copyResult.success && copyResult.data) {
+                    audioPath = copyResult.data;
+                    logger.transcriptionInfo("keep_all: copied original file to archive", { taskId, audioPath, ext, compression });
+                    archiveSize = await readArchiveSize(copyResult.data);
+                  } else {
+                    logger.warn("keep_all: copy failed", { taskId, error: copyResult.error });
+                  }
                 } else {
-                  // For video - original file stays at original path
-                  logger.transcriptionInfo("keep_all: keeping original video file", { taskId, originalPath: task.filePath });
+                  const compressResult = await compressMedia(task.filePath, destPath, compression);
+                  if (compressResult.success && compressResult.data) {
+                    audioPath = compressResult.data;
+                    logger.transcriptionInfo("keep_all: compressed file to archive", { taskId, audioPath, ext, compression });
+                    archiveSize = await readArchiveSize(compressResult.data);
+                  } else {
+                    logger.warn("keep_all: compression failed", { taskId, error: compressResult.error });
+                  }
                 }
               }
-              archiveSize = task.fileSize;
               break;
             }
 
@@ -522,7 +563,11 @@ export const useTasks = create<TasksState>()(
                     archived: true,
                     archivedAt: new Date(),
                     archiveMode: mode,
-                    audioPath: audioPath,
+                    // For "keep_all": filePath points to archived copy, audioPath is undefined
+                    // For "delete_video": filePath is undefined, audioPath is the archived MP3
+                    // For "text_only": filePath is undefined, audioPath is undefined (no media stored)
+                    filePath: mode === "keep_all" && audioPath ? audioPath : undefined,
+                    audioPath: mode === "delete_video" ? audioPath : undefined,
                     archiveSize: archiveSize ?? task.fileSize,
                   }
                 : t

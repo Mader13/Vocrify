@@ -202,8 +202,12 @@ def validate_models(cache_dir: str, logger, model_name: Optional[str] = None) ->
     emit_validation_results(results, cache_dir)
 
 
-def delete_model(model_name: str, cache_dir: str, logger, model_pool) -> None:
-    """Delete a model from cache and emit protocol events."""
+def delete_model(model_name: str, cache_dir: str, logger, model_pool) -> bool:
+    """Delete a model from cache and emit protocol events.
+
+    Returns:
+        True on success, False on failure.
+    """
     logger.info(f"Deleting model: {model_name} from cache: {cache_dir}")
 
     try:
@@ -222,9 +226,11 @@ def delete_model(model_name: str, cache_dir: str, logger, model_pool) -> None:
             {"deleted_paths": result["deleted_paths"]},
         )
         emit_delete_complete(model_name)
+        return True
     else:
         logger.warning(
             f"Failed to delete model: {model_name}",
             {"message": result["message"]},
         )
         emit_error(result["message"])
+        return False

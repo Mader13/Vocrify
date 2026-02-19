@@ -4,11 +4,12 @@
 
 Tauri desktop application for video/audio transcription using AI. Built with React 19, TypeScript, Tailwind CSS 4, and Zustand for state management.
 
-**Core Architecture (Phase 3+):**
+**Core Architecture (Phase 3 - transcribe-rs):**
 
-- **Primary Engine:** Rust transcribe-rs (Whisper GGML, Parakeet ONNX, Moonshine ONNX, SenseVoice ONNX)
-- **Secondary Engine:** Python (PyAnnote/Sherpa-ONNX) for speaker diarization only
+- **Primary Engine:** Rust transcribe-rs (Whisper GGML, Parakeet ONNX, Moonshine ONNX)
+- **Secondary Engine:** Python backend for diarization only (PyAnnote, Sherpa-ONNX)
 - **GPU Acceleration:** CUDA (NVIDIA), MPS (Apple Silicon), Vulkan (AMD/Intel), CPU (fallback)
+- **Multi-agent System:** Claude Flow v3.1 with 99+ specialized agents
 
 ## Commands
 
@@ -16,29 +17,25 @@ Tauri desktop application for video/audio transcription using AI. Built with Rea
 
 ### Development
 
-**Standard workflow - Rust backend handles transcription:**
+**Standard workflow:**
 
 ```bash
 # Terminal 1 - Start Python backend (for diarization only)
 bun run dev:ai
 
-# Terminal 2 - Start web dev server (Vite)
-bun run dev
-
-# OR for Tauri (native window)
-# Terminal 2 - Start Tauri dev mode
+# Terminal 2 - Start Tauri dev mode (includes Vite)
 bun run tauri:dev
 ```
 
-**Note:** The Rust backend (Tauri) now handles all transcription. Python backend is only started when diarization is needed.
+**Note:** The Rust backend (transcribe-rs) handles all transcription. Python backend is only used for speaker diarization when enabled.
 
 ### Build
 
 ```bash
-# Build for production
+# Build for production (web)
 bun run build
 
-# Build Tauri application
+# Build Tauri application (includes ai-engine in resources)
 bun run tauri:build
 
 # Build with Rust transcribe-rs enabled (requires Vulkan SDK on Windows/Linux)
@@ -86,7 +83,8 @@ bun add -d <package>
 
 ### Python Dependencies (AI Engine - Diarization Only)
 
-The Python backend (located in `ai-engine/`) is **only** used for speaker diarization.
+The Python backend (`ai-engine/`) is **only** used for speaker diarization.
+
 **PyTorch Installation by Platform:**
 
 ```bash
@@ -112,7 +110,7 @@ pip install -r requirements.txt
 
 **Device Detection:**
 The app automatically detects available devices at startup. Device priority: CUDA > MPS > Vulkan > CPU.
-See Rust `engine_router.rs` for implementation details.
+See Rust `engine_router.rs` and `performance_config.rs` for implementation details.
 
 ## Code Style
 
@@ -148,10 +146,50 @@ We follow these principles to maintain clean, maintainable, and scalable code:
 - **Services**: One service per domain (transcription, models, storage)
 - **State**: Separate client state from server state in stores
 
+### Self-Documenting Code
+
+We prioritize **self-documenting code** over excessive comments. The code itself should be the primary source of truth.
+
+**Principles:**
+
+| Principle | Description | Example |
+|-----------|-------------|---------|
+| **Meaningful Names** | Use descriptive names for variables, functions, and types | `transcribeWithFallback()` instead of `process()` |
+| **Type-Driven Design** | Leverage TypeScript's type system to encode intent | `type TaskStatus = "queued" \| "processing" \| "completed"` |
+| **Small Functions** | Each function does one thing, named after its purpose | `validateFilePath()`, `loadAudioFile()` |
+| **Consistent Patterns** | Follow established patterns for predictable code | Service layer pattern, CVA variants |
+| **Explicit Over Clever** | Prefer readable code over clever one-liners | Named intermediate variables over nested chains |
+
+**Comments Guidelines:**
+
+- **DO comment** *why* something is done (non-obvious decisions, workarounds)
+- **DO comment** complex algorithms or business logic that isn't self-evident
+- **DON'T comment** *what* the code does (the code itself should show this)
+- **DON'T add** redundant JSDoc that just restates the function signature
+
+**Example:**
+
+```tsx
+// ❌ Redundant comment - code is self-explanatory
+// Start transcription for the given task
+async function startTranscription(taskId: string, filePath: string) {
+  await invoke("start_transcription", { taskId, filePath });
+}
+
+// ✅ Good comment - explains WHY this workaround exists
+// Rust audio decode fails on .mp4/.mkv containers (audrey crate limitation).
+// Route to Python backend which uses FFmpeg for broader format support.
+function shouldBypassRustForFile(filePath: string): boolean {
+  const extension = getFileExtension(filePath);
+  return RUST_UNSUPPORTED_CONTAINER_EXTENSIONS.has(extension);
+}
+```
+
 ### Do
 
 - Use TypeScript strict mode for all types
-- Follow JSDoc comments for functions (see `src/lib/utils.ts`)
+- Write self-documenting code with meaningful names (functions, variables, types)
+- Add JSDoc comments only for non-obvious *why* decisions (see `src/lib/utils.ts`)
 - Use Zustand for state management with persist middleware (see `src/stores/index.ts`)
 - Use `cn()` utility from `@/lib/utils` for class name merging
 - Use class-variance-authority (CVA) for component variants (see `src/components/ui/button.tsx`)
@@ -174,21 +212,23 @@ We follow these principles to maintain clean, maintainable, and scalable code:
 | Module                     | Location                                 | Purpose                                                   |
 | -------------------------- | ---------------------------------------- | --------------------------------------------------------- |
 | **Core**                   |                                          |                                                           |
-| `lib.rs`                   | `src-tauri/src/lib.rs`                   | Main entry point, module organization                     |
+| `lib.rs`                   | `src-tauri/src/lib.rs`                   | Main entry point, module organization, Tauri commands     |
 | `main.rs`                  | `src-tauri/src/main.rs`                  | Tauri app configuration, command routing                  |
-| **Transcription**          |                                          |                                                           |
-| `transcription_manager.rs` | `src-tauri/src/transcription_manager.rs` | Phase 3: Main transcription interface using transcribe-rs |
-| `whisper_engine.rs`        | `src-tauri/src/whisper_engine.rs`        | Legacy whisper-rs module (kept for compatibility)         |
-| `engine_router.rs`         | `src-tauri/src/engine_router.rs`         | Routes requests between Rust and Python engines           |
+| **Transcription (Phase 3)**|                                          |                                                           |
+| `transcription_manager.rs` | `src-tauri/src/transcription_manager.rs` | **Primary**: transcribe-rs unified interface              |
+| `whisper_engine.rs`        | `src-tauri/src/whisper_engine.rs`        | Legacy whisper-rs module (deprecated, kept for reference) |
+| `engine_router.rs`         | `src-tauri/src/engine_router.rs`         | Engine routing logic (Auto/RustOnly/PythonOnly)           |
 | **Model Management**       |                                          |                                                           |
-| `onnx_model_downloader.rs` | `src-tauri/src/onnx_model_downloader.rs` | Downloads ONNX models (Parakeet, SenseVoice)              |
-| `download_manager.rs`      | `src-tauri/src/download_manager.rs`      | Coordinates concurrent model downloads                    |
+| `onnx_model_downloader.rs` | `src-tauri/src/onnx_model_downloader.rs` | Downloads ONNX models (Parakeet, Moonshine)               |
+| `model_downloader.rs`      | `src-tauri/src/model_downloader.rs`      | Unified model download manager                            |
 | **Diarization**            |                                          |                                                           |
 | `sherpa_diarizer.rs`       | `src-tauri/src/sherpa_diarizer.rs`       | Sherpa-ONNX speaker diarization (lightweight)             |
 | `python_bridge.rs`         | `src-tauri/src/python_bridge.rs`         | Bridges to Python for PyAnnote diarization                |
 | **Infrastructure**         |                                          |                                                           |
 | `ffmpeg_manager.rs`        | `src-tauri/src/ffmpeg_manager.rs`        | FFmpeg download and management                            |
 | `storage.rs`               | `src-tauri/src/storage.rs`               | Persistent storage (Tauri Store)                          |
+| `performance_config.rs`    | `src-tauri/src/performance_config.rs`    | Feature flags, device detection, concurrency tuning       |
+| `python_installer.rs`      | `src-tauri/src/python_installer.rs`      | Portable Python installation for runtime                  |
 
 ### Frontend (React + TypeScript)
 
@@ -204,41 +244,47 @@ We follow these principles to maintain clean, maintainable, and scalable code:
 
 **Key Frontend Services:**
 
-- `tauri.ts` - Complete Tauri API abstraction (transcription, models, devices, dialogs)
-- `transcription.ts` - Transcription service with engine routing (Rust → Python fallback)
+- `tauri/index.ts` - Complete Tauri API abstraction (transcription, models, devices, dialogs)
+- `transcription.ts` - Transcription service with engine routing (Rust transcribe-rs → Python fallback)
 - `storage.ts` - Local storage management
 - `notifications.ts` - Notification system with desktop support
 - `store.ts` - Zustand store with task and settings management
 
-### Engine Routing (Phase 3+)
+### Engine Routing (Phase 3 - transcribe-rs)
 
 ```
 User Request (transcribe)
     ↓
-Engine Router (engine_router.rs)
+transcribeWithFallback() in src/services/transcription.ts
     ↓
-┌─────────────────────────────────────┐
-│ Engine Preference Check              │
-│ - auto: Rust → Python fallback     │
-│ - rust: Rust only                  │
-│ - python: Python only              │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│ Model Type Check                                         │
+│ - whisper/moonshine/parakeet → Rust transcribe-rs      │
+│ - other → Python engine                                 │
+└─────────────────────────────────────────────────────────┘
     ↓
-┌─────────────────────────────────────┐
-│ Rust transcribe-rs (Primary)        │
-│ - Whisper GGML                    │
-│ - Parakeet ONNX                   │
-│ - Moonshine ONNX                   │
-│ - SenseVoice ONNX                  │
-│ GPU: CUDA/MPS/Vulkan              │
-└─────────────────────────────────────┘
-    ↓ (fallback if Rust unavailable)
-┌─────────────────────────────────────┐
-│ Python Engine (Diarization Only)    │
-│ - PyAnnote (high accuracy)         │
-│ - Sherpa-ONNX (lightweight)       │
-│ GPU: CUDA/MPS                    │
-└─────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│ Engine Preference Check                                  │
+│ - auto: Rust → Python fallback                          │
+│ - rust: Rust only (error if unavailable)                │
+│ - python: Python only                                   │
+└─────────────────────────────────────────────────────────┘
+    ↓
+┌─────────────────────────────────────────────────────────┐
+│ Rust transcribe-rs (Primary Engine)                      │
+│ Engines:                                                 │
+│ - Whisper (GGML models)                                 │
+│ - Parakeet (ONNX models)                                │
+│ - Moonshine (ONNX models)                               │
+│ GPU: CUDA (NVIDIA) / MPS (Apple) / Vulkan (AMD/Intel)  │
+└─────────────────────────────────────────────────────────┘
+    ↓ (if diarization enabled)
+┌─────────────────────────────────────────────────────────┐
+│ Python Backend (Diarization Only)                        │
+│ - PyAnnote (high accuracy, requires HF token)           │
+│ - Sherpa-ONNX (lightweight, CPU-friendly)               │
+│ GPU: CUDA / MPS                                         │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ### Key Patterns
@@ -298,7 +344,7 @@ export const useStore = create<State>()(
 **Service Layer Pattern (Tauri API):**
 
 ```tsx
-// src/services/tauri.ts
+// src/services/tauri/transcription-commands.ts
 export async function startTranscription(
   taskId: string,
   filePath: string,
@@ -367,7 +413,7 @@ const engine: EnginePreference = "auto";
 - **Models:** `AIModel`, `ModelConfig`, `AvailableModel`, `LocalModel`, `ModelType`
 - **Devices:** `DeviceType`, `DeviceInfo`, `DevicesResponse`
 - **Diarization:** `DiarizationProvider`, `SpeakerCount`
-- **Settings:** `AppSettings`, `EnginePreference`
+- **Settings:** `AppSettings`, `EnginePreference`, `ArchiveMode`
 - **Notifications:** `Notification`, `NotificationSettings`, `NotificationVariant`
 
 ## Error Handling
@@ -396,7 +442,7 @@ const engine: EnginePreference = "auto";
 ### Ask first
 
 - New bun dependencies
-- Changes to Tauri API integration (`src/services/tauri.ts`)
+- Changes to Tauri API integration (`src/services/tauri/`)
 - Rust backend module changes
 - Database/schema changes (if added)
 - Environment variable changes
@@ -409,12 +455,12 @@ const engine: EnginePreference = "auto";
 - Bypass `cn()` utility for class merging
 - Mix different state management solutions
 - Use inline styles instead of Tailwind classes
-- Call Tauri APIs directly in components (use `src/services/tauri.ts`)
+- Call Tauri APIs directly in components (use `src/services/tauri/`)
 
 ## Anti-Patterns (THIS PROJECT)
 
 1. **Inline styles** - Use Tailwind utility classes via `cn()` utility
-2. **Direct Tauri imports in components** - Use `src/services/tauri.ts` abstraction
+2. **Direct Tauri imports in components** - Use `src/services/tauri/` abstraction
 3. **any types** - Use proper TypeScript types from `@/types`
 4. **Class variance without CVA** - Use class-variance-authority for component variants
 5. **Non-persisted sensitive data in Zustand** - Use persist middleware
@@ -431,11 +477,11 @@ const engine: EnginePreference = "auto";
 - **Tauri**: v2.10.2 with `@tauri-apps/api` v2
 - **Node**: >=18 required
 
-**Rust Dependencies (Phase 3+):**
+**Rust Dependencies (Phase 3):**
 
 - `tauri` ^2.10.2
-- `transcribe-rs` ^0.2.2 (optional, requires Vulkan SDK on Windows/Linux)
-- `ort` ^2.0.0-rc.10 (ONNX Runtime)
+- `transcribe-rs` =0.2.2 (optional, requires Vulkan SDK on Windows/Linux)
+- `ort` =2.0.0-rc.10 (ONNX Runtime)
 - `audrey` ^0.3 (audio processing)
 - `tokio` ^1.49.0 (async runtime)
 
@@ -469,17 +515,67 @@ bun run test:coverage
 - Place tests alongside source files: `*.test.tsx` or `*.spec.tsx`
 - Example: `src/stores/index.test.ts`, `src/components/ui/button.test.tsx`
 
+## Multi-Agent System (Claude Flow v3.1)
+
+This project uses **Claude Flow v3.1** for multi-agent AI orchestration:
+
+- **99+ specialized agents** (coder, tester, security, devops, etc.)
+- **Swarm coordination** with hierarchical-mesh topology
+- **Self-learning** with ReasoningBank and HNSW indexing
+- **Memory Database** (AgentDB) with vector search
+- **Hooks system** for automatic workflow optimization
+- **MCP integration** for extended tooling
+
+**Status:**
+```
+✅ Global installation: v3.1.0-alpha.14
+✅ Daemon: Running
+✅ Memory: Initialized
+✅ Swarm: Initialized (hierarchical-mesh, max 15 agents)
+✅ Skills: 29 skills available
+✅ Agents: 99 agents available
+```
+
+**Usage:**
+```bash
+# Check system status
+claude-flow status
+
+# Start daemon
+claude-flow daemon start
+
+# Search memory
+claude-flow memory search -q "API patterns"
+```
+
+See `.claude-flow/` directory for configuration and `docs/CLAUDE_FLOW_GUIDE.md` for detailed usage.
+
 ## A Note To The Agent
 
 We are building this together. When you learn something non-obvious, add it here so future changes go faster.
 
+### Documentation Synchronization Rule
+
+**CRITICAL:** When making architectural changes, you MUST update BOTH documentation files:
+
+1. **`agents.md`** (this file) - Architecture, gotchas, and agent-specific guidance
+2. **`.claude/claude.md`** (if exists) - Claude Code context and project overview
+
+**Synchronization Checklist:**
+- [ ] Update architecture diagrams in both files
+- [ ] Update module descriptions in both files
+- [ ] Update gotchas and known issues in both files
+- [ ] Verify commands and paths are accurate in both files
+
+**Why:** `agents.md` is used by all AI assistants, while `claude.md` provides context for Claude Code specifically. Keeping them synchronized ensures consistent understanding across all AI tools.
+
 ### Device Support (Multi-Platform Acceleration)
 
 - App supports 4 device types: CUDA (NVIDIA GPU), MPS (Apple Silicon), Vulkan (AMD/Intel), CPU (fallback)
-- Device detection: Rust `engine_router.rs` detects available devices
+- Device detection: Rust `performance_config.rs` and `engine_router.rs` detect available devices
 - Device priority: CUDA > MPS > Vulkan > CPU
-- TypeScript types: `DeviceType`, `DeviceInfo`, `DevicesResponse` in `src/types/index.ts`
-- API: `getAvailableDevices()` in `src/services/tauri.ts`
+- TypeScript types: `DeviceType`, `DeviceInfo`, `DevicesResponse` in `src/types/devices.ts`
+- API: `getAvailableDevices()` in `src/services/tauri/device-commands.ts`
 
 ### PyTorch Installation (for Diarization)
 
@@ -494,7 +590,8 @@ We are building this together. When you learn something non-obvious, add it here
 
 **Primary Engine:** Rust transcribe-rs handles all transcription
 
-- Supported engines: Whisper (GGML), Parakeet (ONNX), Moonshine (ONNX), SenseVoice (ONNX)
+- Supported engines: Whisper (GGML), Parakeet (ONNX), Moonshine (ONNX)
+- **Note:** SenseVoice is NOT yet supported in transcribe-rs 0.2.2
 - GPU acceleration: CUDA (NVIDIA), MPS (macOS Metal), Vulkan (AMD/Intel)
 - **Rust module:** `src-tauri/src/transcription_manager.rs`
 
@@ -539,22 +636,23 @@ cargo build --features rust-transcribe
 
 - Whisper GGML: `https://huggingface.co/ggerganov/whisper.cpp`
 - Parakeet V3 int8: `https://blob.handy.computer/parakeet-v3-int8.tar.gz`
-- SenseVoice int8: `https://blob.handy.computer/sense-voice-int8.tar.gz`
+- Moonshine: `https://huggingface.co/coqui/moonshine`
 
 **Updated Files (Phase 3):**
 
 - `src-tauri/Cargo.toml` - Added transcribe-rs dependency
 - `src/services/transcription.ts` - Engine routing with fallback
-- `src/types/index.ts` - Updated engine preference types
+- `src/types/transcription.ts` - Updated transcription types
 - `ai-engine/requirements.txt` - Removed faster-whisper, kept diarization dependencies
 
 ### Runtime Routing Gotchas (Updated Feb 2026)
 
-- UI task start path MUST use `src/services/transcription.ts::transcribeWithFallback()` (not direct `startTranscription`) or Rust transcribe-rs path is bypassed entirely.
+- **CRITICAL:** UI task start path MUST use `src/services/transcription.ts::transcribeWithFallback()` (not direct `startTranscription`) or Rust transcribe-rs path is bypassed entirely.
 - `transcribe_rust` requires model preloading via `load_model_rust` before transcription; otherwise it fails with engine/model-not-initialized and falls back.
 - `TranscriptionManager` must be initialized with Python bridge paths (`python_exe`, `ai-engine/main.py`, `models_dir` as cache). If created with `None` bridge args, diarization silently degrades (transcription succeeds, speaker turns/segments are omitted).
 - Python backend CLI accepts only `--device cpu|cuda|mps|vulkan`; when UI exposes `auto`, map to Python-compatible device on fallback.
-- `python_bridge.rs` invokes Python diarization via compatibility flags (`--diarize-only`, `--audio`, `--provider`, `--num-speakers`, `--cache-dir`). If `ai-engine/main.py` no longer supports this contract, diarization fails at process startup and Rust currently returns transcription without speaker fields.
+- `python_bridge.rs` invokes Python diarization via compatibility flags (`--diarize-only`, `--provider`, `--audio`, `--num-speakers`, `--cache-dir`). If `ai-engine/main.py` no longer supports this contract, diarization fails at process startup and Rust currently returns transcription without speaker fields.
+- Embeddable/isolated Python can start without script directory on `sys.path` (notably in `src-tauri/target/debug/resources`), causing `ModuleNotFoundError: commands`. Keep the `main.py` startup guard that inserts `Path(__file__).resolve().parent` into `sys.path` before importing `commands`.
 - Rust audio decode currently fails on several media containers (`.mp4`, `.m4a`, `.mov`, `.mkv`, `.avi`, `.webm`) with "no supported format was detected"; in `auto` mode `transcribeWithFallback()` should bypass Rust for these extensions and call Python directly.
 - **Critical:** Never call `invoke("transcribe_rust")` directly from components. Always use `transcribeWithFallback()`.
 - Setup wizard checks (`check_python_environment`, `check_ffmpeg_status`, `check_models_status`) should not rely on `main.py --command` for embeddable Python: `main.py` imports `commands` package, which can fail before checks run if optional deps are missing. Prefer direct calls to `environment_checks.py` helpers.
@@ -600,6 +698,26 @@ cargo build --features rust-transcribe
 - Categories: `download`, `transcription`, `error`, `info`
 - Configurable: position, duration, sound, categories
 
-### See Full Migration Plan
+### FFmpeg Container Limitation
 
-- `my-plans/transcription-system-v3.md` - Phase 3: Migration to transcribe-rs
+Rust audio decoding via `audrey` crate only supports WAV/FLAC formats. For other containers:
+
+- **Unsupported:** `.mp4`, `.m4a`, `.mov`, `.mkv`, `.avi`, `.webm`
+- **Workaround:** `transcribeWithFallback()` automatically detects these extensions and routes to Python backend
+- **Future:** Consider adding `symphonia` or FFmpeg WASM for broader format support in Rust
+
+### Model Concurrency Tuning
+
+The app dynamically adjusts concurrent transcription tasks based on device and model size:
+
+| Device | Model | Max Concurrent Tasks |
+|--------|-------|---------------------|
+| CPU | tiny/base | 4 |
+| CPU | small/0.6b | 3 |
+| CPU | medium/large | 2 |
+| GPU (CUDA/MPS) | tiny/base | 8 |
+| GPU (CUDA/MPS) | small | 6 |
+| GPU (CUDA/MPS) | medium | 4 |
+| GPU (CUDA/MPS) | large | 2 |
+
+See `get_max_concurrent_tasks()` in `src-tauri/src/lib.rs` for implementation.

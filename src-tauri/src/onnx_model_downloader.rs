@@ -32,14 +32,15 @@ pub enum OnnxModelType {
 
 impl OnnxModelType {
     /// Get download URL for the model
-    pub fn download_url(&self) -> &'static str {
+    pub fn download_url(&self) -> Result<&'static str, WhisperError> {
         match self {
-            OnnxModelType::Parakeet => "https://blob.handy.computer/parakeet-v3-int8.tar.gz",
-            OnnxModelType::SenseVoice => "https://blob.handy.computer/sense-voice-int8.tar.gz",
-            OnnxModelType::Moonshine => {
-                // Moonshine is downloaded from HuggingFace per-variant
-                panic!("Moonshine requires specific variant URL")
-            }
+            OnnxModelType::Parakeet => Ok("https://blob.handy.computer/parakeet-v3-int8.tar.gz"),
+            OnnxModelType::SenseVoice => Ok("https://blob.handy.computer/sense-voice-int8.tar.gz"),
+            OnnxModelType::Moonshine => Err(WhisperError::ModelLoad(
+                "Moonshine model requires a per-variant HuggingFace URL; \
+                 use download_from_huggingface instead of download_onnx_model"
+                    .to_string(),
+            )),
         }
     }
 
@@ -72,7 +73,7 @@ pub async fn download_onnx_model(
     output_dir: &Path,
     progress_callback: Option<ModelProgressCallback>,
 ) -> Result<PathBuf, WhisperError> {
-    let url = model_type.download_url();
+    let url = model_type.download_url()?;
     let expected_dir = model_type.expected_dir_name();
 
     eprintln!("[INFO] Downloading ONNX model from: {}", url);

@@ -56,6 +56,9 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     [task?.result?.speakerSegments]
   );
 
+  // Check if speaker diarization is available
+  const hasSpeakerData = sanitizedSpeakerSegments.length > 0 || (task.result?.speakerTurns && task.result.speakerTurns.length > 0);
+
   const displaySegments = displayMode === "segments"
     ? sanitizedSegments
     : (sanitizedSpeakerSegments.length > 0 ? sanitizedSpeakerSegments : sanitizedSegments);
@@ -190,13 +193,15 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                   setColorMode(newMode);
                   setDisplayMode(newMode);
                 }}
+                disabled={!hasSpeakerData}
                 className={cn(
                   "h-8 px-3 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
+                  !hasSpeakerData && "opacity-50 cursor-not-allowed",
                   colorMode === "segments"
                     ? "bg-muted/60 text-muted-foreground hover:bg-muted/80"
                     : "bg-primary/10 text-primary hover:bg-primary/20"
                 )}
-                title="Toggle waveform color mode"
+                title={!hasSpeakerData ? "No speaker data available" : "Toggle waveform color mode"}
               >
                 <span>{colorMode === "segments" ? "Segments View" : "Speakers View"}</span>
               </button>

@@ -11,6 +11,6 @@ export { getFilesMetadata, selectMediaFiles, selectOutputDirectory, selectExport
 export { onProgressUpdate, onTranscriptionComplete, onTranscriptionError, onSegmentUpdate, onModelDownloadProgress, onModelDownloadComplete, onModelDownloadError, onModelDownloadRetrying, onModelDownloadStage, onModelDownloadStageComplete, onBackendLogs, onDevicesDetected, onFFmpegProgress, onFFmpegStatus } from "./tauri/events";
 export { checkPythonEnvironment, checkFFmpegStatus, checkModelsStatus, getEnvironmentStatus, checkRuntimeReadiness, isSetupComplete, isSetupCompleteFast, markSetupComplete, resetSetup, installPythonFull, checkPythonInstalled, getPythonInstallProgress, cancelPythonInstall, onPythonInstallProgress } from "./tauri/setup-commands";
 export type { InstallProgress } from "./tauri/setup-commands";
-export { getFileSize, deleteFile, convertToMp3, getArchiveDir, openArchiveFolder } from "./tauri/archive-commands";
+export { getFileSize, deleteFile, copyFile, compressMedia, convertToMp3, getArchiveDir, openArchiveFolder } from "./tauri/archive-commands";
 export { getPerformanceConfig, updatePerformanceConfig } from "./tauri/performance-commands";
 export type { PerformanceConfig } from "@/types/settings";

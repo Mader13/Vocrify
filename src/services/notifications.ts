@@ -213,6 +213,10 @@ export class NotificationEmitter {
    * Clean up all event listeners
    */
   destroy(): void {
+    if (!this.initialized && this.unlistenFns.length === 0) {
+      logger.warn("NotificationEmitter already destroyed or not initialized");
+      return;
+    }
     logger.info("Destroying NotificationEmitter");
     this.unlistenFns.forEach((unlisten) => unlisten());
     this.unlistenFns = [];
@@ -233,6 +237,7 @@ export class NotificationEmitter {
   // ------------------------------------------------------------------------
 
   private onModelDownloadComplete(modelName: string): void {
+    logger.modelInfo("onModelDownloadComplete called", { modelName });
     const uiStore = useUINotificationStore.getState();
     const centerStore = useNotificationCenterStore.getState();
 
@@ -280,25 +285,9 @@ export class NotificationEmitter {
     submodelName: string;
     percent: number;
   }): void {
-    // Only notify on stage completion (100% progress for that stage)
-    if (stage.percent === 100) {
-      const uiStore = useUINotificationStore.getState();
-      const centerStore = useNotificationCenterStore.getState();
-
-      uiStore.show({
-        type: "info",
-        title: "Model Download Progress",
-        message: `Download stage "${stage.stage}" completed for model "${stage.modelName}".`,
-        duration: 3000,
-      });
-
-      centerStore.addNotification({
-        type: "info",
-        priority: "low",
-        title: "Model Download Progress",
-        message: `Download stage "${stage.stage}" completed for model "${stage.modelName}".`,
-      });
-    }
+    // Don't show notifications for individual stage progress - only notify on complete download
+    // This avoids showing multiple notifications for multi-stage downloads (e.g., segmentation + embedding)
+    logger.modelDebug("Download stage progress", { modelName: stage.modelName, stage: stage.stage, percent: stage.percent });
   }
 
   // ------------------------------------------------------------------------

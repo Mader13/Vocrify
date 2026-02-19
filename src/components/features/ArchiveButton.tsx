@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Archive, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTasks } from "@/stores";
-import type { TranscriptionTask, ArchiveMode } from "@/types";
+import type { TranscriptionTask, ArchiveMode, ArchiveCompression } from "@/types";
 import { ArchiveModal } from "./ArchiveModal";
 import { notifySuccess } from "@/services/notifications";
 
@@ -20,10 +21,10 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
 
   const isArchived = task.archived;
 
-  const handleArchive = async (mode: ArchiveMode) => {
+  const handleArchive = async (mode: ArchiveMode, compression?: ArchiveCompression) => {
     setIsArchiving(true);
     try {
-      await archiveTaskWithMode(task.id, mode);
+      await archiveTaskWithMode(task.id, mode, compression);
 
       notifySuccess(
         "Archived",
@@ -72,15 +73,19 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         )}
         {!iconOnly && <span>Archive</span>}
       </button>
-      <ArchiveModal
-        task={task}
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onArchive={handleArchive}
-        isLoading={isArchiving}
-        defaultMode={archiveSettings.defaultMode}
-        showFileSizes={archiveSettings.showFileSizes}
-      />
+      {createPortal(
+        <ArchiveModal
+          task={task}
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          onArchive={handleArchive}
+          isLoading={isArchiving}
+          defaultMode={archiveSettings.defaultMode}
+          defaultCompression={archiveSettings.compression}
+          showFileSizes={archiveSettings.showFileSizes}
+        />,
+        document.body
+      )}
     </>
   );
 }

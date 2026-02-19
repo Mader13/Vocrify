@@ -34,15 +34,16 @@ pub mod engine_router;
 pub mod transcription_manager;
 pub mod python_installer;
 pub mod performance_config;
+pub mod model_downloader;
 
 // Re-export FFmpeg types for frontend
-pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgress, get_ffmpeg_status, get_ffmpeg_path, download_ffmpeg};
+pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgressEvent, get_ffmpeg_status, get_ffmpeg_path, download_ffmpeg};
 
 // Re-export Python installer types for frontend
 pub use python_installer::{InstallProgress, check_python_installed, install_python_full, get_python_install_progress, cancel_python_install};
 
 // Re-export Whisper types for frontend
-pub use whisper_engine::{WhisperEngine, DeviceType as WhisperDeviceType, TranscriptionSegment as WhisperSegment, download_ggml_model as download_ggml_model_impl};
+pub use whisper_engine::{WhisperEngine, DeviceType as WhisperDeviceType, TranscriptionSegment as WhisperSegment};
 
 // Re-export TranscriptionManager types for frontend (Phase 3: transcribe-rs)
 #[allow(unused_imports)]
@@ -332,6 +333,12 @@ pub struct TaskManager {
     running_tasks: HashMap<String, RunningTask>,
     queued_tasks: Vec<QueuedTask>,
     downloading_models: HashMap<String, tokio::task::JoinHandle<()>>,
+    /// Maps model name → child process handle for Python downloads (PyAnnote only).
+    /// Used by `cancel_model_download` to SIGKILL the subprocess.
+    downloading_processes: HashMap<String, Arc<Mutex<Option<tokio::process::Child>>>>,
+    /// Cancellation tokens for Rust-native downloads.
+    /// The download loop polls this and exits when set to `true`.
+    cancel_tokens: HashMap<String, Arc<AtomicBool>>,
     // CRITICAL-5 FIX: Use Mutex for proper synchronization instead of boolean flag
     queue_processor_guard: Arc<tokio::sync::Mutex<()>>,
 }
@@ -1111,7 +1118,7 @@ async fn spawn_transcription(
     }
 
     eprintln!("[DEBUG] Spawning child process...");
-    let child = match cmd.spawn() {
+    let mut child = match cmd.spawn() {
         Ok(c) => {
             eprintln!("[INFO] Child process spawned successfully with PID: {:?}", c.id());
             c
@@ -1123,24 +1130,23 @@ async fn spawn_transcription(
         }
     };
 
-    // HIGH-1: Store child process for cancellation
+    // Take stdout/stderr BEFORE storing in Arc (while we still own the child)
+    let stdout = child.stdout.take().expect("Failed to capture stdout");
+    let stderr = child.stderr.take().expect("Failed to capture stderr");
+    
+    // HIGH-1: Store child process for cancellation - KEEP IT THERE!
+    // This allows cancel_transcription to kill the process via child_process Arc.
     {
         let mut guard = child_process.lock().await;
         *guard = Some(child);
     }
     
-    // Take stdout/stderr before moving child into scopeguard
-    let mut guard = child_process.lock().await;
-    let mut child = guard.take().expect("Child process was just stored");
-    drop(guard);
+    // Note: We no longer use scopeguard here because the process stays in child_process.
+    // Cleanup happens via:
+    // 1. cancel_transcription kills the process
+    // 2. Normal completion: we take the process back for wait() at the end
+    // 3. Panic: the process will be orphaned but will be cleaned up by OS when parent exits
     
-    let stdout = child.stdout.take().expect("Failed to capture stdout");
-    let stderr = child.stderr.take().expect("Failed to capture stderr");
-    
-    // CRITICAL FIX: Use scopeguard to ensure process cleanup on panic/unwind
-    let child_guard = scopeguard::guard(child, |mut child: tokio::process::Child| {
-        let _ = child.start_kill();
-    });
     let mut reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
     
@@ -1252,35 +1258,48 @@ async fn spawn_transcription(
         );
     }
 
-    // CRITICAL FIX: Release the guard after successful read and wait for process
-    // This prevents the cleanup function from running since we reached wait() successfully
-    let mut child = scopeguard::ScopeGuard::into_inner(child_guard);
-    let status = child.wait().await?;
+    // Take the child process back from child_process Arc for wait()
+    // If it's None, the process was killed by cancel_transcription
+    let child_opt = {
+        let mut guard = child_process.lock().await;
+        guard.take()
+    };
+    
+    match child_opt {
+        Some(mut child) => {
+            let status = child.wait().await?;
 
-    if !status.success() {
-        let exit_code = status.code().unwrap_or(-1);
+            if !status.success() {
+                let exit_code = status.code().unwrap_or(-1);
 
-        // Windows native extensions (e.g. torch/onnx runtime) may crash during Python shutdown
-        // AFTER final result is already emitted. In that case, prefer completed result over late exit code.
-        if received_result && !segments.is_empty() {
-            eprintln!(
-                "[WARN] Python exited with code {} after final result was received. Treating task as successful.",
-                exit_code
-            );
-        } else {
-        let error_msg = format!(
-            "Python process exited with code: {}. \
-            Ensure Python 3.8-3.12 is installed with all required dependencies. \
-            Check the application logs for detailed error information.",
-            exit_code
-        );
+                // Windows native extensions (e.g. torch/onnx runtime) may crash during Python shutdown
+                // AFTER final result is already emitted. In that case, prefer completed result over late exit code.
+                if received_result && !segments.is_empty() {
+                    eprintln!(
+                        "[WARN] Python exited with code {} after final result was received. Treating task as successful.",
+                        exit_code
+                    );
+                } else {
+                let error_msg = format!(
+                    "Python process exited with code: {}. \
+                    Ensure Python 3.8-3.12 is installed with all required dependencies. \
+                    Check the application logs for detailed error information.",
+                    exit_code
+                );
 
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "taskId": task_id,
-            "error": error_msg,
-        }));
+                let _ = app.emit("transcription-error", serde_json::json!({
+                    "taskId": task_id,
+                    "error": error_msg,
+                }));
 
-        return Err(AppError::PythonError(error_msg));
+                return Err(AppError::PythonError(error_msg));
+                }
+            }
+        }
+        None => {
+            // Process was killed by cancel_transcription
+            eprintln!("[INFO] Transcription was cancelled (process killed)");
+            return Err(AppError::PythonError("Transcription was cancelled".to_string()));
         }
     }
 
@@ -2101,25 +2120,40 @@ async fn open_archive_folder_command(app: AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Spawn a model download process
+/// Spawn a model download — Rust-native for Whisper/Parakeet/SherpaONNX, Python for PyAnnote.
+///
+/// # Routing
+///
+/// | condition                               | engine   |
+/// |-----------------------------------------|----------|
+/// | `diarization` + `pyannote-diarization`  | Python   |
+/// | everything else                         | Rust     |
+///
+/// PyAnnote needs `huggingface_hub` + gated-repo access and a specific
+/// local cache layout the `pyannote` library reads at runtime.
+/// All other models are downloaded via `reqwest` in `model_downloader.rs`.
 async fn spawn_model_download(
     app: AppHandle,
     model_name: String,
     model_type: String,
     cache_dir: PathBuf,
     token_file: Option<PathBuf>,
+    child_arc: Arc<Mutex<Option<tokio::process::Child>>>,
+    cancel: Arc<AtomicBool>,
 ) -> Result<(), AppError> {
+    // ── Rust-native path ───────────────────────────────────────────────────
+    let is_pyannote = model_type == "diarization" && model_name == "pyannote-diarization";
+    if !is_pyannote {
+        let downloader = model_downloader::ModelDownloader::new(app, cache_dir);
+        return downloader
+            .download(&model_name, &model_type, cancel)
+            .await
+            .map_err(Into::into);
+    }
+
+    // ── PyAnnote: Python subprocess ────────────────────────────────────────
     let download_completed = Arc::new(AtomicBool::new(false));
 
-    // Transform model name: strip "whisper-" prefix for Python backend
-    // Frontend sends "whisper-small", Python expects "small"
-    let python_model_name = if model_type == "whisper" && model_name.starts_with("whisper-") {
-        model_name.strip_prefix("whisper-").unwrap_or(&model_name).to_string()
-    } else {
-        model_name.clone()
-    };
-
-    // All model downloads are handled by Python engine
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
     let engine_dir = engine_path
@@ -2129,10 +2163,9 @@ async fn spawn_model_download(
 
     ensure_python_download_dependencies(&python_exe).await?;
     
-    eprintln!("[DEBUG] Final paths - Python: {:?}, Engine: {:?}", python_exe, engine_path);
+    eprintln!("[DEBUG] PyAnnote download - Python: {:?}, Engine: {:?}", python_exe, engine_path);
 
-    // Run main.py through a bootstrap script that injects engine dir into sys.path.
-    // Embeddable Python runs in isolated mode and may not include script dir by default.
+    // Bootstrap script injects engine dir into sys.path for embeddable Python.
     let bootstrap = r#"
 import runpy
 import sys
@@ -2149,19 +2182,19 @@ runpy.run_path(str(engine), run_name="__main__")
         .arg(bootstrap)
         .arg(engine_path.to_string_lossy().to_string())
         .arg("--download-model")
-        .arg(&python_model_name)
+        .arg(&model_name)
         .arg("--cache-dir")
         .arg(cache_dir.to_string_lossy().to_string())
         .arg("--model-type")
         .arg(&model_type)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());  // Capture stderr to debug Python errors
+        .stderr(Stdio::piped());
     
     // Debug: log the command being executed
     eprintln!("[DEBUG] Spawning download command: {:?}", cmd);
     eprintln!("[DEBUG] Python exe: {:?}", python_exe);
     eprintln!("[DEBUG] Engine path: {:?}", engine_path);
-    eprintln!("[DEBUG] Model: {} (transformed: {}), Type: {}, Cache: {:?}", model_name, python_model_name, model_type, cache_dir);
+    eprintln!("[DEBUG] Model: {}, Type: {}, Cache: {:?}", model_name, model_type, cache_dir);
     
     // HIGH-7: Use token file instead of env var for security
     if let Some(token_path) = token_file {
@@ -2211,9 +2244,22 @@ runpy.run_path(str(engine), run_name="__main__")
     let stdout = child.stdout.take().expect("Failed to capture stdout");
     let stderr = child.stderr.take().expect("Failed to capture stderr");
     
-    // CRITICAL FIX: Use scopeguard to ensure process cleanup on panic/unwind
-    let child_guard = scopeguard::guard(child, |mut child: tokio::process::Child| {
-        let _ = child.start_kill();
+    // Store child in shared Arc so cancel_model_download can kill it.
+    {
+        let mut guard = child_arc.lock().await;
+        *guard = Some(child);
+    }
+
+    // CRITICAL FIX: Use scopeguard to ensure process cleanup on panic/unwind.
+    // Pull the child back out of the Arc — we own it for the rest of this function.
+    let raw_child = {
+        let mut guard = child_arc.lock().await;
+        guard.take()
+    };
+    let child_guard = scopeguard::guard(raw_child, |opt_child| {
+        if let Some(mut c) = opt_child {
+            let _ = c.start_kill();
+        }
     });
     let mut reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
@@ -2390,28 +2436,35 @@ runpy.run_path(str(engine), run_name="__main__")
         }
     }
     
-    // CRITICAL FIX: Release the guard after successful read and wait for process
-    // This prevents the cleanup function from running since we reached wait() successfully
-    let mut child = scopeguard::ScopeGuard::into_inner(child_guard);
-    let status = child.wait().await?;
-    if !status.success() {
-        let exit_code = status.code().unwrap_or(-1);
-        if download_completed.load(Ordering::Relaxed) {
-            eprintln!(
-                "[WARN] Python exited with code {} after DownloadComplete for {}. Treating as success.",
-                exit_code,
-                model_name
-            );
+    // Release the guard. child_guard wraps Option<Child> since cancel may have taken it.
+    match scopeguard::ScopeGuard::into_inner(child_guard) {
+        None => {
+            // Process was taken by cancel_model_download — nothing to wait on.
+            eprintln!("[INFO] PyAnnote download for '{}' was cancelled (no child to wait)", model_name);
             return Ok(());
         }
-        let error_msg = format!(
-            "Model download failed with exit code: {}. \
-            Check your internet connection and HuggingFace token. \
-            See application logs for detailed error output.",
-            exit_code
-        );
-        println!("[DEBUG] {}", error_msg);
-        return Err(AppError::PythonError(error_msg));
+        Some(mut child) => {
+            let status = child.wait().await.map_err(AppError::IoError)?;
+            if !status.success() {
+                let exit_code = status.code().unwrap_or(-1);
+                if download_completed.load(Ordering::Relaxed) {
+                    eprintln!(
+                        "[WARN] Python exited with code {} after DownloadComplete for {}. Treating as success.",
+                        exit_code,
+                        model_name
+                    );
+                    return Ok(());
+                }
+                let error_msg = format!(
+                    "Model download failed with exit code: {}. \
+                    Check your internet connection and HuggingFace token. \
+                    See application logs for detailed error output.",
+                    exit_code
+                );
+                println!("[DEBUG] {}", error_msg);
+                return Err(AppError::PythonError(error_msg));
+            }
+        }
     }
 
     Ok(())
@@ -2426,57 +2479,70 @@ async fn download_model(
     model_type: String,
     hugging_face_token: Option<String>,
 ) -> Result<String, AppError> {
-    let manager = task_manager.lock().await;
-
-    if manager.downloading_models.len() >= MAX_CONCURRENT_DOWNLOADS {
-        return Err(AppError::ModelError("Maximum concurrent downloads reached".to_string()));
+    // ── Pre-flight check ──────────────────────────────────────────────────────
+    {
+        let manager = task_manager.lock().await;
+        if manager.downloading_models.len() >= MAX_CONCURRENT_DOWNLOADS {
+            return Err(AppError::ModelError("Maximum concurrent downloads reached".to_string()));
+        }
+        if manager.downloading_models.contains_key(&model_name) {
+            return Err(AppError::ModelError(format!("Download already in progress for: {}", model_name)));
+        }
     }
 
     let models_dir = get_models_dir(&app)?;
 
-    // HIGH-7: Create secure temp file for token instead of using env var
+    // Create secure temp file for HuggingFace token (PyAnnote path only)
     let token_file = if let Some(token) = hugging_face_token {
         Some(pass_token_securely(&token)?)
     } else {
         None
     };
 
-    // Clone task_manager Arc for use in spawned task (must release mutex first)
+    // Shared state for cancel support
+    let child_arc: Arc<Mutex<Option<tokio::process::Child>>> = Arc::new(Mutex::new(None));
+    let cancel_token: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
+    // Clones for spawned task
     let task_manager_clone = (*task_manager).clone();
     let app_clone = app.clone();
     let model_name_clone = model_name.clone();
     let model_type_clone = model_type.clone();
     let cache_dir = models_dir.clone();
     let token_file_clone = token_file.clone();
-    let token_file_for_cleanup = token_file.clone();
-
-    // Release the mutex before spawning to allow the spawned task to acquire it later
-    drop(manager);
+    let token_file_for_cleanup = token_file;
+    let child_arc_for_task = child_arc.clone();
+    let cancel_token_for_task = cancel_token.clone();
 
     let handle = tokio::spawn(async move {
         let app_for_events = app_clone.clone();
+
         let download_result = spawn_model_download(
             app_clone,
             model_name_clone.clone(),
             model_type_clone,
             cache_dir,
             token_file_clone,
+            child_arc_for_task,
+            cancel_token_for_task,
         ).await;
 
-        // Clean up token file after download (regardless of result)
+        // Cleanup token file regardless of outcome
         if let Some(path) = token_file_for_cleanup {
             let _ = std::fs::remove_file(path);
         }
 
-        // Always remove from active map when task finishes (success or error)
+        // Remove from all tracking maps
         {
             let mut manager = task_manager_clone.lock().await;
             manager.downloading_models.remove(&model_name_clone);
+            manager.downloading_processes.remove(&model_name_clone);
+            manager.cancel_tokens.remove(&model_name_clone);
         }
 
         match download_result {
             Ok(_) => {
-                eprintln!("[INFO] Removed {} from downloading_models (successful)", model_name_clone);
+                eprintln!("[INFO] Model download complete: {}", model_name_clone);
             }
             Err(e) => {
                 let error_text = e.to_string();
@@ -2489,65 +2555,13 @@ async fn download_model(
         }
     });
 
-    // Re-acquire mutex to insert the handle
-    let mut manager = task_manager.lock().await;
-    manager.downloading_models.insert(model_name.clone(), handle);
-
-    Ok(model_name)
-}
-
-/// Download a GGML model directly (for Rust whisper.cpp engine)
-#[tauri::command]
-async fn download_ggml_model(
-    app: AppHandle,
-    task_manager: State<'_, TaskManagerState>,
-    model_name: String,
-) -> Result<String, AppError> {
-    let manager = task_manager.lock().await;
-
-    if manager.downloading_models.len() >= MAX_CONCURRENT_DOWNLOADS {
-        return Err(AppError::ModelError("Maximum concurrent downloads reached".to_string()));
+    // Register in all tracking maps
+    {
+        let mut manager = task_manager.lock().await;
+        manager.downloading_models.insert(model_name.clone(), handle);
+        manager.downloading_processes.insert(model_name.clone(), child_arc);
+        manager.cancel_tokens.insert(model_name.clone(), cancel_token);
     }
-
-    let models_dir = get_models_dir(&app)?;
-
-    // Clone for spawned task
-    let task_manager_clone = (*task_manager).clone();
-    let app_clone = app.clone();
-    let model_name_clone = model_name.clone();
-    let models_dir_clone = models_dir.clone();
-
-    // Release mutex before spawning
-    drop(manager);
-
-    let handle = tokio::spawn(async move {
-        let result = download_ggml_model_impl(&model_name_clone, &models_dir_clone as &Path).await;
-
-        // Remove from downloading_models
-        let mut manager = task_manager_clone.lock().await;
-        manager.downloading_models.remove(&model_name_clone);
-
-        match result {
-            Ok(path) => {
-                eprintln!("[INFO] GGML model downloaded to: {:?}", path);
-                let _ = app_clone.emit("model-download-complete", serde_json::json!({
-                    "modelName": model_name_clone,
-                    "path": path.to_str().unwrap_or_default().to_string(),
-                }));
-            }
-            Err(e) => {
-                eprintln!("[ERROR] Failed to download GGML model: {}", e);
-                let _ = app_clone.emit("model-download-error", serde_json::json!({
-                    "modelName": model_name_clone,
-                    "error": e.to_string(),
-                }));
-            }
-        }
-    });
-
-    // Re-acquire mutex to insert handle
-    let mut manager = task_manager.lock().await;
-    manager.downloading_models.insert(model_name.clone(), handle);
 
     Ok(model_name)
 }
@@ -2566,16 +2580,11 @@ async fn delete_model(
     model_name: String,
 ) -> Result<(), AppError> {
     let models_dir = get_models_dir(&app)?;
-    let model_path = models_dir.join(&model_name);
-
-    if !model_path.exists() {
-        return Err(AppError::ModelError(format!("Model not found: {}", model_name)));
-    }
 
     eprintln!("Deleting model: {}", model_name);
 
-    // CRITICAL: Use Python to delete the model so it can clear the model pool first
-    // This prevents "os error 32" (file in use) errors on Windows
+    // Use Python to delete the model so it can clear the model pool first.
+    // This prevents "os error 32" (file in use) errors on Windows.
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
 
@@ -2594,19 +2603,27 @@ async fn delete_model(
         .map_err(|e| AppError::PythonError(format!("Failed to delete model via Python: {}", e)))?;
 
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
     if !output.status.success() {
-        eprintln!("[ERROR] Python delete_model failed: {}", stderr);
-        return Err(AppError::PythonError(format!(
-            "Failed to delete model: {}",
-            stderr
-        )));
+        eprintln!("[ERROR] Python delete_model failed:\nstdout: {}\nstderr: {}", stdout, stderr);
+
+        // Try to extract structured error from stdout JSON lines
+        let error_detail = stdout
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("error"))
+            .filter_map(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+            .last();
+
+        let error_msg = error_detail.unwrap_or_else(|| stderr.clone());
+        return Err(AppError::PythonError(format!("Failed to delete model: {}", error_msg)));
     }
 
     eprintln!("Model deleted successfully via Python: {}", model_name);
 
     // Give filesystem time to sync before returning success
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
     // Clear selected model from store if the deleted model matches
     // Store format can be: "transcription:model_name" or "diarization:model_name" or legacy "model_name"
@@ -2648,14 +2665,37 @@ async fn cancel_model_download(
     task_manager: State<'_, TaskManagerState>,
     model_name: String,
 ) -> Result<(), AppError> {
-    let mut manager = task_manager.lock().await;
-    
-    if let Some(handle) = manager.downloading_models.remove(&model_name) {
-        handle.abort();
-        return Ok(());
+    let (handle, child_arc, cancel_token) = {
+        let mut manager = task_manager.lock().await;
+        let handle = manager.downloading_models.remove(&model_name);
+        let child_arc = manager.downloading_processes.remove(&model_name);
+        let cancel_token = manager.cancel_tokens.remove(&model_name);
+        (handle, child_arc, cancel_token)
+    };
+
+    if handle.is_none() && child_arc.is_none() && cancel_token.is_none() {
+        return Err(AppError::ModelError(format!("Model download not found: {}", model_name)));
     }
-    
-    Err(AppError::ModelError(format!("Model download not found: {}", model_name)))
+
+    // 1. Signal cancel token so Rust downloader stops gracefully
+    if let Some(token) = cancel_token {
+        token.store(true, Ordering::Relaxed);
+    }
+
+    // 2. Kill Python child process if running (PyAnnote path)
+    if let Some(arc) = child_arc {
+        let mut guard = arc.lock().await;
+        if let Some(child) = guard.as_mut() {
+            let _ = child.start_kill();
+        }
+    }
+
+    // 3. Abort the Tokio task handle last
+    if let Some(h) = handle {
+        h.abort();
+    }
+
+    Ok(())
 }
 
 /// Get disk usage
@@ -4065,7 +4105,6 @@ pub fn run() {
             open_models_folder_command,
             open_archive_folder_command,
             download_model,
-            download_ggml_model,
             cancel_model_download,
             get_local_models,
             delete_model,

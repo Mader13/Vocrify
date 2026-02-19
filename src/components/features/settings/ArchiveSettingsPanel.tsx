@@ -1,6 +1,7 @@
 import { Settings } from "lucide-react";
 import { useTasks } from "@/stores";
-import type { ArchiveMode } from "@/types";
+import type { ArchiveMode, ArchiveCompression } from "@/types";
+import { ARCHIVE_COMPRESSION_LABELS } from "@/types";
 import { cn } from "@/lib/utils";
 
 export function ArchiveSettingsPanel() {
@@ -11,9 +12,20 @@ export function ArchiveSettingsPanel() {
     setArchiveSettings({ defaultMode: mode });
   };
 
+  const handleCompressionChange = (compression: ArchiveCompression) => {
+    setArchiveSettings({ compression });
+  };
+
   const handleToggle = (key: "rememberChoice" | "showFileSizes") => {
     setArchiveSettings({ [key]: !archiveSettings[key] });
   };
+
+  const compressionOptions: { value: ArchiveCompression; label: string; desc: string }[] = [
+    { value: "none", label: "No compression", desc: "Maximum quality, larger file size" },
+    { value: "light", label: "Light", desc: "High quality, ~30% smaller" },
+    { value: "medium", label: "Medium", desc: "Balanced quality and size" },
+    { value: "heavy", label: "Heavy", desc: "Smallest size, lower quality" },
+  ];
 
   return (
     <div className="space-y-6">
@@ -60,6 +72,39 @@ export function ArchiveSettingsPanel() {
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="space-y-3">
+        <label className="text-sm font-medium">Video Compression (for Keep All mode):</label>
+        <div className="grid grid-cols-2 gap-2">
+          {compressionOptions.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => handleCompressionChange(option.value)}
+              className={cn(
+                "flex items-center gap-2 p-2 rounded-lg border text-left transition-all text-sm",
+                archiveSettings.compression === option.value
+                  ? "border-primary bg-primary/5"
+                  : "border-border hover:border-muted-foreground/30"
+              )}
+            >
+              <div
+                className={cn(
+                  "h-3 w-3 rounded-full border-2 shrink-0",
+                  archiveSettings.compression === option.value
+                    ? "border-primary bg-primary"
+                    : "border-muted-foreground"
+                )}
+              />
+              <div>
+                <div className="font-medium">{option.label}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {ARCHIVE_COMPRESSION_LABELS[archiveSettings.compression]}
+        </p>
       </div>
 
       <div className="space-y-4">

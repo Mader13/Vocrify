@@ -79,12 +79,23 @@ pub fn create_hidden_std_command(program: &(impl AsRef<std::path::Path> + ?Sized
 }
 
 fn parse_python_major_minor(version_text: &str) -> Option<(u32, u32)> {
+    // NOTE: `?` inside a for-loop body exits the whole function, not just the iteration.
+    // Use an inner closure to safely try parsing each token without short-circuiting the loop.
     for token in version_text.split_whitespace() {
         let cleaned = token.trim_matches(|c: char| !c.is_ascii_digit() && c != '.');
-        let mut parts = cleaned.split('.');
-        let major = parts.next()?.parse::<u32>().ok()?;
-        let minor = parts.next()?.parse::<u32>().ok()?;
-        return Some((major, minor));
+        let result = (|| -> Option<(u32, u32)> {
+            let mut parts = cleaned.split('.');
+            let major = parts.next()?.parse::<u32>().ok()?;
+            let minor = parts.next()?.parse::<u32>().ok()?;
+            // Reject implausible values (guard against e.g. "3." or malformed tokens)
+            if major == 0 && minor == 0 {
+                return None;
+            }
+            Some((major, minor))
+        })();
+        if result.is_some() {
+            return result;
+        }
     }
 
     None
@@ -264,9 +275,15 @@ impl PythonInstaller {
 
         #[cfg(target_os = "windows")]
         {
+            // Check NVIDIA_NVSMI_PATH env var first (set by some NVIDIA driver installs)
+            if let Ok(nvsmi_path) = std::env::var("NVIDIA_NVSMI_PATH") {
+                candidates.push(PathBuf::from(&nvsmi_path).join("nvidia-smi.exe"));
+                candidates.push(PathBuf::from(nvsmi_path));
+            }
+
             if let Ok(program_files) = std::env::var("ProgramFiles") {
                 candidates.push(
-                    PathBuf::from(program_files)
+                    PathBuf::from(&program_files)
                         .join("NVIDIA Corporation")
                         .join("NVSMI")
                         .join("nvidia-smi.exe"),
@@ -285,10 +302,51 @@ impl PythonInstaller {
             candidates.push(
                 PathBuf::from("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"),
             );
+            // Modern NVIDIA drivers install nvidia-smi.exe directly to System32
             candidates.push(PathBuf::from("C:\\Windows\\System32\\nvidia-smi.exe"));
+            // Some driver versions use SysWOW64
+            candidates.push(PathBuf::from("C:\\Windows\\SysWOW64\\nvidia-smi.exe"));
         }
 
         candidates
+    }
+
+    /// Check for nvcuda.dll — present on any system with NVIDIA CUDA-capable driver
+    #[cfg(target_os = "windows")]
+    fn has_nvcuda_dll() -> bool {
+        let candidates = [
+            "C:\\Windows\\System32\\nvcuda.dll",
+            "C:\\Windows\\SysWOW64\\nvcuda.dll",
+        ];
+        candidates.iter().any(|p| std::path::Path::new(p).exists())
+    }
+
+    /// PowerShell-based GPU detection (works on Windows 11 where wmic is deprecated)
+    #[cfg(target_os = "windows")]
+    async fn has_nvidia_gpu_via_powershell(&self) -> bool {
+        let script = "Get-WmiObject Win32_VideoController | \
+            Select-Object -ExpandProperty Name | \
+            Where-Object { $_ -match 'NVIDIA' }";
+
+        let output = create_hidden_command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .output()
+            .await;
+
+        if let Ok(output) = output {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if !stdout.trim().is_empty() {
+                    eprintln!(
+                        "[PYTHON INSTALLER] NVIDIA GPU detected via PowerShell: {}",
+                        stdout.trim()
+                    );
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     async fn has_nvidia_gpu(&self) -> bool {
@@ -315,6 +373,14 @@ impl PythonInstaller {
                 }
             }
 
+            // nvcuda.dll check — lightweight, no process spawn (Windows only)
+            #[cfg(target_os = "windows")]
+            if Self::has_nvcuda_dll() {
+                eprintln!("[PYTHON INSTALLER] NVIDIA GPU detected via nvcuda.dll presence");
+                return true;
+            }
+
+            // wmic fallback — deprecated in Windows 11 22H2+, try anyway
             if let Ok(output) = create_hidden_command("wmic")
                 .arg("path")
                 .arg("win32_VideoController")
@@ -331,6 +397,12 @@ impl PythonInstaller {
                         return true;
                     }
                 }
+            }
+
+            // PowerShell fallback — always available on Windows 10/11 (Windows only)
+            #[cfg(target_os = "windows")]
+            if self.has_nvidia_gpu_via_powershell().await {
+                return true;
             }
         }
 
@@ -353,23 +425,33 @@ impl PythonInstaller {
         TorchInstallTarget::Cpu
     }
 
-    fn torch_install_args(&self, target: TorchInstallTarget) -> Vec<String> {
+    /// Build pip install args for PyTorch.
+    ///
+    /// `is_upgrade`: when true (replacing CPU→CUDA), adds `--force-reinstall` so pip
+    /// actually replaces the existing wheels. For fresh installs this flag is omitted
+    /// to avoid the overhead of redownloading when nothing is installed yet.
+    ///
+    /// NOTE: for CUDA we only pass `--index-url` (PyTorch WHL index already contains
+    /// torchvision/torchaudio CUDA builds). Adding `--extra-index-url pypi.org/simple`
+    /// is unnecessary and can cause pip to pick CPU wheels from PyPI over CUDA ones.
+    fn torch_install_args(&self, target: TorchInstallTarget, is_upgrade: bool) -> Vec<String> {
         let mut args = vec![
             "install".to_string(),
-            "--upgrade".to_string(),
-            "--force-reinstall".to_string(),
-            "--no-cache-dir".to_string(),
             "--no-warn-script-location".to_string(),
-            "torch".to_string(),
-            "torchvision".to_string(),
-            "torchaudio".to_string(),
         ];
+
+        if is_upgrade {
+            // Force pip to replace existing CPU wheels with CUDA wheels.
+            args.push("--upgrade".to_string());
+            args.push("--force-reinstall".to_string());
+            args.push("--no-cache-dir".to_string());
+        }
+
+        args.extend(["torch".to_string(), "torchvision".to_string(), "torchaudio".to_string()]);
 
         if target == TorchInstallTarget::Cuda {
             args.push("--index-url".to_string());
             args.push("https://download.pytorch.org/whl/cu121".to_string());
-            args.push("--extra-index-url".to_string());
-            args.push("https://pypi.org/simple".to_string());
         }
 
         args
@@ -524,17 +606,16 @@ impl PythonInstaller {
             };
 
             if should_install_or_upgrade_torch(target, torch_installed, torch_has_cuda_build) {
-                if matches!(target, TorchInstallTarget::Cuda)
-                    && torch_installed
-                    && !torch_has_cuda_build
-                {
+                // is_upgrade = torch was already installed but wrong build (CPU→CUDA)
+                let is_upgrade = torch_installed;
+                if is_upgrade {
                     self.emit_progress(
                         InstallStage::InstallingPytorch,
                         64.0,
                         "Detected CPU-only PyTorch on NVIDIA system, upgrading to CUDA build...",
                     );
                 }
-                self.install_pytorch(&python_dir).await?;
+                self.install_pytorch(&python_dir, is_upgrade).await?;
             }
 
             self.install_dependencies(&python_dir).await?;
@@ -543,9 +624,10 @@ impl PythonInstaller {
         }
 
         // Check system Python first
-        if let Ok(Some(_system_python)) = self.check_system_python().await {
-            self.emit_progress(InstallStage::Complete, 100.0, 
-                &format!("Используется системный Python"));
+        if let Ok(Some(system_python)) = self.check_system_python().await {
+            // Still install ai-engine dependencies into the system Python env
+            self.install_dependencies_for(&system_python, &python_dir).await?;
+            self.emit_progress(InstallStage::Complete, 100.0, "Используется системный Python");
             return Ok(());
         }
 
@@ -555,11 +637,11 @@ impl PythonInstaller {
         // Install pip
         self.install_pip(&python_dir).await?;
 
-        // Install PyTorch
-        self.install_pytorch(&python_dir).await?;
+        // Install PyTorch (fresh install — no force-reinstall needed)
+        self.install_pytorch(&python_dir, false).await?;
 
         // Install dependencies
-        self.install_dependencies(&python_dir).await?;
+        self.install_dependencies_for(&self.get_python_exe(), &python_dir).await?;
 
         self.emit_progress(InstallStage::Complete, 100.0, "Установка завершена");
         Ok(())
@@ -725,7 +807,7 @@ impl PythonInstaller {
         Ok(())
     }
 
-    async fn install_pytorch(&self, _python_dir: &PathBuf) -> Result<(), String> {
+    async fn install_pytorch(&self, _python_dir: &PathBuf, is_upgrade: bool) -> Result<(), String> {
         self.emit_progress(InstallStage::InstallingPytorch, 65.0, "Installing PyTorch...");
 
         let python_exe = self.get_python_exe();
@@ -768,7 +850,7 @@ impl PythonInstaller {
         );
         self.emit_progress(InstallStage::InstallingPytorch, 70.0, &target_message);
 
-        let mut args = self.torch_install_args(target);
+        let mut args = self.torch_install_args(target, is_upgrade);
         let mut output = create_hidden_command(&python_exe)
             .arg("-m")
             .arg("pip")
@@ -792,7 +874,7 @@ impl PythonInstaller {
                 "CUDA install failed, falling back to CPU build...",
             );
 
-            args = self.torch_install_args(TorchInstallTarget::Cpu);
+            args = self.torch_install_args(TorchInstallTarget::Cpu, is_upgrade);
             output = create_hidden_command(&python_exe)
                 .arg("-m")
                 .arg("pip")
@@ -838,10 +920,25 @@ impl PythonInstaller {
     }
 
     async fn install_dependencies(&self, python_dir: &PathBuf) -> Result<(), String> {
+        self.install_dependencies_for(&self.get_python_exe(), python_dir).await
+    }
+
+    /// Install ai-engine dependencies using an explicit Python executable.
+    /// Separating the exe from the discovery logic allows us to install into
+    /// system Python environments (where `self.get_python_exe()` points nowhere).
+    async fn install_dependencies_for(
+        &self,
+        python_exe: &Path,
+        python_dir: &PathBuf,
+    ) -> Result<(), String> {
         self.emit_progress(InstallStage::InstallingDependencies, 85.0, "Installing dependencies...");
 
-        let python_exe = self.get_python_exe();
-        if !self.python_has_module("pip").await {
+        if !python_exe.exists() && python_exe.components().count() > 1 {
+            return Err(format!("Python executable not found: {:?}", python_exe));
+        }
+
+        // For embeddable Python, verify pip is present before proceeding
+        if python_exe == self.get_python_exe() && !self.python_has_module("pip").await {
             self.emit_progress(
                 InstallStage::InstallingPip,
                 84.0,
@@ -972,5 +1069,52 @@ mod tests {
         );
 
         assert!(!should_upgrade);
+    }
+
+    // parse_python_major_minor: `?` must NOT exit the loop on non-numeric tokens
+    #[test]
+    fn parse_python_version_from_command_output() {
+        // Typical `python --version` output (Python writes to stdout or stderr)
+        assert_eq!(
+            super::parse_python_major_minor("Python 3.12.10"),
+            Some((3, 12))
+        );
+        assert_eq!(
+            super::parse_python_major_minor("Python 3.10.14"),
+            Some((3, 10))
+        );
+        // Some systems include trailing whitespace or carriage return
+        assert_eq!(
+            super::parse_python_major_minor("Python 3.11.9\r\n"),
+            Some((3, 11))
+        );
+        // Combined stdout+stderr string (both may be empty)
+        assert_eq!(
+            super::parse_python_major_minor("Python 3.12.10 "),
+            Some((3, 12))
+        );
+    }
+
+    #[test]
+    fn parse_python_version_rejects_garbage() {
+        assert_eq!(super::parse_python_major_minor(""), None);
+        assert_eq!(super::parse_python_major_minor("no version here"), None);
+        // "0.0" is explicitly rejected
+        assert_eq!(super::parse_python_major_minor("0.0"), None);
+    }
+
+    #[test]
+    fn supported_system_python_accepts_valid_versions() {
+        assert!(super::is_supported_system_python_version("Python 3.10.14"));
+        assert!(super::is_supported_system_python_version("Python 3.11.9"));
+        assert!(super::is_supported_system_python_version("Python 3.12.10"));
+    }
+
+    #[test]
+    fn supported_system_python_rejects_unsupported_versions() {
+        assert!(!super::is_supported_system_python_version("Python 3.9.18"));
+        assert!(!super::is_supported_system_python_version("Python 3.13.0"));
+        assert!(!super::is_supported_system_python_version("Python 2.7.18"));
+        assert!(!super::is_supported_system_python_version(""));
     }
 }

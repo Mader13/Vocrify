@@ -2,7 +2,16 @@ export type DiarizationProvider = "none" | "pyannote" | "sherpa-onnx";
 
 export type EnginePreference = "auto" | "rust" | "python";
 
+export type ArchiveCompression = "none" | "light" | "medium" | "heavy";
+
 export type ArchiveMode = "keep_all" | "delete_video" | "text_only";
+
+export const ARCHIVE_COMPRESSION_LABELS: Record<ArchiveCompression, string> = {
+  none: "No compression",
+  light: "Light (high quality)",
+  medium: "Medium (balanced)",
+  heavy: "Heavy (small size)",
+};
 
 export interface AppSettings {
   defaultModel: string;
@@ -68,12 +77,14 @@ export interface HuggingFaceToken {
 
 export interface ArchiveSettings {
   defaultMode: ArchiveMode;
+  compression: ArchiveCompression;
   rememberChoice: boolean;
   showFileSizes: boolean;
 }
 
 export const DEFAULT_ARCHIVE_SETTINGS: ArchiveSettings = {
   defaultMode: "delete_video",
+  compression: "none",
   rememberChoice: true,
   showFileSizes: true,
 };

@@ -78,6 +78,9 @@ const getModelSizeMb = (modelName: string): number => {
 /**
  * Setup model download event listeners
  * Returns array of unlisten functions for cleanup
+ *
+ * NOTE: We only listen to progress and stage events here.
+ * Complete/Error notifications are handled by NotificationEmitter to avoid duplicates.
  */
 async function setupDownloadEventListeners(
   updateProgress: (progress: ModelDownloadProgress) => void,
@@ -96,7 +99,7 @@ async function setupDownloadEventListeners(
     })
   );
 
-  // Listen for download completion
+  // Listen for download completion (for state updates only, notifications handled by NotificationEmitter)
   unlisteners.push(
     await onModelDownloadComplete((modelName) => {
       logger.modelInfo("Download complete", { modelName });
@@ -106,7 +109,7 @@ async function setupDownloadEventListeners(
     })
   );
 
-  // Listen for download errors
+  // Listen for download errors (for state updates only, notifications handled by NotificationEmitter)
   unlisteners.push(
     await onModelDownloadError((modelName, error) => {
       logger.modelError("Download error", { modelName, error });
@@ -154,10 +157,6 @@ async function setupDownloadEventListeners(
 
 let listenersInitialized = false;
 let unlisteners: UnlistenFn[] = [];
-const completionProbeTimers: Record<string, ReturnType<typeof setTimeout>> = {};
-const completionProbeAttempts: Record<string, number> = {};
-const MAX_COMPLETION_PROBE_ATTEMPTS = 12;
-const COMPLETION_PROBE_INTERVAL_MS = 1500;
 
 export const useModelsStore = create<ModelsState>()((set, get) => ({
   availableModels: [...AVAILABLE_MODELS],
@@ -229,7 +228,7 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
           progress: 0,
           currentMb: 0,
           totalMb: sizeMb,
-          speedMbS: "0",
+          speedMbS: 0,
           etaS: undefined,
           totalEstimated: false,
           status: "downloading",
@@ -472,105 +471,18 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
             progress,
             currentMb,
             totalMb,
-            speedMbS: String(Math.max(0, progressEvent.speedMbS || 0).toFixed(1)),
+            speedMbS: Math.max(0, progressEvent.speedMbS || 0),
             etaS,
             totalEstimated,
           },
         },
       };
     });
-
-    // Fallback: backend may occasionally miss DownloadComplete and keep sending 100% updates.
-    // If we observe sustained 100% progress, verify installation from backend and finalize UI.
-    const modelName = progressEvent.modelName;
-    const stateAfterUpdate = get();
-    const downloadAfterUpdate = stateAfterUpdate.downloads[modelName];
-    if (
-      downloadAfterUpdate &&
-      downloadAfterUpdate.status === "downloading" &&
-      (downloadAfterUpdate.progress >= 99.9 || progressEvent.percent >= 99.9)
-    ) {
-      if (!completionProbeTimers[modelName]) {
-        completionProbeAttempts[modelName] = 0;
-
-        const runProbe = async () => {
-          try {
-            completionProbeAttempts[modelName] =
-              (completionProbeAttempts[modelName] || 0) + 1;
-
-            const result = await getLocalModels();
-            const isInstalled =
-              !!result.success &&
-              !!result.data?.some((m) => m.name === modelName && m.installed);
-
-            if (isInstalled) {
-              logger.modelInfo("Fallback completion probe finalized download", {
-                modelName,
-                attempts: completionProbeAttempts[modelName],
-              });
-              if (completionProbeTimers[modelName]) {
-                clearTimeout(completionProbeTimers[modelName]);
-                delete completionProbeTimers[modelName];
-              }
-              delete completionProbeAttempts[modelName];
-              get().setDownloadCompleted(modelName);
-              return;
-            }
-
-            if ((completionProbeAttempts[modelName] || 0) >= MAX_COMPLETION_PROBE_ATTEMPTS) {
-              logger.modelWarn("Fallback completion probe reached max attempts", {
-                modelName,
-                attempts: completionProbeAttempts[modelName],
-              });
-              if (completionProbeTimers[modelName]) {
-                clearTimeout(completionProbeTimers[modelName]);
-                delete completionProbeTimers[modelName];
-              }
-              delete completionProbeAttempts[modelName];
-              return;
-            }
-
-            completionProbeTimers[modelName] = setTimeout(
-              runProbe,
-              COMPLETION_PROBE_INTERVAL_MS
-            );
-          } catch (error) {
-            logger.modelWarn("Fallback completion probe failed", {
-              modelName,
-              error: String(error),
-            });
-            if ((completionProbeAttempts[modelName] || 0) < MAX_COMPLETION_PROBE_ATTEMPTS) {
-              completionProbeTimers[modelName] = setTimeout(
-                runProbe,
-                COMPLETION_PROBE_INTERVAL_MS
-              );
-            } else {
-              if (completionProbeTimers[modelName]) {
-                clearTimeout(completionProbeTimers[modelName]);
-                delete completionProbeTimers[modelName];
-              }
-              delete completionProbeAttempts[modelName];
-            }
-          }
-        };
-
-        completionProbeTimers[modelName] = setTimeout(
-          runProbe,
-          COMPLETION_PROBE_INTERVAL_MS
-        );
-      }
-    }
   },
 
   setDownloadCompleted: (modelName: string) => {
     logger.modelInfo("Download completed event received", { modelName });
 
-    if (completionProbeTimers[modelName]) {
-      clearTimeout(completionProbeTimers[modelName]);
-      delete completionProbeTimers[modelName];
-    }
-    delete completionProbeAttempts[modelName];
-    
     set((state) => {
       // Remove download entry - backend will verify installation
       const newDownloads = { ...state.downloads };
@@ -747,23 +659,25 @@ export async function initializeModelsStore() {
   const result = await loadSelectedModel();
   if (result.success && result.data) {
     let modelName: string | null = null;
-    
-    // Parse stored value to determine if it's transcription or diarization model
+    let modelCategory: 'transcription' | 'diarization' = 'transcription';
+
+    // Parse stored value to determine category and model name
     if (result.data.startsWith('transcription:')) {
       modelName = result.data.replace('transcription:', '');
+      modelCategory = 'transcription';
     } else if (result.data.startsWith('diarization:')) {
       modelName = result.data.replace('diarization:', '');
+      modelCategory = 'diarization';
     } else {
-      // Legacy format - assume it's a transcription model
+      // Legacy format — assume transcription model
       modelName = result.data;
+      modelCategory = 'transcription';
     }
-    
+
     // Validate the loaded model name - discard if corrupted
     if (isValidModel(modelName)) {
-      if (modelName!.startsWith('transcription:')) {
-        store.setSelectedTranscriptionModel(modelName!.replace('transcription:', ''));
-      } else if (modelName!.startsWith('diarization:')) {
-        store.setSelectedDiarizationModel(modelName!.replace('diarization:', ''));
+      if (modelCategory === 'diarization') {
+        store.setSelectedDiarizationModel(modelName);
       } else {
         store.setSelectedTranscriptionModel(modelName);
       }
@@ -780,14 +694,6 @@ export async function initializeModelsStore() {
  * Call this when the app is unmounting to prevent memory leaks
  */
 export function cleanupModelsStore() {
-  Object.values(completionProbeTimers).forEach((timerId) => clearTimeout(timerId));
-  for (const key of Object.keys(completionProbeTimers)) {
-    delete completionProbeTimers[key];
-  }
-  for (const key of Object.keys(completionProbeAttempts)) {
-    delete completionProbeAttempts[key];
-  }
-
   unlisteners.forEach(unlisten => unlisten());
   unlisteners = [];
   listenersInitialized = false;

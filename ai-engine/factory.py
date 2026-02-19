@@ -11,15 +11,15 @@ logger = __import__("logging").getLogger(__name__)
 class ModelRegistry:
     """Registry for model factories - OCP compliant."""
 
-    _registry: dict[str, "ModelFactoryABC"] = {}
+    _registry: dict[str, "ModelFactory"] = {}
 
     @classmethod
-    def register(cls, name: str, factory: "ModelFactoryABC"):
+    def register(cls, name: str, factory: "ModelFactory"):
         """Register a model factory."""
         cls._registry[name] = factory
 
     @classmethod
-    def get(cls, name: str) -> Optional["ModelFactoryABC"]:
+    def get(cls, name: str) -> Optional["ModelFactory"]:
         """Get factory by name."""
         return cls._registry.get(name)
 
@@ -29,7 +29,7 @@ class ModelRegistry:
         return list(cls._registry.keys())
 
 
-class ModelFactoryABC:
+class ModelFactory:
     """Abstract base class for model factories."""
 
     @staticmethod
@@ -90,7 +90,7 @@ def _validate_diarization_provider(
     return provider
 
 
-class WhisperFactory(ModelFactoryABC):
+class WhisperFactory(ModelFactory):
     """Factory for Whisper models."""
 
     VALID_SIZES = {"tiny", "base", "small", "medium", "large", "large-v2", "large-v3"}
@@ -116,7 +116,7 @@ class WhisperFactory(ModelFactoryABC):
         )
 
 
-class DistilWhisperFactory(ModelFactoryABC):
+class DistilWhisperFactory(ModelFactory):
     """Factory for Distil-Whisper models."""
 
     VALID_SIZES = {
@@ -154,7 +154,7 @@ class DistilWhisperFactory(ModelFactoryABC):
         )
 
 
-class ParakeetFactory(ModelFactoryABC):
+class ParakeetFactory(ModelFactory):
     """Factory for Parakeet models."""
 
     @staticmethod

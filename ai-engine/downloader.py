@@ -647,7 +647,10 @@ class ImprovedDownloader:
             response = None
             for attempt in range(max_retries):
                 try:
-                    response = requests.head(url, headers=headers, timeout=30)
+                    # allow_redirects=True is critical for GitHub releases:
+                    # without it the HEAD response is the 302 redirect itself
+                    # whose Content-Length is the tiny HTML body, not the file.
+                    response = requests.head(url, headers=headers, timeout=30, allow_redirects=True)
                     response.raise_for_status()
                     break
                 except (
@@ -762,8 +765,11 @@ class ImprovedDownloader:
 
             # Some sources don't provide Content-Length on HEAD,
             # but do provide it on the actual GET response.
-            if total_size <= 0:
-                total_size = int(response.headers.get("content-length", 0) or 0)
+            # Also: if the HEAD was a redirect and returned a small body size,
+            # the actual GET response will have the correct file size — always prefer it.
+            actual_size = int(response.headers.get("content-length", 0) or 0)
+            if actual_size > total_size:
+                total_size = actual_size
 
             # Final fallback for progress tracking when server omits Content-Length.
             if total_size <= 0:

@@ -256,7 +256,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
 
                   <div className="flex items-center justify-between gap-4">
                     <p className="text-xs text-muted-foreground">
-                      {download.speedMbS && download.speedMbS !== "0" ? `${download.speedMbS} MB/s` : "Calculating speed..."}
+                      {download.speedMbS > 0 ? `${download.speedMbS.toFixed(1)} MB/s` : "Calculating speed..."}
                       {formatEta(download.etaS) ? ` • ~${formatEta(download.etaS)} left` : ""}
                     </p>
                     {onDownloadCancel && (

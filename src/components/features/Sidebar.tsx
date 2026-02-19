@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTasks, useUIStore } from "@/stores";
 import { selectMediaFiles } from "@/services/tauri";
+import { useNotificationStore } from "@/services/notifications";
 import { useModelValidation } from "@/hooks";
 
 const MIN_SIDEBAR_WIDTH = 320;
@@ -95,6 +96,11 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
     
   const handleAddFiles = useCallback(async () => {
     if (!validateModelSelection()) {
+      useNotificationStore.getState().addNotification({
+        title: "No Model Selected",
+        message: "Please select and install a model in the Models section first.",
+        type: "warning",
+      });
       return;
     }
 

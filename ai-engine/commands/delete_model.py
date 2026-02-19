@@ -11,5 +11,5 @@ def handle_delete_model(args, logger) -> int:
         emit_error("--cache-dir is required for --delete-model")
         return 1
 
-    delete_model(args.delete_model, args.cache_dir, logger, model_pool)
-    return 0
+    success = delete_model(args.delete_model, args.cache_dir, logger, model_pool)
+    return 0 if success else 1

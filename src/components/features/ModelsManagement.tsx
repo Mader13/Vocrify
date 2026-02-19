@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { openModelsFolder } from "@/services/tauri";
 import { MODEL_NAMES } from "@/types";
+import { logger } from "@/lib/logger";
 
 export function ModelsManagement() {
   const {
@@ -26,13 +27,17 @@ export function ModelsManagement() {
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
+    // Only run on mount - these functions shouldn't change during component lifetime
     const init = async () => {
       setIsLoading(true);
+      logger.modelDebug("ModelsManagement: loading models and disk usage");
       await Promise.all([loadModels(), loadDiskUsage()]);
+      logger.modelDebug("ModelsManagement: load complete");
       setIsLoading(false);
     };
     init();
-  }, [loadModels, loadDiskUsage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatSize = (mb: number | undefined): string => {
     if (mb === undefined || mb === null || isNaN(mb)) {
@@ -163,7 +168,7 @@ export function ModelsManagement() {
                     {formatSize(download.currentMb)} /{" "}
                     {formatSize(download.totalMb)}
                     {download.totalEstimated ? " (estimated)" : ""}
-                    {download.speedMbS && ` - ${download.speedMbS} MB/s`}
+                    {download.speedMbS > 0 && ` - ${download.speedMbS.toFixed(1)} MB/s`}
                     {formatEta(download.etaS) && ` - ~${formatEta(download.etaS)} remaining`}
                   </p>
                 </div>

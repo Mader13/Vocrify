@@ -73,7 +73,7 @@ export interface ModelDownloadState {
   progress: number;
   currentMb: number;
   totalMb: number;
-  speedMbS: string;
+  speedMbS: number;
   etaS?: number;
   totalEstimated?: boolean;
   status: "downloading" | "paused" | "completed" | "error" | "cancelled";
@@ -105,7 +105,7 @@ export const MODEL_NAMES: Record<AIModel, string> = {
   "parakeet-tdt-0.6b-v3": "Parakeet 0.6B (multilingual)",
   "parakeet-tdt-1.1b": "Parakeet 1.1B (English only)",
   "pyannote-diarization": "PyAnnote Diarization",
-  "sherpa-onnx-diarization": "Sherpa-ONNX Diarization",
+  "sherpa-onnx-diarization": "Sherpa-ONNX Diarization (segmentation and embedding)",
 };
 
 export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {

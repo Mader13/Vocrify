@@ -11,7 +11,7 @@ import {
 import { transcribeWithFallback } from "@/services/transcription";
 import { initializeModelsStore, useModelsStore } from "@/stores/modelsStore";
 import { initializeNotifications as initNotificationCenter } from "@/components/ui/notification-center";
-import { initializeNotifications as initNotificationEmitter } from "@/services/notifications";
+import { initializeNotifications as initNotificationEmitter, getNotificationEmitter } from "@/services/notifications";
 import { Button } from "@/components/ui/button";
 import { NotificationProvider } from "@/components/ui/notifications";
 import { cn } from "@/lib/utils";
@@ -82,9 +82,13 @@ function MainApplication() {
     }
   }, [currentView, setSelectedTask]);
 
+  // NOTE: loadModels is intentionally NOT in the dependency array.
+  // It's already called via initializeModelsStore() at startup.
+  // Adding it here can cause infinite loops as the function reference may change.
+  // Models are reloaded when the user visits the Models section via ModelsManagement component.
   useEffect(() => {
     loadModels();
-  }, [loadModels]);
+  }, []);
 
   useEffect(() => {
     initializeModelsStore();
@@ -146,6 +150,14 @@ function MainApplication() {
 
     return () => {
       unsubscribers.forEach((unlisten) => unlisten());
+      // Clean up NotificationEmitter to prevent duplicate event handlers
+      try {
+        const emitter = getNotificationEmitter();
+        logger.info("Cleaning up NotificationEmitter in useEffect");
+        emitter.destroy();
+      } catch (error) {
+        logger.error("Failed to destroy NotificationEmitter", { error });
+      }
     };
   }, [updateTaskProgress, updateTaskStatus, appendTaskSegment, appendStreamingSegment]);
 
@@ -185,7 +197,7 @@ function MainApplication() {
     logger.transcriptionDebug("Processing tasks", { total: tasks.length });
     tasks.forEach((task) => {
       logger.transcriptionDebug("Task status", { taskId: task.id, status: task.status });
-      if (task.status === "queued" && !processedTasks.has(task.id)) {
+      if (task.status === "queued" && !processedTasks.has(task.id) && task.filePath) {
         logger.transcriptionInfo("Starting task", { taskId: task.id, fileName: task.filePath });
         processedTasks.add(task.id);
         updateTaskStatus(task.id, "processing");
@@ -243,6 +255,8 @@ function MainApplication() {
   };
 
   const handleModalConfirm = async (filesWithSettings: FileWithSettings[], rememberChoice: boolean) => {
+    logger.info("Diarization modal confirmed", { rememberChoice, filesCount: filesWithSettings.length });
+
     for (const file of filesWithSettings) {
       const validation = validateDiarizationSettings(
         file.enableDiarization,
@@ -267,18 +281,25 @@ function MainApplication() {
     if (rememberChoice && filesWithSettings.length > 0) {
       const firstFile = filesWithSettings[0];
       if (firstFile.enableDiarization && firstFile.diarizationProvider) {
+        const numSpeakersValue = firstFile.numSpeakers === "auto" ? 2 : firstFile.numSpeakers;
+        logger.info("Saving diarization settings", {
+          provider: firstFile.diarizationProvider,
+          numSpeakers: numSpeakersValue
+        });
         updateLastDiarizationProvider(firstFile.diarizationProvider);
-        updateSettings({ numSpeakers: firstFile.numSpeakers === "auto" ? 2 : firstFile.numSpeakers });
+        updateSettings({ numSpeakers: numSpeakersValue });
+      }
+    } else {
+      // Even if not remembering, still update provider for current session
+      for (const file of filesWithSettings) {
+        if (file.enableDiarization && file.diarizationProvider) {
+          updateLastDiarizationProvider(file.diarizationProvider);
+          break; // Only need to update once
+        }
       }
     }
 
     for (const file of filesWithSettings) {
-      if (file.enableDiarization && file.diarizationProvider) {
-        if (!rememberChoice) {
-          updateLastDiarizationProvider(file.diarizationProvider);
-        }
-      }
-
       await addTask(file.path, file.name, file.size, {
         model: selectedModel as AIModel,
         device: defaultDevice as DeviceType,

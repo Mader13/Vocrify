@@ -22,6 +22,30 @@ export async function deleteFile(filePath: string): Promise<CommandResult<void>>
   }
 }
 
+export async function copyFile(sourcePath: string, destPath: string): Promise<CommandResult<string>> {
+  try {
+    const result = await invoke<string>("copy_file", { sourcePath, destPath });
+    return { success: true, data: result };
+  } catch (error) {
+    logger.error("Failed to copy file", { sourcePath, destPath, error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function compressMedia(
+  inputPath: string,
+  outputPath: string,
+  compression: "none" | "light" | "medium" | "heavy"
+): Promise<CommandResult<string>> {
+  try {
+    const result = await invoke<string>("compress_media", { inputPath, outputPath, compression });
+    return { success: true, data: result };
+  } catch (error) {
+    logger.error("Failed to compress media", { inputPath, outputPath, compression, error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function convertToMp3(
   inputPath: string,
   outputPath: string

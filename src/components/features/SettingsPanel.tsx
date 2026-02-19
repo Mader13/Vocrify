@@ -28,7 +28,6 @@ import {
 import { useUIStore, useTasks, useSetupStore } from "@/stores";
 import { selectOutputDirectory, clearCache } from "@/services/tauri";
 import { logger } from "@/lib/logger";
-import { ArchiveSettingsPanel } from "./settings/ArchiveSettingsPanel";
 import { DEVICE_NAMES, LANGUAGE_NAMES } from "@/types";
 import type { DeviceType, Language } from "@/types";
 
@@ -470,10 +469,7 @@ export function SettingsPanel() {
             </div>
           </div>
 
-          {/* Archive Settings Section */}
-          <div className="space-y-4 pt-4 mt-2 border-t">
-            <ArchiveSettingsPanel />
-          </div>
+
         </div>
 
         <DialogFooter className="flex gap-2 flex-wrap">

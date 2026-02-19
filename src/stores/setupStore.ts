@@ -330,6 +330,7 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
       if (result.success) {
         logger.info("FFmpeg downloaded successfully, verifying...");
         await get().checkFFmpeg();
+        set({ isChecking: false });
       } else {
         set({
           ffmpegCheck: failedFFmpegCheck(result.error || "Download failed"),
