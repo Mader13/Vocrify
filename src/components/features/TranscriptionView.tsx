@@ -4,6 +4,7 @@ import { AlertTriangle, FileText, RefreshCw, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useTasks, useUIStore } from "@/stores";
+import { usePlaybackStore } from "@/stores/playbackStore";
 
 import { CompletedView } from "./CompletedView";
 import { ProcessingView } from "./ProcessingView";
@@ -15,6 +16,9 @@ export function TranscriptionView() {
   const tasks = useTasks((s) => s.tasks);
 
   const task = tasks.find((t) => t.id === selectedTaskId);
+
+  const playingTaskId = usePlaybackStore((s) => s.playingTaskId);
+  const isPlayingTaskVisible = playingTaskId === selectedTaskId;
 
   // Derived state - no useEffect needed
   const showCompleted = useMemo(
