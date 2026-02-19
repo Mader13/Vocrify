@@ -499,6 +499,9 @@ type TaskManagerState = Arc<Mutex<TaskManager>>;
 /// TranscriptionManager state for Rust-based transcription
 type TranscriptionManagerState = Arc<Mutex<Option<TranscriptionManager>>>;
 
+/// Abort handles for active Rust transcribe-rs tasks (enables cancel_transcription)
+type RustTaskHandles = Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>>;
+
 /// Performance configuration state for feature flags
 /// Uses RwLock to allow updating config after initial setup
 type PerformanceConfigState = Arc<RwLock<PerformanceConfig>>;
@@ -1533,6 +1536,7 @@ async fn start_transcription(
 #[tauri::command]
 async fn cancel_transcription(
     task_manager: State<'_, TaskManagerState>,
+    rust_handles: State<'_, RustTaskHandles>,
     task_id: String,
 ) -> Result<(), AppError> {
     let mut manager = task_manager.lock().await;
@@ -1552,7 +1556,14 @@ async fn cancel_transcription(
     
     // Check if it's queued
     manager.queued_tasks.retain(|t| t.id != task_id);
-    
+    drop(manager);
+
+    // Abort active Rust transcribe-rs task if present
+    if let Some(handle) = rust_handles.lock().await.remove(&task_id) {
+        eprintln!("[INFO] Aborting Rust transcription task: {}", task_id);
+        handle.abort();
+    }
+
     Ok(())
 }
 
@@ -3478,6 +3489,7 @@ async fn transcribe_rust(
     options: crate::RustTranscriptionOptions,
     app: AppHandle,
     state: State<'_, TranscriptionManagerState>,
+    rust_handles: State<'_, RustTaskHandles>,
 ) -> Result<TranscriptionResult, String> {
     eprintln!("[INFO] transcribe_rust called: task_id={}, file={}, model={}",
         task_id, file_path, options.language.as_ref().map(|s| s.as_str()).unwrap_or("auto"));
@@ -3542,9 +3554,11 @@ async fn transcribe_rust(
         validated_path.clone()
     };
 
-    let manager_guard = state.lock().await;
-    let manager = manager_guard.as_ref()
-        .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+    // Validate manager is initialized (quick check before spawning)
+    {
+        let guard = state.lock().await;
+        guard.as_ref().ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+    }
 
     #[cfg(feature = "rust-transcribe")]
     {
@@ -3588,18 +3602,50 @@ async fn transcribe_rust(
         }));
 
         eprintln!("[PROGRESS] Starting transcription...");
- 
-        // Run transcription - transcribe_file is blocking, no real-time progress available
+
+        // Spawn transcription as an abortable task so cancel_transcription can stop it.
+        // Note: the underlying C/FFI inference thread may run its current step to completion,
+        // but the Tauri command returns immediately on abort and the result is discarded.
         let enable_diarization = options.enable_diarization;
-        let result = manager.transcribe_file(&audio_path, &tm_options, hf_token.as_deref()).await
-            .map_err(|e| {
+        let state_arc = Arc::clone(&*state);
+        let audio_path_for_spawn = audio_path.clone();
+        let join_handle = tokio::spawn(async move {
+            let guard = state_arc.lock().await;
+            let manager = guard.as_ref()
+                .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+            manager.transcribe_file(&audio_path_for_spawn, &tm_options, hf_token.as_deref())
+                .await
+                .map_err(|e| e.to_string())
+        });
+
+        // Register abort handle immediately so cancel_transcription can stop this task
+        {
+            let mut handles = rust_handles.lock().await;
+            handles.insert(task_id.clone(), join_handle.abort_handle());
+        }
+
+        let result = match join_handle.await {
+            Ok(Ok(data)) => data,
+            Ok(Err(e)) => {
                 eprintln!("[ERROR] Rust transcription failed: {}", e);
                 let _ = app.emit("transcription-error", serde_json::json!({
                     "taskId": task_id,
-                    "error": e.to_string(),
+                    "error": e,
                 }));
-                e.to_string()
-            })?;
+                rust_handles.lock().await.remove(&task_id);
+                return Err(e);
+            }
+            Err(ref e) if e.is_cancelled() => {
+                eprintln!("[INFO] Rust transcription cancelled: {}", task_id);
+                rust_handles.lock().await.remove(&task_id);
+                return Err("CANCELLED".to_string());
+            }
+            Err(e) => {
+                rust_handles.lock().await.remove(&task_id);
+                return Err(format!("Transcription task panicked: {}", e));
+            }
+        };
+        rust_handles.lock().await.remove(&task_id);
 
         // Transcription done - emit completion progress
         let audio_duration = result.duration;
@@ -4026,6 +4072,7 @@ async fn update_performance_config(
 pub fn run() {
     let task_manager: TaskManagerState = Arc::new(Mutex::new(TaskManager::default()));
     let transcription_manager_state: TranscriptionManagerState = Arc::new(Mutex::new(None));
+    let rust_task_handles: RustTaskHandles = Arc::new(Mutex::new(HashMap::new()));
     // Initialize performance config state early with defaults
     // This prevents "state not managed" errors when commands are called during startup
     let performance_config_state: PerformanceConfigState = Arc::new(RwLock::new(PerformanceConfig::default()));
@@ -4036,6 +4083,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(task_manager)
         .manage(transcription_manager_state)
+        .manage(rust_task_handles)
         .manage(performance_config_state)
         .setup(|app| {
             let app_handle = app.app_handle();

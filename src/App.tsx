@@ -54,7 +54,7 @@ function MainApplication() {
 
   const { validateModelSelection, modelError, setModelError, selectedModel } = useModelValidation();
   const { availableModels, loadModels } = useModelsStore();
-  const { defaultDevice, defaultLanguage, diarizationProvider, enginePreference } = useTasks((s) => s.settings);
+  const { defaultDevice, defaultLanguage, diarizationProvider, enginePreference, enableDiarization } = useTasks((s) => s.settings);
 
   const [pendingFiles, setPendingFiles] = useState<SelectedFile[]>([]);
   const [isDiarizationModalOpen, setIsDiarizationModalOpen] = useState(false);
@@ -280,14 +280,18 @@ function MainApplication() {
     // Save settings if rememberChoice is true
     if (rememberChoice && filesWithSettings.length > 0) {
       const firstFile = filesWithSettings[0];
+      const numSpeakersValue = firstFile.numSpeakers === "auto" ? 2 : firstFile.numSpeakers;
+      logger.info("Saving diarization settings", {
+        enableDiarization: firstFile.enableDiarization,
+        provider: firstFile.diarizationProvider,
+        numSpeakers: numSpeakersValue
+      });
+      updateSettings({
+        enableDiarization: firstFile.enableDiarization,
+        numSpeakers: numSpeakersValue
+      });
       if (firstFile.enableDiarization && firstFile.diarizationProvider) {
-        const numSpeakersValue = firstFile.numSpeakers === "auto" ? 2 : firstFile.numSpeakers;
-        logger.info("Saving diarization settings", {
-          provider: firstFile.diarizationProvider,
-          numSpeakers: numSpeakersValue
-        });
         updateLastDiarizationProvider(firstFile.diarizationProvider);
-        updateSettings({ numSpeakers: numSpeakersValue });
       }
     } else {
       // Even if not remembering, still update provider for current session
@@ -364,6 +368,7 @@ function MainApplication() {
         files={pendingFiles}
         availableDiarizationProviders={availableDiarizationProviders}
         lastUsedProvider={diarizationProvider as DiarizationProvider}
+        lastUsedEnableDiarization={enableDiarization}
       />
 
       <Dialog open={modelError.open} onOpenChange={(open) => setModelError({ ...modelError, open })}>

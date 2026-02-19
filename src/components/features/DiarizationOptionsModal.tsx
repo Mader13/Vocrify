@@ -27,6 +27,7 @@ export interface DiarizationOptionsModalProps {
   files: Array<{ path: string; name: string; size: number }>;
   availableDiarizationProviders: DiarizationProvider[];
   lastUsedProvider: DiarizationProvider;
+  lastUsedEnableDiarization: boolean;
 }
 
 export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = ({
@@ -36,6 +37,7 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
   files,
   availableDiarizationProviders,
   lastUsedProvider,
+  lastUsedEnableDiarization,
 }) => {
   const setCurrentView = useUIStore((s) => s.setCurrentView);
   const [filesWithSettings, setFilesWithSettings] = useState<FileWithSettings[]>([]);
@@ -54,13 +56,13 @@ export const DiarizationOptionsModal: React.FC<DiarizationOptionsModalProps> = (
           name: file.name,
           path: file.path,
           size: file.size,
-          enableDiarization: availableDiarizationProviders.length > 0,
+          enableDiarization: lastUsedEnableDiarization && availableDiarizationProviders.length > 0,
           diarizationProvider: availableDiarizationProviders.length > 0 ? autoProvider : null,
           numSpeakers: 'auto' as SpeakerCount,
         }))
       );
     }
-  }, [isOpen, files, availableDiarizationProviders, lastUsedProvider]);
+  }, [isOpen, files, availableDiarizationProviders, lastUsedProvider, lastUsedEnableDiarization]);
 
   const handleToggleDiarization = (fileId: string, enabled: boolean) => {
     setFilesWithSettings((prev) =>

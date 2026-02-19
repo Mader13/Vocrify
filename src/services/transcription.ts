@@ -217,11 +217,19 @@ export async function transcribeWithFallback(
 
       return { success: true };
     } catch (rustError) {
+      const errorMessage = rustError instanceof Error ? rustError.message : String(rustError);
+
+      // Cancelled by user — do not fall back to Python
+      if (errorMessage.includes("CANCELLED")) {
+        logger.transcriptionInfo("Rust transcription cancelled by user", { taskId });
+        return { success: false, error: "CANCELLED" };
+      }
+
       logger.transcriptionWarn(
         "Rust engine failed, attempting Python fallback",
         {
           taskId,
-          error: String(rustError),
+          error: errorMessage,
         }
       );
 
@@ -233,7 +241,7 @@ export async function transcribeWithFallback(
       // If rust-only mode, return the error
       return {
         success: false,
-        error: rustError instanceof Error ? rustError.message : String(rustError),
+        error: errorMessage,
       };
     }
   }
