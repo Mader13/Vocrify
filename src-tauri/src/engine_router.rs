@@ -13,17 +13,11 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "rust-whisper")]
-use crate::whisper_engine::{WhisperEngine, DeviceType, TranscriptionOptions as WhisperOptions, WhisperError};
 use crate::python_bridge::{PythonBridge, SpeakerSegment, DiarizationProvider};
 
 /// Engine router errors
 #[derive(Debug, Error)]
 pub enum EngineRouterError {
-    #[cfg(feature = "rust-whisper")]
-    #[error("Whisper engine error: {0}")]
-    Whisper(#[from] WhisperError),
-
     #[error("Python bridge error: {0}")]
     PythonBridge(String),
 
@@ -160,90 +154,17 @@ impl EngineRouter {
         match self.preference {
             EnginePreference::PythonOnly => EngineChoice::PythonEngine,
             EnginePreference::RustOnly => EngineChoice::RustWhisper,
-            EnginePreference::Auto => {
-                // Whisper models use Rust if available
-                #[cfg(feature = "rust-whisper")]
-                {
-                    EngineChoice::RustWhisper
-                }
-                #[cfg(not(feature = "rust-whisper"))]
-                {
-                    EngineChoice::PythonEngine
-                }
-            }
+            EnginePreference::Auto => EngineChoice::PythonEngine,
         }
     }
 
-    /// Transcribe using Rust whisper-rs
-    #[cfg(feature = "rust-whisper")]
+    /// Legacy Rust whisper path is retired; route to Python engine.
     async fn transcribe_with_rust(
         &self,
         audio_path: &Path,
         options: &RouterTranscriptionOptions,
     ) -> Result<RouterTranscriptionResult, EngineRouterError> {
-        eprintln!("[INFO] EngineRouter: Using Rust Whisper for {}", options.model);
-
-        // Get model path
-        let model_path = self.get_whisper_model_path(&options.model)?;
-
-        // Get or create Whisper engine
-        let device = self.parse_device(&options.device);
-        let engine = self.create_whisper_engine(&model_path, device).await?;
-
-        // Load audio
-        let audio = self.load_audio(audio_path).await?;
-
-        // Transcribe
-        let whisper_options = WhisperOptions {
-            language: options.language.clone(),
-            translate: false,
-            print_progress: true,
-            print_timestamps: true,
-        };
-
-        let result = engine.transcribe(&audio, whisper_options)
-            .map_err(|e| {
-                eprintln!("[WARN] Rust Whisper failed: {}, falling back to Python", e);
-                // Auto-fallback to Python
-                EngineRouterError::Whisper(e)
-            })?;
-
-        // Convert result
-        let segments: Vec<RouterSegment> = result.segments.into_iter()
-            .map(|s| RouterSegment {
-                start: s.start,
-                end: s.end,
-                text: s.text,
-                speaker: s.speaker,
-                confidence: s.confidence,
-            })
-            .collect();
-
-        // Run diarization if requested
-        let speaker_turns = if options.enable_diarization {
-            self.run_diarization(audio_path, options).await?
-        } else {
-            None
-        };
-
-        Ok(RouterTranscriptionResult {
-            segments,
-            language: result.language,
-            duration: result.duration,
-            speaker_turns,
-            engine_used: "rust-whisper".to_string(),
-        })
-    }
-
-    /// Transcribe using Rust whisper-rs (stub when feature disabled)
-    #[cfg(not(feature = "rust-whisper"))]
-    async fn transcribe_with_rust(
-        &self,
-        audio_path: &Path,
-        options: &RouterTranscriptionOptions,
-    ) -> Result<RouterTranscriptionResult, EngineRouterError> {
-        // Fallback to Python
-        eprintln!("[WARN] rust-whisper feature disabled, falling back to Python");
+        eprintln!("[WARN] Legacy rust-whisper route requested, falling back to Python");
         self.transcribe_with_python(audio_path, options).await
     }
 
@@ -333,20 +254,6 @@ impl EngineRouter {
         }
     }
 
-    /// Create Whisper engine (no caching since WhisperEngine doesn't implement Clone)
-    #[cfg(feature = "rust-whisper")]
-    async fn create_whisper_engine(
-        &self,
-        model_path: &Path,
-        device: DeviceType,
-    ) -> Result<WhisperEngine, EngineRouterError> {
-        // Create new engine on demand
-        // Note: We don't cache because WhisperEngine doesn't implement Clone
-        // and the underlying whisper.cpp context is not thread-safe
-        let engine = WhisperEngine::new(model_path, device)?;
-        Ok(engine)
-    }
-
     /// Get Whisper model path
     #[allow(dead_code)]
     fn get_whisper_model_path(&self, model_name: &str) -> Result<PathBuf, EngineRouterError> {
@@ -375,17 +282,6 @@ impl EngineRouter {
             Ok(model_path)
         } else {
             Err(EngineRouterError::ModelNotFound(model_name.to_string()))
-        }
-    }
-
-    /// Parse device string to DeviceType
-    #[cfg(feature = "rust-whisper")]
-    fn parse_device(&self, device: &str) -> DeviceType {
-        match device.to_lowercase().as_str() {
-            "cuda" => DeviceType::Cuda,
-            "mps" => DeviceType::Metal,
-            "vulkan" => DeviceType::Vulkan,
-            _ => DeviceType::Cpu,
         }
     }
 

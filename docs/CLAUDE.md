@@ -8,9 +8,9 @@ Transcribe Video is a cross-platform desktop application for video transcription
 
 - **Frontend**: React + TypeScript with Vite, styled with Tailwind CSS v4
 - **Backend**: Rust via Tauri framework
-- **AI Engine**: Python 3.8-3.12 (NOT 3.13+) using faster-whisper and pyannote.audio
+- **AI Engine**: Rust transcribe-rs (primary transcription) + Python 3.8-3.12 for diarization
 
-**Architecture**: The app spawns Python subprocesses from Rust that process video/audio files and emit JSON events via stdout for progress updates and results.
+**Architecture**: Rust transcribe-rs is the primary transcription path; Python subprocesses are used for diarization and compatibility flows.
 
 ## Development Commands
 
@@ -133,7 +133,11 @@ src/
 
 ```
 src-tauri/src/
-└── lib.rs               # Main Tauri commands + task queue management
+├── lib.rs                          # Main Tauri commands + composition root
+├── task_queue.rs                   # Queue state/contracts extracted from lib.rs
+├── python_ipc.rs                   # Python stdout message parsing + critical error logic
+├── transcription_orchestrator.rs   # Shared orchestration helpers (temp file cleanup, etc.)
+└── transcription_manager.rs        # transcribe-rs manager (primary engine)
 ```
 
 Key Tauri commands (all in `lib.rs`):
@@ -197,6 +201,11 @@ We follow these principles to maintain clean, maintainable, and scalable code:
 
 Frontend → Rust (Tauri commands) → Python subprocess → JSON stdout → Rust events → Frontend
 
+Transport-level frontend event wiring is centralized in service layer helpers:
+
+- `src/services/tauri/events.ts::subscribeToTranscriptionTransportEvents`
+- `src/services/transcription.ts::subscribeToTranscriptionRuntime`
+
 Python engine outputs JSON messages to stdout:
 
 ```json
@@ -215,6 +224,7 @@ Python engine outputs JSON messages to stdout:
 - Zustand stores in `/src/stores`
 - All types defined in `/src/types/index.ts`
 - Tauri event listeners update frontend state via `listen()` from `@tauri-apps/api/event`
+- Store mutations live in `src/stores/index.ts`; duplicate helper actions under `src/stores/actions/` were removed
 
 ### 3. Model Management
 

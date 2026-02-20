@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Archive, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTasks } from "@/stores";
+import { canArchiveTask } from "@/stores/utils/archive-eligibility";
 import type { TranscriptionTask, ArchiveMode, ArchiveCompression } from "@/types";
 import { ArchiveModal } from "./ArchiveModal";
 import { notifySuccess } from "@/services/notifications";
@@ -52,6 +53,10 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         {!iconOnly && <span>Archived</span>}
       </button>
     );
+  }
+
+  if (!canArchiveTask(task)) {
+    return null;
   }
 
   return (

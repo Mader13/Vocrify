@@ -8,6 +8,32 @@ interface LogViewerProps {
   className?: string;
 }
 
+function parseLogLevel(value: string): LogLevel | "all" {
+  if (value === "all") {
+    return "all";
+  }
+
+  const parsed = Number(value);
+  if (
+    parsed === LogLevel.DEBUG ||
+    parsed === LogLevel.INFO ||
+    parsed === LogLevel.WARN ||
+    parsed === LogLevel.ERROR
+  ) {
+    return parsed;
+  }
+
+  return "all";
+}
+
+function parseLogCategory(value: string): LogEntry["category"] | "all" {
+  if (value === "all" || value === "transcription" || value === "upload" || value === "model" || value === "system") {
+    return value;
+  }
+
+  return "all";
+}
+
 export function LogViewer({ className }: LogViewerProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filter, setFilter] = useState<{
@@ -108,7 +134,7 @@ export function LogViewer({ className }: LogViewerProps) {
             <Filter className="h-4 w-4 text-gray-400" />
             <select
               value={filter.level}
-              onChange={(e) => setFilter({ ...filter, level: e.target.value as any })}
+              onChange={(e) => setFilter({ ...filter, level: parseLogLevel(e.target.value) })}
               className="bg-gray-700 border-gray-600 text-gray-100 rounded px-3 py-1 text-sm focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">All Levels</option>
@@ -122,7 +148,7 @@ export function LogViewer({ className }: LogViewerProps) {
           <div className="flex items-center gap-2">
             <select
               value={filter.category}
-              onChange={(e) => setFilter({ ...filter, category: e.target.value as any })}
+              onChange={(e) => setFilter({ ...filter, category: parseLogCategory(e.target.value) })}
               className="bg-gray-700 border-gray-600 text-gray-100 rounded px-3 py-1 text-sm focus:ring-2 focus:ring-blue-500"
             >
               <option value="all">All Categories</option>

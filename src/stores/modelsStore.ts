@@ -603,9 +603,11 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
       }
 
       const stages = { ...download.stages };
-      if (stages[stage as keyof typeof stages]) {
-        stages[stage as keyof typeof stages] = {
-          ...stages[stage as keyof typeof stages]!,
+      const stageKey = stage as keyof typeof stages;
+      const stageEntry = stages[stageKey];
+      if (stageEntry) {
+        stages[stageKey] = {
+          ...stageEntry,
           completed: true,
           progress: 100,
         };

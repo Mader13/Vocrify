@@ -170,7 +170,15 @@ export function usePlaybackSync({
         ws?.play?.();
       }
     }
-  }, [isWaveformReady, isActivePlayer, taskId]);
+  }, [
+    isWaveformReady,
+    isActivePlayer,
+    taskId,
+    store.currentTime,
+    store.isPlaying,
+    videoRef,
+    wavesurferRef,
+  ]);
 
   return {
     handlePlay,

@@ -25,6 +25,12 @@ use tauri_plugin_dialog::DialogExt;
 use scopeguard;
 
 use python_installer::{create_hidden_command, create_hidden_std_command};
+use python_ipc::{PythonMessage, is_critical_error};
+use task_queue::{
+    QueuedTask, RunningTask, TaskManager, dequeue_next_task, enqueue_task,
+    should_process_next_after_cleanup,
+};
+use transcription_orchestrator::cleanup_temp_wav_file;
 
 pub mod ffmpeg_manager;
 pub mod whisper_engine;
@@ -36,15 +42,27 @@ pub mod python_installer;
 pub mod performance_config;
 pub mod model_downloader;
 pub mod audio;
+pub(crate) mod task_queue;
+pub(crate) mod python_ipc;
+pub(crate) mod transcription_orchestrator;
+
+#[cfg(test)]
+mod lib_queue_tests;
+
+#[cfg(test)]
+mod transcription_manager_memory_tests;
+
+#[cfg(test)]
+mod temp_wav_cleanup_tests;
+
+#[cfg(test)]
+mod lib_refactor_contract_tests;
 
 // Re-export FFmpeg types for frontend
 pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgressEvent, get_ffmpeg_status, get_ffmpeg_path, download_ffmpeg};
 
 // Re-export Python installer types for frontend
 pub use python_installer::{InstallProgress, check_python_installed, install_python_full, get_python_install_progress, cancel_python_install};
-
-// Re-export Whisper types for frontend
-pub use whisper_engine::{WhisperEngine, DeviceType as WhisperDeviceType, TranscriptionSegment as WhisperSegment};
 
 // Re-export TranscriptionManager types for frontend (Phase 3: transcribe-rs)
 #[allow(unused_imports)]
@@ -231,6 +249,8 @@ pub struct TranscriptionResult {
     pub speaker_turns: Option<Vec<SpeakerTurn>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_segments: Option<Vec<TranscriptionSegment>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<ProgressMetrics>,
 }
 
 /// Progress event sent to the frontend
@@ -245,7 +265,7 @@ pub struct ProgressEvent {
     pub metrics: Option<ProgressMetrics>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressMetrics {
     pub realtime_factor: Option<f64>,
@@ -255,93 +275,30 @@ pub struct ProgressMetrics {
     pub gpu_usage: Option<f64>,
     pub cpu_usage: Option<f64>,
     pub memory_usage: Option<f64>,
+    pub model_load_ms: Option<u64>,
+    pub decode_ms: Option<u64>,
+    pub inference_ms: Option<u64>,
+    pub diarization_ms: Option<u64>,
+    pub total_ms: Option<u64>,
 }
 
-/// Messages from the Python engine
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-#[serde(tag = "type", rename_all = "lowercase")]
-enum PythonMessage {
-    Hello {
-        message: String,
-        version: String,
-        python_version: String,
-    },
-    Debug {
-        message: String,
-    },
-    Progress {
-        stage: String,
-        progress: u8,
-        message: String,
-        #[serde(default)]
-        metrics: Option<ProgressMetrics>,
-    },
-    Segment {
-        segment: TranscriptionSegment,
-        index: u32,
-        total: Option<u32>,
-    },
-    Result {
-        segments: Vec<TranscriptionSegment>,
-        language: String,
-        duration: f64,
-        #[serde(default)]
-        speaker_turns: Option<Vec<SpeakerTurn>>,
-        #[serde(default)]
-        speaker_segments: Option<Vec<TranscriptionSegment>>,
-    },
-    Error {
-        error: String,
-    },
-    ProgressDownload {
-        current: u64,
-        total: u64,
-        percent: f64,
-        speed_mb_s: f64,
-    },
-    DownloadComplete {
-        model_name: String,
-        size_mb: u64,
-        path: String,
-    },
-    ModelsList {
-        data: Vec<LocalModel>,
-    },
-    DeleteComplete {
-        model_name: String,
-    },
-}
+fn spawn_queue_processor(app: AppHandle, task_manager: TaskManagerState) {
+    tokio::spawn(async move {
+        loop {
+            process_next_queued_task(app.clone(), &task_manager).await;
 
-/// Task state for queued tasks
-#[derive(Debug, Clone)]
-struct QueuedTask {
-    id: String,
-    file_path: String,
-    options: TranscriptionOptions,
-}
+            let has_queued_tasks = {
+                let manager = task_manager.lock().await;
+                !manager.queued_tasks.is_empty()
+            };
 
-/// Running task state with child process handle
-#[derive(Debug)]
-struct RunningTask {
-    handle: tokio::task::JoinHandle<()>,
-    child_process: Arc<Mutex<Option<tokio::process::Child>>>,
-}
+            if !has_queued_tasks {
+                break;
+            }
 
-/// Global task manager state
-#[derive(Default)]
-pub struct TaskManager {
-    running_tasks: HashMap<String, RunningTask>,
-    queued_tasks: Vec<QueuedTask>,
-    downloading_models: HashMap<String, tokio::task::JoinHandle<()>>,
-    /// Maps model name → child process handle for Python downloads (PyAnnote only).
-    /// Used by `cancel_model_download` to SIGKILL the subprocess.
-    downloading_processes: HashMap<String, Arc<Mutex<Option<tokio::process::Child>>>>,
-    /// Cancellation tokens for Rust-native downloads.
-    /// The download loop polls this and exits when set to `true`.
-    cancel_tokens: HashMap<String, Arc<AtomicBool>>,
-    // CRITICAL-5 FIX: Use Mutex for proper synchronization instead of boolean flag
-    queue_processor_guard: Arc<tokio::sync::Mutex<()>>,
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
+    });
 }
 
 /// Model management types
@@ -506,15 +463,6 @@ type RustTaskHandles = Arc<Mutex<HashMap<String, tokio::task::AbortHandle>>>;
 /// Performance configuration state for feature flags
 /// Uses RwLock to allow updating config after initial setup
 type PerformanceConfigState = Arc<RwLock<PerformanceConfig>>;
-
-/// Check if a stderr line represents a critical error
-fn is_critical_error(line: &str) -> bool {
-    let lower = line.to_lowercase();
-    lower.contains("traceback")
-        || (lower.contains("error") && !lower.contains("warning"))
-        || lower.contains("exception")
-        || lower.contains("failed")
-}
 
 /// Application error type
 #[derive(Debug, thiserror::Error)]
@@ -1328,6 +1276,7 @@ async fn spawn_transcription(
         duration,
         speaker_turns,
         speaker_segments,
+        metrics: None,
     };
 
     eprintln!("[DEBUG] Emitting transcription-complete with {} segments, {} speaker_turns, {} speaker_segments",
@@ -1376,7 +1325,7 @@ async fn process_next_queued_task(
     }
 
     // Get the next queued task
-    if let Some(next_task) = manager.queued_tasks.pop() {
+    if let Some(next_task) = dequeue_next_task(&mut manager.queued_tasks) {
         let task_id = next_task.id.clone();
 
         // Spawn the task
@@ -1386,7 +1335,10 @@ async fn process_next_queued_task(
         let options_clone = next_task.options.clone();
 
         let task_id_for_error = next_task.id.clone();
+        let task_id_for_cleanup = next_task.id.clone();
         let app_clone_for_error = app_clone.clone();
+        let app_clone_for_next = app.clone();
+        let task_manager_for_next = task_manager.clone();
 
         let child_process = Arc::new(Mutex::new(None));
         let child_process_clone = child_process.clone();
@@ -1408,6 +1360,15 @@ async fn process_next_queued_task(
                     "taskId": task_id_for_error,
                     "error": e.to_string(),
                 }));
+            }
+
+            let should_process_next = {
+                let mut manager = task_manager_for_next.lock().await;
+                should_process_next_after_cleanup(&mut manager, &task_id_for_cleanup)
+            };
+
+            if should_process_next {
+                spawn_queue_processor(app_clone_for_next, task_manager_for_next.clone());
             }
         });
 
@@ -1467,7 +1428,7 @@ async fn start_transcription(
 
     if manager.running_tasks.len() >= max_concurrent {
         // Queue the task
-        manager.queued_tasks.push(QueuedTask {
+        enqueue_task(&mut manager.queued_tasks, QueuedTask {
             id: task_id,
             file_path,
             options,
@@ -1487,6 +1448,7 @@ async fn start_transcription(
 
     let task_id_for_error = task_id.clone();
     let app_clone_for_error = app_clone.clone();
+    let app_clone_for_next = app.clone();
 
     let child_process = Arc::new(Mutex::new(None));
     let child_process_clone = child_process.clone();
@@ -1510,24 +1472,19 @@ async fn start_transcription(
             }));
         }
 
-        // CRITICAL: Remove task from running_tasks and process next
-        let mut manager = task_manager_arc.lock().await;
-        manager.running_tasks.remove(&task_id_clone);
-        drop(manager); // Release lock before processing next task
+        let should_process_next = {
+            let mut manager = task_manager_arc.lock().await;
+            should_process_next_after_cleanup(&mut manager, &task_id_clone)
+        };
+
+        if should_process_next {
+            spawn_queue_processor(app_clone_for_next, task_manager_arc.clone());
+        }
     });
 
     manager.running_tasks.insert(task_id, RunningTask {
         handle,
         child_process: child_process_for_task,
-    });
-
-    // Start processing queued tasks in background
-    let task_manager_for_queue = (*task_manager).clone();
-    let app_for_queue = app.clone();
-    tokio::spawn(async move {
-        // Wait a bit for current task to complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        process_next_queued_task(app_for_queue, &task_manager_for_queue).await;
     });
 
     Ok(())
@@ -3606,12 +3563,18 @@ async fn transcribe_rust(
     eprintln!("[INFO] transcribe_rust called: task_id={}, file={}, model={}",
         task_id, file_path, options.language.as_ref().map(|s| s.as_str()).unwrap_or("auto"));
 
+    let total_start = std::time::Instant::now();
+    let model_load_start = std::time::Instant::now();
+
     // Ensure manager is initialized before proceeding
     ensure_manager_initialized(&state, &app).await?;
+    let model_load_ms = model_load_start.elapsed().as_millis() as u64;
 
     // Validate file path
     let validated_path = validate_file_path(&file_path)
         .map_err(|e| e.to_string())?;
+
+    let decode_start = std::time::Instant::now();
 
     // Check if file needs conversion to WAV for Rust transcription
     // Symphonia supports: wav, flac, mp3, m4a/aac, ogg, alac
@@ -3680,6 +3643,12 @@ async fn transcribe_rust(
         validated_path.clone()
     };
 
+    let temp_wav_path = audio_path.clone();
+    let _temp_wav_guard = scopeguard::guard((), move |_| {
+        cleanup_temp_wav_file(&temp_wav_path, needs_conversion);
+    });
+    let decode_ms = decode_start.elapsed().as_millis() as u64;
+
     // Validate manager is initialized (quick check before spawning)
     {
         let guard = state.lock().await;
@@ -3694,6 +3663,10 @@ async fn transcribe_rust(
             "progress": 0,
             "stage": "loading",
             "message": "Loading audio and model...",
+            "metrics": {
+                "modelLoadMs": model_load_ms,
+                "decodeMs": decode_ms,
+            },
         }));
 
         // Get RTF estimate for this model
@@ -3725,6 +3698,10 @@ async fn transcribe_rust(
             "progress": 10,
             "stage": "transcribing",
             "message": "Transcribing audio...",
+            "metrics": {
+                "modelLoadMs": model_load_ms,
+                "decodeMs": decode_ms,
+            },
         }));
 
         eprintln!("[PROGRESS] Starting transcription...");
@@ -3735,7 +3712,7 @@ async fn transcribe_rust(
         let enable_diarization = options.enable_diarization;
         let state_arc = Arc::clone(&*state);
         let audio_path_for_spawn = audio_path.clone();
-        let join_handle = tokio::spawn(async move {
+        let mut join_handle = tokio::spawn(async move {
             let guard = state_arc.lock().await;
             let manager = guard.as_ref()
                 .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
@@ -3750,7 +3727,33 @@ async fn transcribe_rust(
             handles.insert(task_id.clone(), join_handle.abort_handle());
         }
 
-        let result = match join_handle.await {
+        let inference_start = std::time::Instant::now();
+        let mut heartbeat_progress: u8 = 12;
+        let mut heartbeat_timer = tokio::time::interval(tokio::time::Duration::from_secs(15));
+        heartbeat_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        let join_result = loop {
+            tokio::select! {
+                result = &mut join_handle => {
+                    break result;
+                }
+                _ = heartbeat_timer.tick() => {
+                    heartbeat_progress = (heartbeat_progress.saturating_add(1)).min(89);
+                    let _ = app.emit("progress-update", serde_json::json!({
+                        "taskId": task_id,
+                        "progress": heartbeat_progress,
+                        "stage": "transcribing",
+                        "message": "Transcribing audio...",
+                        "metrics": {
+                            "modelLoadMs": model_load_ms,
+                            "decodeMs": decode_ms,
+                        }
+                    }));
+                }
+            }
+        };
+
+        let result = match join_result {
             Ok(Ok(data)) => data,
             Ok(Err(e)) => {
                 eprintln!("[ERROR] Rust transcription failed: {}", e);
@@ -3771,7 +3774,14 @@ async fn transcribe_rust(
                 return Err(format!("Transcription task panicked: {}", e));
             }
         };
+        let inference_ms = inference_start.elapsed().as_millis() as u64;
         rust_handles.lock().await.remove(&task_id);
+
+        let mut merged_metrics = result.metrics.clone().unwrap_or_default();
+        merged_metrics.model_load_ms = Some(model_load_ms);
+        merged_metrics.decode_ms = Some(decode_ms);
+        merged_metrics.inference_ms = Some(merged_metrics.inference_ms.unwrap_or(inference_ms));
+        merged_metrics.total_ms = Some(total_start.elapsed().as_millis() as u64);
 
         // Transcription done - emit completion progress
         let audio_duration = result.duration;
@@ -3792,6 +3802,7 @@ async fn transcribe_rust(
             "progress": progress,
             "stage": "transcribing",
             "message": format!("Processed {:.0}s of audio...", audio_duration),
+            "metrics": merged_metrics,
         }));
         
         let final_duration = result.duration;
@@ -3802,6 +3813,7 @@ async fn transcribe_rust(
             "progress": 90,
             "stage": if enable_diarization { "diarizing" } else { "finalizing" },
             "message": if enable_diarization { "Running speaker diarization..." } else { "Finalizing..." },
+            "metrics": merged_metrics,
         }));
 
         // Handle diarization if enabled
@@ -3813,14 +3825,9 @@ async fn transcribe_rust(
                 "progress": 98,
                 "stage": "finalizing",
                 "message": "Preparing output...",
+                "metrics": merged_metrics,
             }));
         }
-
-        // Emit completion
-        let _ = app.emit("transcription-complete", serde_json::json!({
-            "taskId": task_id,
-            "result": result,
-        }));
 
         eprintln!("[INFO] Rust transcription complete: {} segments", result.segments.len());
 
@@ -3847,7 +3854,14 @@ async fn transcribe_rust(
                 speaker: s.speaker,
                 confidence: s.confidence,
             }).collect()),
+            metrics: Some(merged_metrics),
         };
+
+        // Emit completion
+        let _ = app.emit("transcription-complete", serde_json::json!({
+            "taskId": task_id,
+            "result": lib_result,
+        }));
 
         Ok(lib_result)
     }

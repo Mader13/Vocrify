@@ -9,43 +9,47 @@ interface ProgressMetricsDisplayProps {
   compact?: boolean;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export function ProgressMetricsDisplay({ metrics, compact }: ProgressMetricsDisplayProps) {
   const shouldReduceMotion = useReducedMotion();
 
   if (!metrics) return null;
 
   const items = [
-    metrics.estimatedTimeRemaining !== undefined && metrics.estimatedTimeRemaining >= 0 && {
+    isFiniteNumber(metrics.estimatedTimeRemaining) && metrics.estimatedTimeRemaining >= 0 && {
       icon: Clock,
       label: "ETA",
       value: formatTime(metrics.estimatedTimeRemaining),
       color: "text-blue-400",
     },
-    metrics.realtimeFactor !== undefined && {
+    isFiniteNumber(metrics.realtimeFactor) && {
       icon: Zap,
       label: "Speed",
       value: `${metrics.realtimeFactor.toFixed(1)}x`,
       color: "text-emerald-400",
     },
-    metrics.processedDuration !== undefined && metrics.totalDuration !== undefined && {
+    isFiniteNumber(metrics.processedDuration) && isFiniteNumber(metrics.totalDuration) && {
       icon: Clock,
       label: "Progress",
       value: `${formatTime(metrics.processedDuration)} / ${formatTime(metrics.totalDuration)}`,
       color: "text-purple-400",
     },
-    metrics.gpuUsage !== undefined && {
+    isFiniteNumber(metrics.gpuUsage) && {
       icon: Cpu,
       label: "GPU",
       value: `${metrics.gpuUsage}%`,
       color: "text-orange-400",
     },
-    metrics.cpuUsage !== undefined && {
+    isFiniteNumber(metrics.cpuUsage) && {
       icon: Cpu,
       label: "CPU",
       value: `${metrics.cpuUsage}%`,
       color: "text-sky-400",
     },
-    metrics.memoryUsage !== undefined && {
+    isFiniteNumber(metrics.memoryUsage) && {
       icon: MemoryStick,
       label: "RAM",
       value: `${metrics.memoryUsage} MB`,

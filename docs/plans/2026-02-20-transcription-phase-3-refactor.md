@@ -147,12 +147,19 @@ git commit -m "refactor: consolidate store actions and remove dead duplicate hel
 
 **Files:**
 - Modify: `AGENTS.md`
-- Modify: `.claude/claude.md`
+- Modify: `docs/CLAUDE.md`
 - Modify: `docs/plans/2026-02-20-transcription-phase-3-refactor.md`
 
 **Step 1: Write the failing check**
 
 Подготовить checklist синхронизации: архитектура, маршрутизация движков, gotchas, команды.
+
+Checklist:
+
+- [x] Обновить backend module map (extractions из `lib.rs`)
+- [x] Синхронизировать service boundary для transport событий
+- [x] Отразить удаление legacy `rust-whisper` feature
+- [x] Зафиксировать single source of truth для store actions
 
 **Step 2: Run check to verify mismatch exists**
 
@@ -198,6 +205,14 @@ Expected: базовые user workflows транскрипции и диариз
 **Step 4: Handoff notes**
 
 Зафиксировать, какие legacy элементы окончательно удалены и какие API стабилизированы.
+
+Handoff notes:
+
+- Legacy removed: deprecated Cargo feature `rust-whisper`; legacy Whisper re-export from `src-tauri/src/lib.rs`; duplicate pure store action helpers under `src/stores/actions/`.
+- Rust backend boundaries stabilized: `task_queue.rs`, `python_ipc.rs`, and `transcription_orchestrator.rs` extracted from `lib.rs` as focused modules.
+- Frontend service boundary stabilized: App-level transport wiring moved behind `subscribeToTranscriptionRuntime` and `subscribeToTranscriptionTransportEvents`.
+- Verification status: TypeScript, tests, lint, build, and Cargo tests are green.
+- Smoke-run note: `bun run tauri:dev` currently fails if port `5173` is occupied by another Vite instance; free the port and rerun smoke validation.
 
 **Step 5: Commit**
 

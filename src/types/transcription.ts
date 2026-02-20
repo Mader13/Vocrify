@@ -38,6 +38,7 @@ export interface TranscriptionResult {
   duration: number;
   speakerTurns?: SpeakerTurn[];
   speakerSegments?: TranscriptionSegment[];
+  metrics?: ProgressMetrics;
 }
 
 export interface TranscriptionTask {

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { TranscriptionTask } from "@/types";
-import { recoverInterruptedTasks } from "@/stores/utils/task-recovery";
+import {
+  INTERRUPTED_TRANSCRIPTION_ERROR,
+  recoverInterruptedTasks,
+} from "@/stores/utils/task-recovery";
 
 function createTask(overrides: Partial<TranscriptionTask>): TranscriptionTask {
   return {
@@ -39,7 +42,7 @@ describe("recoverInterruptedTasks", () => {
 
     expect(recoveredCount).toBe(1);
     expect(recovered[0].status).toBe("interrupted");
-    expect(recovered[0].error).toBeNull();
+    expect(recovered[0].error).toBe(INTERRUPTED_TRANSCRIPTION_ERROR);
     expect(recovered[0].completedAt).not.toBeNull();
     expect(recovered[1].status).toBe("queued");
   });

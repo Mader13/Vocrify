@@ -1,6 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface AlertDialogProps {
   open: boolean;
@@ -16,7 +17,7 @@ const AlertDialog = ({ open, onOpenChange, children }: AlertDialogProps) => {
   );
 };
 
-interface AlertDialogContentProps extends React.HTMLAttributes<HTMLDivElement> {}
+type AlertDialogContentProps = React.HTMLAttributes<HTMLDivElement>;
 
 const AlertDialogContent = React.forwardRef<HTMLDivElement, AlertDialogContentProps>(
   ({ className, children, onClick, ...props }, ref) => {
@@ -91,9 +92,8 @@ const AlertDialogAction = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
 >(({ className, ...props }, ref) => {
-  const { Button: ButtonComponent } = require("@/components/ui/button");
   return (
-    <ButtonComponent
+    <Button
       ref={ref}
       className={cn(className)}
       {...props}
@@ -106,9 +106,8 @@ const AlertDialogCancel = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
 >(({ className, ...props }, ref) => {
-  const { Button: ButtonComponent } = require("@/components/ui/button");
   return (
-    <ButtonComponent
+    <Button
       ref={ref}
       variant="outline"
       className={cn(className)}

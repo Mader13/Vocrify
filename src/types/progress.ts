@@ -14,6 +14,11 @@ export interface ProgressMetrics {
   gpuUsage?: number;
   cpuUsage?: number;
   memoryUsage?: number;
+  modelLoadMs?: number;
+  decodeMs?: number;
+  inferenceMs?: number;
+  diarizationMs?: number;
+  totalMs?: number;
 }
 
 export interface ProgressEvent {

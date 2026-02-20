@@ -2,20 +2,20 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Upload, AlertCircle, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout";
 import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer, VideoPlayer } from "@/components/features";
-import { useTasks, useUIStore, useSetupStore, usePlaybackStore } from "@/stores";
+import { getTaskStatusById, useTasks, useUIStore, useSetupStore, usePlaybackStore } from "@/stores";
 import {
-  onProgressUpdate,
-  onTranscriptionError,
-  onSegmentUpdate,
-} from "@/services/tauri";
-import { transcribeWithFallback } from "@/services/transcription";
+  subscribeToTranscriptionRuntime,
+  transcribeWithFallback,
+} from "@/services/transcription";
+import { getQueuedTaskIdsToStart } from "@/services/transcription-queue";
+import { collectStaleProcessingTaskIds } from "@/services/transcription-heartbeat";
 import { initializeModelsStore, useModelsStore } from "@/stores/modelsStore";
 import { initializeNotifications as initNotificationEmitter, getNotificationEmitter } from "@/services/notifications";
 import { Button } from "@/components/ui/button";
 import { NotificationProvider } from "@/components/ui/notifications";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
-import type { DiarizationProvider, AIModel, DeviceType, Language, TranscriptionResult } from "@/types";
+import type { DiarizationProvider, AIModel, DeviceType, Language } from "@/types";
 import type { FileWithSettings } from "@/components/features/DiarizationOptionsModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useModelValidation, useDropZone } from "@/hooks";
@@ -105,7 +105,14 @@ function MainApplication() {
 
   const { validateModelSelection, modelError, setModelError, selectedModel } = useModelValidation();
   const { availableModels, loadModels } = useModelsStore();
-  const { defaultDevice, defaultLanguage, diarizationProvider, enginePreference, enableDiarization } = useTasks((s) => s.settings);
+  const {
+    defaultDevice,
+    defaultLanguage,
+    diarizationProvider,
+    enginePreference,
+    enableDiarization,
+    maxConcurrentTasks,
+  } = useTasks((s) => s.settings);
 
   const [pendingFiles, setPendingFiles] = useState<SelectedFile[]>([]);
   const [isDiarizationModalOpen, setIsDiarizationModalOpen] = useState(false);
@@ -131,7 +138,7 @@ function MainApplication() {
         setSelectedTask(null);
       }
     }
-  }, [currentView, setSelectedTask]);
+  }, [currentView, setSelectedTask, selectedTaskId]);
 
   // NOTE: loadModels is intentionally NOT in the dependency array.
   // It's already called via initializeModelsStore() at startup.
@@ -139,7 +146,7 @@ function MainApplication() {
   // Models are reloaded when the user visits the Models section via ModelsManagement component.
   useEffect(() => {
     loadModels();
-  }, []);
+  }, [loadModels]);
 
   useEffect(() => {
     initializeModelsStore();
@@ -148,55 +155,20 @@ function MainApplication() {
       logger.error("Failed to initialize notification emitter", { error });
     });
 
-    const unsubscribers: (() => void)[] = [];
+    let unlistenRuntime: (() => void) | null = null;
 
-    onProgressUpdate((event) => {
-      updateTaskProgress(event.taskId, event.progress, event.stage, event.metrics);
-    }).then((unlisten) => unsubscribers.push(unlisten));
-
-    // Listen to CustomEvent from transcription.ts (Rust path)
-    const handleTranscriptionComplete = (e: CustomEvent<{ taskId: string; result: TranscriptionResult }>) => {
-      const { taskId, result } = e.detail;
-      logger.transcriptionDebug("Transcription complete", {
-        taskId,
-        segments: result.segments?.length,
-        speakerTurns: result.speakerTurns?.length,
-        speakerSegments: result.speakerSegments?.length,
-        hasSpeakerData: !!(result.speakerTurns && result.speakerTurns.length > 0)
-      });
-      if (result.speakerTurns) {
-        logger.transcriptionDebug("Speaker turns", { taskId, speakerTurns: result.speakerTurns.slice(0, 3) });
-      }
-      if (result.speakerSegments) {
-        logger.transcriptionDebug("Speaker segments", { taskId, speakerSegments: result.speakerSegments.slice(0, 3) });
-      }
-      updateTaskStatus(taskId, "completed", result);
-    };
-    window.addEventListener("transcription-complete", handleTranscriptionComplete as EventListener);
-    unsubscribers.push(() => window.removeEventListener("transcription-complete", handleTranscriptionComplete as EventListener));
-
-    onTranscriptionError((taskId, error) => {
-      const existingTask = useTasks.getState().tasks.find((t) => t.id === taskId);
-
-      if (existingTask?.status === "completed" || existingTask?.status === "cancelled" || existingTask?.status === "interrupted") {
-        logger.transcriptionWarn("Ignoring late transcription error for finalized task", {
-          taskId,
-          status: existingTask.status,
-          error,
-        });
-        return;
-      }
-
-      updateTaskStatus(taskId, "failed", undefined, error);
-    }).then((unlisten) => unsubscribers.push(unlisten));
-
-    onSegmentUpdate(({ taskId, segment }) => {
-      appendTaskSegment(taskId, segment.segment, segment.index, segment.total);
-      appendStreamingSegment(taskId, segment.segment);
-    }).then((unlisten) => unsubscribers.push(unlisten));
+    subscribeToTranscriptionRuntime({
+      updateTaskProgress,
+      updateTaskStatus,
+      appendTaskSegment,
+      appendStreamingSegment,
+      getTaskStatus: (taskId) => getTaskStatusById(taskId),
+    }).then((unlisten) => {
+      unlistenRuntime = unlisten;
+    });
 
     return () => {
-      unsubscribers.forEach((unlisten) => unlisten());
+      unlistenRuntime?.();
       // Clean up NotificationEmitter to prevent duplicate event handlers
       try {
         const emitter = getNotificationEmitter();
@@ -215,20 +187,17 @@ function MainApplication() {
     const checkStaleTasks = () => {
       const now = Date.now();
       const tasks = useTasks.getState().tasks;
+      const staleTaskIds = collectStaleProcessingTaskIds(tasks, now, STALE_THRESHOLD_MS);
 
-      tasks.forEach((task) => {
-        if (task.status === "processing") {
-          const lastProgressTime = task.lastProgressUpdate ?? 0;
-          const timeSinceLastUpdate = now - lastProgressTime;
+      staleTaskIds.forEach((taskId) => {
+        const task = tasks.find((item) => item.id === taskId);
+        const timeSinceLastUpdate = task?.lastProgressUpdate ? now - task.lastProgressUpdate : undefined;
 
-          if (timeSinceLastUpdate > STALE_THRESHOLD_MS && lastProgressTime > 0) {
-            logger.transcriptionWarn("Marking task as interrupted - no progress updates received", {
-              taskId: task.id,
-              timeSinceLastUpdate,
-            });
-            updateTaskStatus(task.id, "interrupted", undefined, "Transcription was interrupted: no progress received from backend. The task may have failed or been terminated.");
-          }
-        }
+        logger.transcriptionWarn("Marking task as interrupted - no progress updates received", {
+          taskId,
+          timeSinceLastUpdate,
+        });
+        updateTaskStatus(taskId, "interrupted", undefined, "Transcription was interrupted: no progress received from backend. The task may have failed or been terminated.");
       });
     };
 
@@ -240,11 +209,12 @@ function MainApplication() {
 
   useEffect(() => {
     const processedTasks = new Set<string>();
+    const startTaskIds = new Set(getQueuedTaskIdsToStart(tasks, maxConcurrentTasks));
 
     logger.transcriptionDebug("Processing tasks", { total: tasks.length });
     tasks.forEach((task) => {
       logger.transcriptionDebug("Task status", { taskId: task.id, status: task.status });
-      if (task.status === "queued" && !processedTasks.has(task.id) && task.filePath) {
+      if (task.status === "queued" && startTaskIds.has(task.id) && !processedTasks.has(task.id) && task.filePath) {
         logger.transcriptionInfo("Starting task", { taskId: task.id, fileName: task.filePath });
         processedTasks.add(task.id);
         updateTaskStatus(task.id, "processing");
@@ -254,7 +224,7 @@ function MainApplication() {
         });
       }
     });
-  }, [tasks, updateTaskStatus, enginePreference]);
+  }, [tasks, updateTaskStatus, enginePreference, maxConcurrentTasks]);
 
   const handleFilesFromDialog = useCallback((files: Array<{ path: string; name: string; size: number }>) => {
     if (!validateModelSelection()) {

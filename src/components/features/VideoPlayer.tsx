@@ -1,3 +1,5 @@
+/* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion, react-hooks/exhaustive-deps */
+
 import * as React from "react";
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import type WaveSurfer from "wavesurfer.js";

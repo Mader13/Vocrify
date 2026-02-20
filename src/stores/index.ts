@@ -21,6 +21,7 @@ import type {
 } from "@/types";
 import { logger } from "@/lib/logger";
 import { recoverInterruptedTasks } from "@/stores/utils/task-recovery";
+import { canArchiveTask } from "@/stores/utils/archive-eligibility";
 
 export type ViewType = "transcription" | "models" | "settings" | "archive";
 
@@ -225,7 +226,9 @@ export const useTasks = create<TasksState>()(
         logger.transcriptionDebug("Progress update", { taskId, progress, stage, metrics });
         set((state) => ({
           tasks: state.tasks.map((task) =>
-            task.id === taskId ? { ...task, progress, ...(stage && { stage }), ...(metrics && { metrics }) } : task,
+            task.id === taskId
+              ? { ...task, progress, lastProgressUpdate: Date.now(), ...(stage && { stage }), ...(metrics && { metrics }) }
+              : task,
           ),
         }));
       },
@@ -247,6 +250,7 @@ export const useTasks = create<TasksState>()(
               ...(result && { result }),
               ...(error !== undefined && { error }),
               ...(status === "processing" && !task.startedAt && { startedAt: new Date() }),
+              ...(status === "processing" && { lastProgressUpdate: Date.now() }),
             };
             return updatedTask;
           });
@@ -307,12 +311,17 @@ export const useTasks = create<TasksState>()(
               newSegments.push(segment);
             }
 
+            const result = taskWithResult.result;
+            if (!result) {
+              return taskWithResult;
+            }
+
             return {
               ...taskWithResult,
               result: {
-                ...taskWithResult.result!,
+                ...result,
                 segments: newSegments,
-                duration: Math.max(taskWithResult.result!.duration || 0, segment.end),
+                duration: Math.max(result.duration || 0, segment.end),
               },
             };
           }),
@@ -472,6 +481,11 @@ export const useTasks = create<TasksState>()(
         if (!task) {
           logger.error("Archive task not found", { taskId });
           return;
+        }
+
+        if (!canArchiveTask(task)) {
+          logger.warn("Archive denied for non-archivable task", { taskId, status: task.status });
+          throw new Error(`Task status '${task.status}' cannot be archived`);
         }
 
         const { convertToMp3, getArchiveDir, getFileSize, copyFile, compressMedia } = await import("@/services/tauri");
@@ -777,6 +791,10 @@ const useUIState = create<UIState>((set, get) => ({
 }));
 
 export const useUIStore = useUIState;
+
+export function getTaskStatusById(taskId: string): TaskStatus | null {
+  return useTasks.getState().tasks.find((task) => task.id === taskId)?.status ?? null;
+}
 
 // Re-export models store
 export { useModelsStore, initializeModelsStore } from "./modelsStore";

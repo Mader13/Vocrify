@@ -1,3 +1,5 @@
+/* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
+
 /**
  * Logger utility for transcription and upload processes
  */
@@ -25,6 +27,28 @@ export interface LoggerConfig {
   enableConsole: boolean;
   enableStorage: boolean;
   maxStorageEntries: number;
+}
+
+export function formatPerformanceMetrics(metrics?: {
+  modelLoadMs?: number;
+  decodeMs?: number;
+  inferenceMs?: number;
+  diarizationMs?: number;
+  totalMs?: number;
+}): string {
+  if (!metrics) {
+    return "";
+  }
+
+  const entries = [
+    metrics.modelLoadMs !== undefined ? `modelLoad=${metrics.modelLoadMs}ms` : null,
+    metrics.decodeMs !== undefined ? `decode=${metrics.decodeMs}ms` : null,
+    metrics.inferenceMs !== undefined ? `inference=${metrics.inferenceMs}ms` : null,
+    metrics.diarizationMs !== undefined ? `diarization=${metrics.diarizationMs}ms` : null,
+    metrics.totalMs !== undefined ? `total=${metrics.totalMs}ms` : null,
+  ].filter((value): value is string => value !== null);
+
+  return entries.join(" ");
 }
 
 class Logger {

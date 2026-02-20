@@ -51,6 +51,28 @@ export async function onSegmentUpdate(
   );
 }
 
+export interface TranscriptionTransportHandlers {
+  onProgress: (event: ProgressEvent) => void;
+  onError: (taskId: string, error: string) => void;
+  onSegment: (event: { taskId: string; segment: SegmentEvent }) => void;
+}
+
+export async function subscribeToTranscriptionTransportEvents(
+  handlers: TranscriptionTransportHandlers,
+): Promise<() => void> {
+  const [unlistenProgress, unlistenError, unlistenSegment] = await Promise.all([
+    onProgressUpdate(handlers.onProgress),
+    onTranscriptionError(handlers.onError),
+    onSegmentUpdate(handlers.onSegment),
+  ]);
+
+  return () => {
+    unlistenProgress();
+    unlistenError();
+    unlistenSegment();
+  };
+}
+
 export async function onModelDownloadProgress(
   callback: (progress: ModelDownloadProgress) => void
 ): Promise<UnlistenFn> {

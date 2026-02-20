@@ -7,6 +7,7 @@ vi.mock("@/services/tauri", () => ({
   checkRuntimeReadiness: vi.fn(),
   getAvailableDevices: vi.fn(),
   isSetupComplete: vi.fn(),
+  isSetupCompleteFast: vi.fn(),
   markSetupComplete: vi.fn(),
   resetSetup: vi.fn(),
 }));
@@ -18,6 +19,7 @@ import {
   checkRuntimeReadiness,
   getAvailableDevices,
   isSetupComplete,
+  isSetupCompleteFast,
   markSetupComplete,
   resetSetup,
 } from "@/services/tauri";
@@ -29,6 +31,7 @@ const mockedCheckPythonEnvironment = vi.mocked(checkPythonEnvironment);
 const mockedCheckRuntimeReadiness = vi.mocked(checkRuntimeReadiness);
 const mockedGetAvailableDevices = vi.mocked(getAvailableDevices);
 const mockedIsSetupComplete = vi.mocked(isSetupComplete);
+const mockedIsSetupCompleteFast = vi.mocked(isSetupCompleteFast);
 const mockedMarkSetupComplete = vi.mocked(markSetupComplete);
 const mockedResetSetup = vi.mocked(resetSetup);
 
@@ -53,6 +56,7 @@ describe("setupStore", () => {
     resetStore();
 
     mockedIsSetupComplete.mockResolvedValue({ success: true, data: false });
+    mockedIsSetupCompleteFast.mockResolvedValue({ success: true, data: false });
     mockedCheckPythonEnvironment.mockResolvedValue({
       success: true,
       data: {
@@ -123,7 +127,7 @@ describe("setupStore", () => {
   });
 
   it("initialize marks setup complete when backend says complete", async () => {
-    mockedIsSetupComplete.mockResolvedValueOnce({ success: true, data: true });
+    mockedIsSetupCompleteFast.mockResolvedValueOnce({ success: true, data: true });
 
     await useSetupStore.getState().initialize();
 
@@ -168,7 +172,7 @@ describe("setupStore", () => {
     const state = useSetupStore.getState();
     expect(state.pythonCheck?.status).toBe("ok");
     expect(state.ffmpegCheck?.installed).toBe(true);
-    expect(state.deviceCheck?.status).toBe("ok");
+    expect(state.deviceCheck).toBe(null);
     expect(state.modelCheck?.status).toBe("ok");
     expect(state.runtimeReadiness?.ready).toBe(true);
   });
@@ -191,29 +195,36 @@ describe("setupStore", () => {
   });
 
   it("completeSetup marks store complete when runtime is ready", async () => {
+    await useSetupStore.getState().checkPython();
+    await useSetupStore.getState().checkFFmpeg();
     await useSetupStore.getState().completeSetup();
     expect(useSetupStore.getState().isComplete).toBe(true);
   });
 
   it("completeSetup fails when runtime is not ready", async () => {
-    mockedCheckRuntimeReadiness.mockResolvedValueOnce({
+    mockedCheckPythonEnvironment.mockResolvedValueOnce({
       success: true,
       data: {
-        ready: false,
-        pythonReady: false,
-        ffmpegReady: true,
-        pythonMessage: "python missing",
-        ffmpegMessage: "ok",
-        message: "Runtime is not ready",
-        checkedAt: "2026-02-16T00:00:00.000Z",
+        status: "error",
+        version: null,
+        executable: null,
+        inVenv: false,
+        pytorchInstalled: false,
+        pytorchVersion: null,
+        cudaAvailable: false,
+        mpsAvailable: false,
+        message: "python missing",
       },
     });
+
+    await useSetupStore.getState().checkPython();
+    await useSetupStore.getState().checkFFmpeg();
 
     await useSetupStore.getState().completeSetup();
 
     const state = useSetupStore.getState();
     expect(state.isComplete).toBe(false);
-    expect(state.error).toContain("Runtime is not ready");
+    expect(state.error).toContain("Python check not completed or failed");
     expect(mockedMarkSetupComplete).not.toHaveBeenCalled();
   });
 

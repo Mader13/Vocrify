@@ -14,10 +14,121 @@
 import type {
   TranscriptionOptions,
   EnginePreference,
+  TranscriptionResult,
+  ProgressEvent,
+  SegmentEvent,
+  TaskStatus,
+  ProgressStage,
 } from "@/types";
-import { startTranscription } from "./tauri";
+import {
+  onTranscriptionComplete,
+  startTranscription,
+} from "./tauri";
+import { subscribeToTranscriptionTransportEvents } from "./tauri/events";
 import { logger } from "@/lib/logger";
 import { invoke } from "@tauri-apps/api/core";
+
+let loadedRustModel: string | null = null;
+
+type UpdateTaskStatus = (
+  taskId: string,
+  status: TaskStatus,
+  result?: TranscriptionResult,
+  error?: string,
+) => void;
+
+interface CompletionPayload {
+  taskId: string;
+  result: TranscriptionResult;
+}
+
+function logCompletion(taskId: string, result: TranscriptionResult): void {
+  logger.transcriptionDebug("Transcription complete", {
+    taskId,
+    segments: result.segments?.length,
+    speakerTurns: result.speakerTurns?.length,
+    speakerSegments: result.speakerSegments?.length,
+    hasSpeakerData: !!(result.speakerTurns && result.speakerTurns.length > 0),
+  });
+}
+
+function completeTask(
+  payload: CompletionPayload,
+  updateTaskStatus: UpdateTaskStatus,
+): void {
+  logCompletion(payload.taskId, payload.result);
+  updateTaskStatus(payload.taskId, "completed", payload.result);
+}
+
+export async function subscribeToTranscriptionCompletion(
+  updateTaskStatus: UpdateTaskStatus,
+): Promise<() => void> {
+  const handleCompletion = (payload: CompletionPayload) => {
+    completeTask(payload, updateTaskStatus);
+  };
+
+  const unlistenTauri = await onTranscriptionComplete((taskId, result) => {
+    handleCompletion({ taskId, result });
+  });
+
+  const handleWindowCompletion = (event: Event) => {
+    const detail = (event as CustomEvent<CompletionPayload>).detail;
+    if (!detail?.taskId || !detail?.result) {
+      return;
+    }
+
+    handleCompletion(detail);
+  };
+
+  window.addEventListener("transcription-complete", handleWindowCompletion);
+
+  return () => {
+    unlistenTauri();
+    window.removeEventListener("transcription-complete", handleWindowCompletion);
+  };
+}
+
+interface TranscriptionRuntimeHandlers {
+  updateTaskProgress: (taskId: string, progress: number, stage?: ProgressStage, metrics?: ProgressEvent["metrics"]) => void;
+  updateTaskStatus: UpdateTaskStatus;
+  appendTaskSegment: (taskId: string, segment: SegmentEvent["segment"], index: number, totalSegments: number | null) => void;
+  appendStreamingSegment: (taskId: string, segment: SegmentEvent["segment"]) => void;
+  getTaskStatus: (taskId: string) => TaskStatus | null;
+}
+
+export async function subscribeToTranscriptionRuntime(
+  handlers: TranscriptionRuntimeHandlers,
+): Promise<() => void> {
+  const unlistenTransport = await subscribeToTranscriptionTransportEvents({
+    onProgress: (event: ProgressEvent) => {
+      handlers.updateTaskProgress(event.taskId, event.progress, event.stage, event.metrics);
+    },
+    onError: (taskId: string, error: string) => {
+      const status = handlers.getTaskStatus(taskId);
+      if (status === "completed" || status === "cancelled" || status === "interrupted") {
+        logger.transcriptionWarn("Ignoring late transcription error for finalized task", {
+          taskId,
+          status,
+          error,
+        });
+        return;
+      }
+
+      handlers.updateTaskStatus(taskId, "failed", undefined, error);
+    },
+    onSegment: ({ taskId, segment }: { taskId: string; segment: SegmentEvent }) => {
+      handlers.appendTaskSegment(taskId, segment.segment, segment.index, segment.total);
+      handlers.appendStreamingSegment(taskId, segment.segment);
+    },
+  });
+
+  const unlistenCompletion = await subscribeToTranscriptionCompletion(handlers.updateTaskStatus);
+
+  return () => {
+    unlistenTransport();
+    unlistenCompletion();
+  };
+}
 
 const RUST_UNSUPPORTED_CONTAINER_EXTENSIONS = new Set([
   "mp4",
@@ -47,14 +158,13 @@ function shouldBypassRustForFile(filePath: string): boolean {
 
 /**
  * Check if a model should use Rust transcribe-rs
- * Phase 3: transcribe-rs supports Whisper, Parakeet, Moonshine, SenseVoice
+ * Phase 3: transcribe-rs supports Whisper, Parakeet, Moonshine
  */
 export function shouldUseRustEngine(model: string): boolean {
   // All transcribe-rs supported models use Rust
   if (model.startsWith("whisper") ||
       model.startsWith("parakeet") || 
-      model.startsWith("moonshine") ||
-      model.startsWith("sense")) {
+      model.startsWith("moonshine")) {
     return true;
   }
 
@@ -144,7 +254,10 @@ export async function transcribeWithFallback(
       });
 
       // Ensure model is loaded for transcribe-rs before transcription.
-      await invoke("load_model_rust", { modelName: options.model });
+      if (loadedRustModel !== options.model) {
+        await invoke("load_model_rust", { modelName: options.model });
+        loadedRustModel = options.model;
+      }
 
       // Match Rust command schema (`RustTranscriptionOptions`) for transcribe_rust.
       const numSpeakersAsNumber = typeof options.numSpeakers === "string"
@@ -174,6 +287,13 @@ export async function transcribeWithFallback(
           speaker?: string;
           confidence: number;
         }>;
+        metrics?: {
+          modelLoadMs?: number;
+          decodeMs?: number;
+          inferenceMs?: number;
+          diarizationMs?: number;
+          totalMs?: number;
+        };
       }>("transcribe_rust", {
         taskId,
         filePath,
@@ -210,6 +330,7 @@ export async function transcribeWithFallback(
             duration: result.duration,
             speakerTurns: result.speakerTurns,
             speakerSegments: result.speakerSegments,
+            metrics: result.metrics,
           },
         },
       });
@@ -218,6 +339,10 @@ export async function transcribeWithFallback(
       return { success: true };
     } catch (rustError) {
       const errorMessage = rustError instanceof Error ? rustError.message : String(rustError);
+
+      if (errorMessage.includes("model") || errorMessage.includes("load")) {
+        loadedRustModel = null;
+      }
 
       // Cancelled by user — do not fall back to Python
       if (errorMessage.includes("CANCELLED")) {

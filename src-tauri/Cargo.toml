@@ -41,7 +41,7 @@ bzip2 = "0.4"
 # Phase 3: transcribe-rs - Unified Rust Transcription Engine
 # ============================================================================
 #
-# transcribe-rs supports multiple engines: Whisper, Parakeet, Moonshine, SenseVoice
+# transcribe-rs supports multiple engines: Whisper, Parakeet, Moonshine
 # GPU acceleration:
 # - macOS: Metal (automatic)
 # - Windows/Linux: Vulkan (AMD/Intel) or CUDA (NVIDIA)
@@ -65,7 +65,6 @@ transcribe-rs = { version = "=0.2.2", optional = true, features = ["whisper", "p
 # To enable: cargo build --features rust-transcribe
 default = ["rust-transcribe"]
 rust-transcribe = ["dep:transcribe-rs"]
-rust-whisper = []  # Deprecated: kept for backward compatibility
 
 # Build requirements for rust-transcribe:
 # - macOS: No additional SDK needed (Metal is built-in) ✓

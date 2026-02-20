@@ -4,7 +4,7 @@
 //! Supports multiple engines: Whisper (GGML), Parakeet (ONNX)
 //!
 //! Usage:
-//! ```
+//! ```ignore
 //! let manager = TranscriptionManager::new(models_dir)?;
 //! manager.load_model("whisper-base").await?;
 //! let result = manager.transcribe_file(audio_path).await?;
@@ -62,6 +62,8 @@ pub struct TranscriptionResult {
     pub speaker_turns: Option<Vec<SpeakerTurn>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_segments: Option<Vec<TranscriptionSegment>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<crate::ProgressMetrics>,
 }
 
 /// A speaker turn from diarization
@@ -229,6 +231,8 @@ impl TranscriptionManager {
         options: &TranscriptionOptions,
         hf_token: Option<&str>,
     ) -> Result<TranscriptionResult, TranscriptionError> {
+        let total_start = std::time::Instant::now();
+
         // Get model name with minimal lock duration
         let model_name = {
             let current = self.current_model.lock().unwrap();
@@ -247,6 +251,7 @@ impl TranscriptionManager {
             audio_path, engine_type);
 
         // Perform transcription
+        let inference_start = std::time::Instant::now();
         let mut result = match engine_type {
             EngineType::Whisper => {
                 self.transcribe_with_whisper(audio_path, &model_path, options).await
@@ -262,9 +267,13 @@ impl TranscriptionManager {
             }
         }?;
 
+        let inference_ms = inference_start.elapsed().as_millis() as u64;
+        let mut diarization_ms: Option<u64> = None;
+
         // Run diarization if enabled
         if options.enable_diarization {
             eprintln!("[INFO] Diarization enabled, running...");
+            let diarization_start = std::time::Instant::now();
 
             match self.run_diarization(audio_path, options, hf_token).await {
                 Ok((speaker_turns, speaker_segments)) => {
@@ -289,7 +298,16 @@ impl TranscriptionManager {
                     // Continue without speaker info
                 }
             }
+
+            diarization_ms = Some(diarization_start.elapsed().as_millis() as u64);
         }
+
+        result.metrics = Some(crate::ProgressMetrics {
+            inference_ms: Some(inference_ms),
+            diarization_ms,
+            total_ms: Some(total_start.elapsed().as_millis() as u64),
+            ..Default::default()
+        });
 
         Ok(result)
     }
@@ -338,7 +356,7 @@ impl TranscriptionManager {
         });
 
         // Perform transcription (0.2.2 requires owned Vec and WhisperInferenceParams)
-        let result = engine.transcribe_samples(audio_data.clone(), params)
+        let result = engine.transcribe_samples(audio_data, params)
             .map_err(|e| TranscriptionError::Transcription(format!("{:?}", e)))?;
 
         let elapsed = start_time.elapsed();
@@ -371,6 +389,7 @@ impl TranscriptionManager {
             duration,
             speaker_turns: None,
             speaker_segments: None,
+            metrics: None,
         })
     }
 
@@ -397,7 +416,7 @@ impl TranscriptionManager {
         let start_time = std::time::Instant::now();
 
         // Perform transcription (0.2.2 requires owned Vec)
-        let result = engine.transcribe_samples(audio_data.clone(), None)
+        let result = engine.transcribe_samples(audio_data, None)
             .map_err(|e| TranscriptionError::Transcription(format!("{:?}", e)))?;
 
         let elapsed = start_time.elapsed();
@@ -427,6 +446,7 @@ impl TranscriptionManager {
             duration,
             speaker_turns: None,
             speaker_segments: None,
+            metrics: None,
         })
     }
 
@@ -460,8 +480,7 @@ impl TranscriptionManager {
         let start_time = std::time::Instant::now();
 
         // Perform transcription (0.2.2 requires owned Vec)
-        let audio_data_owned = audio_data.clone();
-        let result = engine.transcribe_samples(audio_data_owned, None)
+        let result = engine.transcribe_samples(audio_data, None)
             .map_err(|e| TranscriptionError::Transcription(format!("{:?}", e)))?;
 
         let elapsed = start_time.elapsed();
@@ -491,6 +510,7 @@ impl TranscriptionManager {
             duration,
             speaker_turns: None,
             speaker_segments: None,
+            metrics: None,
         })
     }
 

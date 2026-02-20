@@ -176,7 +176,8 @@ function VirtualizedSegmentRow(
 
   // Check if this segment is the currently highlighted search result
   const isHighlighted = highlightedSearchIndex !== undefined && matchingIndices?.[highlightedSearchIndex] === index;
-  const matchIndex = matchingIndices?.indexOf(index) !== -1 ? matchingIndices!.indexOf(index) + 1 : undefined;
+  const matchedIndex = matchingIndices?.indexOf(index) ?? -1;
+  const matchIndex = matchedIndex >= 0 ? matchedIndex + 1 : undefined;
   const totalMatches = matchingIndices?.length;
 
   return (

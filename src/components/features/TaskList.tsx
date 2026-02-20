@@ -1,5 +1,6 @@
 import {
   Clock,
+  Clock3,
   Loader2,
   Check,
   AlertTriangle,
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ProgressEnhanced } from "@/components/ui/progress-enhanced";
 import { cn, formatFileSize, formatDateTime } from "@/lib/utils";
 import { useTasks, useTasksByView, useUIStore } from "@/stores";
+import { canArchiveTask } from "@/stores/utils/archive-eligibility";
 import type { TranscriptionTask, TaskStatus } from "@/types";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -70,7 +72,12 @@ function TaskItemTooltip({ fileName, targetRef }: TaskItemTooltipProps) {
     if (!targetRef.current) return;
 
     const updatePosition = () => {
-      const rect = targetRef.current!.getBoundingClientRect();
+      const target = targetRef.current;
+      if (!target) {
+        return;
+      }
+
+      const rect = target.getBoundingClientRect();
       setPosition({
         top: rect.top + rect.height / 2,
         left: rect.right,
@@ -215,6 +222,12 @@ function TaskItem({ task, compact, onHoverStart, onHoverEnd }: TaskItemProps) {
             <p className="text-xs text-muted-foreground">
               {formatFileSize(task.fileSize)} · {formatDateTime(task.createdAt)}
             </p>
+            {task.status === "queued" && (
+              <div className="mt-1 inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                <Clock3 className="h-3 w-3" />
+                In queue
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
@@ -232,7 +245,22 @@ function TaskItem({ task, compact, onHoverStart, onHoverEnd }: TaskItemProps) {
               </Button>
             )}
 
-            {(task.status === "completed" || task.status === "failed" || task.status === "cancelled" || task.status === "interrupted") && (
+            {task.status === "queued" && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
+                title="Remove from queue"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeTask(task.id);
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+
+            {canArchiveTask(task) && (
               <>
                 <ArchiveButton task={task} iconOnly />
                 <Button

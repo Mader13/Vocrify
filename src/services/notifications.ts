@@ -10,6 +10,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { useTasks } from "@/stores";
 import type { FFmpegProgress } from "@/services/tauri";
 import type {
   ProgressEvent,
@@ -372,7 +373,7 @@ export class NotificationEmitter {
     });
   }
 
-  private onTranscriptionComplete(taskId: string, result: { segments: any[] }): void {
+  private onTranscriptionComplete(taskId: string, result: { segments: unknown[] }): void {
     const uiStore = useUINotificationStore.getState();
 
     const task = this.getTaskById(taskId);
@@ -424,8 +425,6 @@ export class NotificationEmitter {
   // ------------------------------------------------------------------------
 
   private getTaskById(taskId: string): TranscriptionTask | undefined {
-    // Import dynamically to avoid circular dependency
-    const { useTasks } = require("@/stores");
     const tasks = useTasks.getState().tasks;
     return tasks.find((t: TranscriptionTask) => t.id === taskId);
   }
@@ -710,7 +709,7 @@ export function emitTranscriptionNotification(
   task: TranscriptionTask
 ): void {
   switch (status) {
-    case "completed":
+    case "completed": {
       const segmentCount = task.result?.segments.length ?? 0;
       notifySuccess(
         "Transcription Complete",
@@ -722,6 +721,7 @@ export function emitTranscriptionNotification(
         }
       );
       break;
+    }
 
     case "failed":
       notifyError(

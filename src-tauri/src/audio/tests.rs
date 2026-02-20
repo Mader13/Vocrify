@@ -1,33 +1,11 @@
 //! Audio module tests
 
 use super::*;
-use std::path::PathBuf;
-
-/// Create a test WAV file with known samples
-fn create_test_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[f32]) -> Result<()> {
-    use hound::{WavSpec, WavWriter};
-
-    let spec = WavSpec {
-        channels,
-        sample_rate,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-
-    let mut writer = WavWriter::create(path, spec)?;
-    for &sample in samples {
-        let clamped = sample.clamp(-1.0, 1.0);
-        let int_sample = (clamped * i16::MAX as f32) as i16;
-        writer.write_sample(int_sample)?;
-    }
-    writer.finalize()?;
-
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio::utils::intervals_overlap;
     use tempfile::tempdir;
 
     #[test]
@@ -50,7 +28,7 @@ mod tests {
             2,
         );
         let mono = stereo.to_mono();
-        
+
         assert_eq!(mono.channels, 1);
         assert_eq!(mono.samples.len(), 2);
         // Average of each stereo pair
@@ -63,9 +41,9 @@ mod tests {
         // Resample from 44100 to 16000
         let samples: Vec<f32> = (0..44100).map(|i| (i as f32 * 0.001).sin()).collect();
         let audio = AudioBuffer::new(samples, 44100, 1);
-        
+
         let resampled = audio.resample(16000);
-        
+
         assert_eq!(resampled.sample_rate, 16000);
         assert_eq!(resampled.channels, 1);
         // Should have approximately 16000 samples
@@ -77,10 +55,10 @@ mod tests {
         // 1 second of audio at 16kHz
         let samples: Vec<f32> = (0..16000).map(|i| (i as f32 * 0.001).sin()).collect();
         let audio = AudioBuffer::new(samples, 16000, 1);
-        
+
         // Slice from 250ms to 750ms (500ms = 8000 samples)
         let sliced = audio.slice(250, 750);
-        
+
         assert_eq!(sliced.sample_rate, 16000);
         assert_eq!(sliced.channels, 1);
         // 500ms should be 8000 samples
@@ -106,7 +84,7 @@ mod tests {
         assert_eq!(loaded.sample_rate, 16000);
         assert_eq!(loaded.channels, 1);
         assert_eq!(loaded.samples.len(), original.samples.len());
-        
+
         // Check samples are close (16-bit quantization)
         for (orig, loaded) in original.samples.iter().zip(loaded.samples.iter()) {
             assert!((orig - loaded).abs() < 0.01);
@@ -115,9 +93,6 @@ mod tests {
 
     #[test]
     fn test_to_whisper_format() {
-        let temp_dir = tempdir().unwrap();
-        let wav_path = temp_dir.path().join("test_stereo_44k.wav");
-
         // Create stereo 44.1kHz test audio
         let samples: Vec<f32> = (0..88200).map(|i| (i as f32 * 0.001).sin()).collect();
         let stereo = AudioBuffer::new(samples, 44100, 2);
@@ -143,7 +118,7 @@ mod tests {
 
         // Merge with 1000ms threshold
         let merged = merge_intervals(&intervals, 1000);
-        
+
         // Should merge first three (same speaker, gaps < 1000ms)
         // and last two (same speaker, no gap)
         assert_eq!(merged.len(), 2);

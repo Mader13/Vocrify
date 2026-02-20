@@ -19,8 +19,9 @@ export function recoverInterruptedTasks(
 
     return {
       ...task,
-      status: "processing" as TaskStatus,
-      completedAt: null,
+      status: "interrupted" as TaskStatus,
+      error: INTERRUPTED_TRANSCRIPTION_ERROR,
+      completedAt: new Date(),
     };
   });
 

@@ -358,7 +358,7 @@ export const NotificationItem = React.memo(
               className="h-full bg-current opacity-30"
               initial={{ width: "100%" }}
               animate={{
-                width: isPaused || isHovered ? `${(timeLeft / duration!) * 100}%` : "0%",
+                width: isPaused || isHovered ? `${duration ? (timeLeft / duration) * 100 : 0}%` : "0%",
               }}
               transition={{
                 duration: isPaused || isHovered ? 0.3 : timeLeft / 1000,

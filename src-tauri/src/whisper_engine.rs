@@ -7,10 +7,6 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use serde::{Deserialize, Serialize};
 
-// Conditional import based on feature flag
-#[cfg(feature = "rust-whisper")]
-use whisper_rs::{WhisperContext, WhisperContextParameters, FullParams, SamplingStrategy};
-
 /// Supported device types for transcription
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -101,65 +97,13 @@ impl Default for TranscriptionOptions {
     }
 }
 
-/// Whisper engine for transcription
-#[cfg(feature = "rust-whisper")]
-pub struct WhisperEngine {
-    context: WhisperContext,
-    device: DeviceType,
-    model_path: std::path::PathBuf,
-}
-
-/// Stub implementation when rust-whisper feature is disabled
-#[cfg(not(feature = "rust-whisper"))]
+/// Legacy Whisper engine surface kept for compatibility.
 pub struct WhisperEngine {
     device: DeviceType,
     model_path: std::path::PathBuf,
 }
 
 impl WhisperEngine {
-    /// Create a new WhisperEngine with the specified model and device
-    #[cfg(feature = "rust-whisper")]
-    pub fn new(model_path: &Path, device: DeviceType) -> Result<Self, WhisperError> {
-        if !model_path.exists() {
-            return Err(WhisperError::ModelNotFound(model_path.display().to_string()));
-        }
-
-        eprintln!("[INFO] Initializing WhisperEngine with device: {:?}", device);
-        eprintln!("[INFO] Model path: {:?}", model_path);
-
-        // Configure whisper context based on device
-        let params = WhisperContextParameters::default();
-
-        match device {
-            DeviceType::Cpu => {
-                // CPU mode - no GPU acceleration
-                eprintln!("[INFO] Using CPU mode");
-            }
-            DeviceType::Cuda | DeviceType::Metal | DeviceType::Vulkan => {
-                // GPU mode - whisper.cpp auto-detects GPU type at runtime
-                eprintln!("[INFO] Using GPU mode ({:?})", device);
-                // Note: whisper.cpp handles GPU selection internally
-                // The Vulkan build also supports CUDA through runtime detection
-            }
-        }
-
-        // Create context with parameters
-        let context = WhisperContext::new_with_params(
-            model_path.to_string_lossy().as_ref(),
-            params
-        ).map_err(|e| WhisperError::ContextInit(format!("{:?}", e)))?;
-
-        eprintln!("[INFO] WhisperEngine initialized successfully");
-
-        Ok(Self {
-            context,
-            device,
-            model_path: model_path.to_path_buf(),
-        })
-    }
-
-    /// Stub implementation when rust-whisper feature is disabled
-    #[cfg(not(feature = "rust-whisper"))]
     pub fn new(model_path: &Path, device: DeviceType) -> Result<Self, WhisperError> {
         if !model_path.exists() {
             return Err(WhisperError::ModelNotFound(model_path.display().to_string()));
@@ -174,91 +118,6 @@ impl WhisperEngine {
         })
     }
 
-    /// Transcribe audio samples
-    #[cfg(feature = "rust-whisper")]
-    pub fn transcribe(
-        &self,
-        audio: &[f32],
-        options: TranscriptionOptions,
-    ) -> Result<TranscriptionResult, WhisperError> {
-        eprintln!("[INFO] Starting transcription with {} audio samples", audio.len());
-        eprintln!("[INFO] Device: {:?}, Language: {:?}", self.device, options.language);
-
-        // Configure transcription parameters
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-
-        // Set language if specified
-        if let Some(ref lang) = options.language {
-            params.set_language(Some(lang));
-        }
-
-        // Enable translation if requested
-        if options.translate {
-            params.set_translate(true);
-        }
-
-        // Progress callbacks
-        if options.print_progress {
-            params.set_print_progress(true);
-        }
-
-        // Run transcription
-        let mut state = self.context.create_state()
-            .map_err(|e| WhisperError::Transcription(format!("Failed to create state: {:?}", e)))?;
-
-        state.full(params, audio)
-            .map_err(|e| WhisperError::Transcription(format!("Transcription failed: {:?}", e)))?;
-
-        // Extract segments
-        let num_segments = state.full_n_segments()
-            .map_err(|e| WhisperError::Transcription(format!("Failed to get segment count: {:?}", e)))?;
-
-        let mut segments = Vec::with_capacity(num_segments as usize);
-        let mut total_duration = 0.0f64;
-
-        for i in 0..num_segments {
-            let text = state.full_get_segment_text(i)
-                .map_err(|e| WhisperError::Transcription(format!("Failed to get segment text: {:?}", e)))?;
-
-            let start = state.full_get_segment_t0(i)
-                .map_err(|e| WhisperError::Transcription(format!("Failed to get segment start: {:?}", e)))?;
-
-            let end = state.full_get_segment_t1(i)
-                .map_err(|e| WhisperError::Transcription(format!("Failed to get segment end: {:?}", e)))?;
-
-            // Convert from centiseconds to seconds
-            let start_sec = start as f64 / 100.0;
-            let end_sec = end as f64 / 100.0;
-
-            total_duration = total_duration.max(end_sec);
-
-            segments.push(TranscriptionSegment {
-                start: start_sec,
-                end: end_sec,
-                text: text.trim().to_string(),
-                speaker: None, // Speaker diarization is handled separately
-                confidence: 1.0, // whisper.cpp doesn't provide confidence scores
-            });
-        }
-
-        // Detect language
-        let language = options.language.unwrap_or_else(|| {
-            // Try to get detected language from state
-            "auto".to_string()
-        });
-
-        eprintln!("[INFO] Transcription complete: {} segments, {:.2}s duration",
-            segments.len(), total_duration);
-
-        Ok(TranscriptionResult {
-            segments,
-            language,
-            duration: total_duration,
-        })
-    }
-
-    /// Stub implementation when rust-whisper feature is disabled
-    #[cfg(not(feature = "rust-whisper"))]
     pub fn transcribe(
         &self,
         _audio: &[f32],

@@ -214,6 +214,9 @@ function shouldBypassRustForFile(filePath: string): boolean {
 | **Core**                   |                                          |                                                           |
 | `lib.rs`                   | `src-tauri/src/lib.rs`                   | Main entry point, module organization, Tauri commands     |
 | `main.rs`                  | `src-tauri/src/main.rs`                  | Tauri app configuration, command routing                  |
+| `task_queue.rs`            | `src-tauri/src/task_queue.rs`            | Queue state/contracts extracted from `lib.rs`             |
+| `python_ipc.rs`            | `src-tauri/src/python_ipc.rs`            | Python stdout message parsing and error classification     |
+| `transcription_orchestrator.rs` | `src-tauri/src/transcription_orchestrator.rs` | Shared transcription orchestration helpers           |
 | **Transcription (Phase 3)**|                                          |                                                           |
 | `transcription_manager.rs` | `src-tauri/src/transcription_manager.rs` | **Primary**: transcribe-rs unified interface              |
 | `whisper_engine.rs`        | `src-tauri/src/whisper_engine.rs`        | Legacy whisper-rs module (deprecated, kept for reference) |
@@ -246,6 +249,7 @@ function shouldBypassRustForFile(filePath: string): boolean {
 
 - `tauri/index.ts` - Complete Tauri API abstraction (transcription, models, devices, dialogs)
 - `transcription.ts` - Transcription service with engine routing (Rust transcribe-rs → Python fallback)
+- `tauri/events.ts` - Transport-level event subscription helpers (`subscribeToTranscriptionTransportEvents`)
 - `storage.ts` - Local storage management
 - `notifications.ts` - Notification system with desktop support
 - `store.ts` - Zustand store with task and settings management
@@ -658,8 +662,14 @@ cargo build --features rust-transcribe
 - Embeddable/isolated Python can start without script directory on `sys.path` (notably in `src-tauri/target/debug/resources`), causing `ModuleNotFoundError: commands`. Keep the `main.py` startup guard that inserts `Path(__file__).resolve().parent` into `sys.path` before importing `commands`.
 - Rust audio decode currently fails on several media containers (`.mp4`, `.m4a`, `.mov`, `.mkv`, `.avi`, `.webm`) with "no supported format was detected"; in `auto` mode `transcribeWithFallback()` should bypass Rust for these extensions and call Python directly.
 - **Critical:** Never call `invoke("transcribe_rust")` directly from components. Always use `transcribeWithFallback()`.
+- Transport event wiring (`progress-update`, `segment-update`, `transcription-error`, `transcription-complete`) should be centralized in service layer (`subscribeToTranscriptionRuntime`) rather than directly in `App.tsx`.
 - Setup wizard checks (`check_python_environment`, `check_ffmpeg_status`, `check_models_status`) should not rely on `main.py --command` for embeddable Python: `main.py` imports `commands` package, which can fail before checks run if optional deps are missing. Prefer direct calls to `environment_checks.py` helpers.
 - Model downloads can appear stuck at 0% if Python process exits before emitting JSON progress (e.g., missing `requests`/`tenacity`/`huggingface_hub` in embeddable Python). Backend should emit `model-download-error` on any spawn/early-exit failure and remove task from `downloading_models` to avoid permanent stuck state.
+
+### Refactor Cleanup Notes (Phase 3)
+
+- Deprecated `rust-whisper` Cargo feature is retired from `src-tauri/Cargo.toml`; active path is `rust-transcribe`.
+- Legacy duplicate pure store action helpers under `src/stores/actions/` were removed; `src/stores/index.ts` is the single source of truth for runtime task/settings mutations.
 
 ### Python Env Gotcha (Windows)
 
