@@ -157,9 +157,8 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold tracking-tight">Workspace</p>
-            <p className="text-xs text-muted-foreground">Manage uploads and queue</p>
             <p className="text-[11px] text-muted-foreground">
-              Файлы можно перетаскивать прямо в окно приложения
+                Or simply drag & drop the file anywhere in the application window.
             </p>
           </div>
           <AddFilesButton onClick={handleAddFiles} variant="mobile" />

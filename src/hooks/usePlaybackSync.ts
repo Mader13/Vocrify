@@ -9,6 +9,29 @@ interface UsePlaybackSyncOptions {
   isWaveformReady: boolean;
 }
 
+function playVideoSafely(videoEl: HTMLVideoElement | null) {
+  if (!videoEl || !videoEl.paused) return;
+
+  try {
+    const playResult = videoEl.play();
+    if (playResult && typeof playResult.catch === "function") {
+      playResult.catch(console.error);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function pauseVideoSafely(videoEl: HTMLVideoElement | null) {
+  if (!videoEl || videoEl.paused) return;
+
+  try {
+    videoEl.pause();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 /**
  * Hook for synchronizing VideoPlayer state with playbackStore.
  * Handles:
@@ -38,14 +61,14 @@ export function usePlaybackSync({
 
     // If we're not the active player, pause
     if (!isActivePlayer) {
-      videoEl?.pause();
+      pauseVideoSafely(videoEl);
       ws?.pause?.();
       return;
     }
 
     // If we ARE the active player but store says we should be paused, pause
     if (!store.isPlaying) {
-      videoEl?.pause();
+      pauseVideoSafely(videoEl);
       ws?.pause?.();
     }
     // NOTE: We don't call play() here - let the video's own events handle that
@@ -58,13 +81,18 @@ export function usePlaybackSync({
       // Only respond if the event is for our task
       if (taskIdFromEvent !== taskId || !isActivePlayer) return;
       const videoEl = videoRef.current;
-      const ws = wavesurferRef.current as { play?: () => void } | null;
-      videoEl?.play().catch(console.error);
+      const ws = wavesurferRef.current as { play?: () => void; isPlaying?: () => boolean } | null;
+
+      playVideoSafely(videoEl);
+
       // Only trigger WaveSurfer play for audio-only tasks (no video element).
       // When a video element exists, WaveSurfer is muted and used solely for
       // visualization — calling ws.play() here would duplicate the audio.
       if (!videoEl) {
-        ws?.play?.();
+        const isWaveformAlreadyPlaying = ws?.isPlaying?.() ?? false;
+        if (!isWaveformAlreadyPlaying) {
+          ws?.play?.();
+        }
       }
     };
 
@@ -74,7 +102,7 @@ export function usePlaybackSync({
       if (taskIdFromEvent !== taskId || !isActivePlayer) return;
       const videoEl = videoRef.current;
       const ws = wavesurferRef.current as { pause?: () => void } | null;
-      videoEl?.pause();
+      pauseVideoSafely(videoEl);
       ws?.pause?.();
     };
 
@@ -136,7 +164,7 @@ export function usePlaybackSync({
     }
 
     if (store.isPlaying) {
-      videoEl?.play().catch(() => {});
+      playVideoSafely(videoEl);
       // Only play WaveSurfer for audio-only tasks (no video element).
       if (!videoEl) {
         ws?.play?.();

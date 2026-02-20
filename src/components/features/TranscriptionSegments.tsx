@@ -4,6 +4,7 @@ import { List } from "react-window";
 
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/lib/utils";
+import type { CompletedViewLayoutMode } from "@/components/features/completed-view-layout";
 import type { TranscriptionSegment } from "@/types";
 
 /**
@@ -43,6 +44,8 @@ export interface TranscriptionSegmentsProps {
   onSegmentClick: (index: number, startTime: number) => void;
   /** Whether video player is visible (affects height) */
   isVideoVisible?: boolean;
+  /** Layout mode for responsive height behavior */
+  layoutMode?: CompletedViewLayoutMode;
   /** Search query to highlight in segments */
   searchQuery?: string;
   /** Index of the currently highlighted search result (for navigation) */
@@ -84,23 +87,23 @@ function SegmentItem({ segment, isActive, onClick, searchQuery, isHighlighted, m
     <div
       onClick={onClick}
       className={cn(
-        "flex gap-2 sm:gap-4 py-2 sm:py-3 px-2 border-b last:border-0 cursor-pointer transition-all duration-300 ease-out hover:bg-muted/50",
+        "cursor-pointer border-b border-border/70 px-3 py-2.5 transition-colors duration-200 hover:bg-muted/45 sm:px-4 sm:py-3",
+        "flex gap-2 sm:gap-4 last:border-b-0",
         isActive && [
-          "bg-gradient-to-r from-primary/15 via-primary/8 to-transparent",
-          "border-l-4 border-l-primary border-primary/20",
-          "shadow-[inset_0_0_20px_rgba(var(--primary-rgb),0.05)]"
+          "border-l-2 border-l-primary bg-primary/10",
+          "shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--primary)_18%,transparent)]"
         ],
         isHighlighted && !isActive && [
-          "bg-blue-500/10 border-l-4 border-l-blue-500"
+          "border-l-2 border-l-foreground/20 bg-accent/60"
         ]
       )}
     >
       <div className="shrink-0 flex flex-col items-start gap-1">
         <div className={cn(
-          "font-mono min-w-[50px] sm:min-w-[60px] transition-all duration-300 ease-out",
+          "min-w-[50px] font-mono transition-colors duration-200 sm:min-w-[60px]",
           isActive
-            ? "text-primary font-semibold text-sm sm:text-base"
-            : "text-muted-foreground text-xs sm:text-sm"
+            ? "text-primary text-[13px] font-semibold sm:text-base"
+            : "text-muted-foreground text-[11px] sm:text-sm"
         )}>
           {formatTime(segment.start)}
         </div>
@@ -113,19 +116,19 @@ function SegmentItem({ segment, isActive, onClick, searchQuery, isHighlighted, m
       <div className="flex-1 min-w-0">
         {segment.speaker && (
           <span className={cn(
-            "inline-block px-1.5 sm:px-2 py-0.5 mb-1 text-xs font-medium rounded transition-all duration-300",
+            "mb-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium transition-colors duration-200 sm:px-2",
             isActive
-              ? "bg-primary/25 text-primary shadow-sm"
-              : "bg-primary/15 text-primary/80"
+              ? "bg-primary/20 text-primary"
+              : "bg-muted text-foreground/75"
           )}>
             {searchQuery ? highlightText(segment.speaker, searchQuery) : segment.speaker}
           </span>
         )}
         <p className={cn(
-          "leading-relaxed break-words transition-all duration-300 ease-out",
+          "break-words leading-relaxed transition-colors duration-200",
           isActive
-            ? "text-foreground font-medium text-sm sm:text-base"
-            : "text-sm"
+            ? "text-foreground text-[14px] font-medium sm:text-base"
+            : "text-[14px] sm:text-sm"
         )}>
           {searchQuery ? highlightText(segment.text, searchQuery) : segment.text}
         </p>
@@ -210,7 +213,17 @@ function VirtualizedSegmentRow(
  * @param onScrollToSegment - Callback to scroll to a specific segment
  */
 export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
-  ({ segments, currentTime, selectedSegmentIndex, onSegmentClick, isVideoVisible = true, searchQuery = "", highlightedSearchIndex, onScrollToSegment }): React.JSX.Element => {
+  ({
+    segments,
+    currentTime,
+    selectedSegmentIndex,
+    onSegmentClick,
+    isVideoVisible = true,
+    layoutMode = "stacked",
+    searchQuery = "",
+    highlightedSearchIndex,
+    onScrollToSegment,
+  }): React.JSX.Element => {
     const scrollElementToCenter = useCallback((container: HTMLElement, element: HTMLElement) => {
       const containerRect = container.getBoundingClientRect();
       const elementRect = element.getBoundingClientRect();
@@ -368,6 +381,8 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
       scrollElementToCenter,
     ]);
 
+    const shouldCapHeight = isVideoVisible && layoutMode === "stacked";
+
     /**
      * Render all segments without virtualization (<200 segments)
      */
@@ -379,7 +394,7 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
           onWheel={(e) => e.stopPropagation()}
           className={cn(
             "flex flex-col overflow-y-auto",
-            isVideoVisible ? "max-h-[400px]" : "h-full"
+            shouldCapHeight ? "max-h-[44vh] sm:max-h-[400px]" : "h-full"
           )}
         >
           {segments.map((segment, index) => {
@@ -423,14 +438,17 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
     };
 
     return (
-      <div className={cn(isVideoVisible ? "max-h-[400px]" : "h-full")} onWheel={(e) => e.stopPropagation()}>
+      <div
+        className={cn(shouldCapHeight ? "max-h-[44vh] sm:max-h-[400px]" : "h-full")}
+        onWheel={(e) => e.stopPropagation()}
+      >
         <List
           rowCount={segments.length}
           rowHeight={80}
           rowComponent={VirtualizedSegmentRow}
           rowProps={rowProps}
           overscanCount={5}
-          style={{ height: isVideoVisible ? 400 : "100%" }}
+          style={{ height: shouldCapHeight ? "44vh" : "100%" }}
         />
       </div>
     );

@@ -28,6 +28,12 @@ const excludedFilePatterns = [
   /\.pyc$/i,
   /\.pyo$/i,
   /\.backup$/i,
+  /\.md$/i,
+  /^test_.*\.py$/i,
+  /\.bat$/i,
+  /\.sh$/i,
+  /^=/,
+  /^requirements-.*\.txt$/i,
 ];
 
 function shouldInclude(sourcePath) {

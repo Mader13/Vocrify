@@ -63,6 +63,7 @@ export interface TranscriptionTask {
   archiveSize?: number;
   videoDeleted?: boolean;
   lastProgressUpdate?: number;
+  speakerNameMap?: Record<string, string>;
 }
 
 export interface SegmentEvent {

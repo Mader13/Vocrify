@@ -10,7 +10,6 @@ import {
 } from "@/services/tauri";
 import { transcribeWithFallback } from "@/services/transcription";
 import { initializeModelsStore, useModelsStore } from "@/stores/modelsStore";
-import { initializeNotifications as initNotificationCenter } from "@/components/ui/notification-center";
 import { initializeNotifications as initNotificationEmitter, getNotificationEmitter } from "@/services/notifications";
 import { Button } from "@/components/ui/button";
 import { NotificationProvider } from "@/components/ui/notifications";
@@ -37,10 +36,15 @@ interface SelectedFile {
 function BackgroundPlayer() {
   const playingTaskId = usePlaybackStore((s) => s.playingTaskId);
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
+  const currentView = useUIStore((s) => s.currentView);
   const tasks = useTasks((s) => s.tasks);
 
-  // Only render when there's a playing task that is NOT currently visible on screen
-  const shouldRender = playingTaskId !== null && playingTaskId !== selectedTaskId;
+  const isPlayingTaskVisible = currentView === "transcription" && selectedTaskId === playingTaskId;
+
+  // Render whenever the currently playing task is not visible on screen.
+  // This includes non-transcription views where selectedTaskId can still
+  // temporarily point at the playing task during view transitions.
+  const shouldRender = playingTaskId !== null && !isPlayingTaskVisible;
   const task = shouldRender
     ? tasks.find((t) => t.id === playingTaskId && t.status === "completed")
     : undefined;
@@ -69,7 +73,7 @@ function BackgroundPlayer() {
       <VideoPlayer
         task={task}
         colorMode="segments"
-        isVideoVisible={false}
+        isVideoVisible
       />
     </div>
   );
@@ -139,10 +143,6 @@ function MainApplication() {
 
   useEffect(() => {
     initializeModelsStore();
-
-    initNotificationCenter().catch((error: Error) => {
-      logger.error("Failed to initialize notification center", { error });
-    });
 
     initNotificationEmitter().catch((error: Error) => {
       logger.error("Failed to initialize notification emitter", { error });

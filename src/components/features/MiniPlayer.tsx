@@ -3,6 +3,7 @@ import { Play, Pause, X, GripVertical, FileAudio } from 'lucide-react';
 import { cn, formatTime } from '@/lib/utils';
 import { usePlaybackStore, type MiniPlayerPosition } from '@/stores/playbackStore';
 import { useUIStore } from '@/stores';
+import { getSmoothedPointerVelocity, getSnapDurationMs, getThrowTargetCorner } from '@/components/features/miniplayer-physics';
 
 // Target positions for each corner (with smooth snapping)
 const getTargetPosition = (position: MiniPlayerPosition, viewportWidth: number, viewportHeight: number, elementHeight: number) => {
@@ -22,12 +23,12 @@ const getTargetPosition = (position: MiniPlayerPosition, viewportWidth: number, 
 };
 
 const DRAG_THRESHOLD = 8; // Minimum pixels to move before considering it a drag
-const SNAP_ANIMATION_DURATION = 300; // ms
 
 function MiniPlayerInner() {
   const store = usePlaybackStore();
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
   const setCurrentView = useUIStore((s) => s.setCurrentView);
+  const currentView = useUIStore((s) => s.currentView);
   // Hide MiniPlayer when the user is already viewing the playing task's page
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
   const elementRef = useRef<HTMLDivElement>(null);
@@ -36,9 +37,16 @@ function MiniPlayerInner() {
   const [isSnapping, setIsSnapping] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const dragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const dragVelocity = useRef({ x: 0, y: 0 });
+  const previousPointer = useRef<{ x: number; y: number; time: number } | null>(null);
   const isDraggingRef = useRef(false);
 
   const handleClose = useCallback(() => {
+    if (store.playingTaskId) {
+      window.dispatchEvent(new CustomEvent('miniplayer-pause', {
+        detail: { taskId: store.playingTaskId }
+      }));
+    }
     store.stop();
   }, [store]);
 
@@ -75,6 +83,8 @@ function MiniPlayerInner() {
 
     // Store initial mouse position for drag threshold check
     dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragVelocity.current = { x: 0, y: 0 };
+    previousPointer.current = { x: e.clientX, y: e.clientY, time: performance.now() };
 
     // Calculate offset from the top-left corner of the element
     const rect = elementRef.current?.getBoundingClientRect();
@@ -154,6 +164,17 @@ function MiniPlayerInner() {
         setIsDragging(true);
       }
 
+      const now = performance.now();
+      const previous = previousPointer.current;
+      if (previous) {
+        dragVelocity.current = getSmoothedPointerVelocity(
+          previous,
+          { x: e.clientX, y: e.clientY, time: now },
+          dragVelocity.current
+        );
+      }
+      previousPointer.current = { x: e.clientX, y: e.clientY, time: now };
+
       e.preventDefault();
       // Directly update element position without re-render
       elementRef.current.style.left = `${e.clientX - dragOffset.current.x}px`;
@@ -169,16 +190,17 @@ function MiniPlayerInner() {
         const screenWidth = window.innerWidth;
         const screenHeight = window.innerHeight;
         const elementHeight = elementRef.current.offsetHeight;
+        const speed = Math.hypot(dragVelocity.current.x, dragVelocity.current.y);
+        const snapDuration = getSnapDurationMs(speed);
 
-        // Determine which quadrant of mouse is in
-        const isLeft = e.clientX < screenWidth / 2;
-        const isTop = e.clientY < screenHeight / 2;
-
-        let newPosition: MiniPlayerPosition;
-        if (isTop && isLeft) newPosition = 'top-left';
-        else if (isTop && !isLeft) newPosition = 'top-right';
-        else if (!isTop && isLeft) newPosition = 'bottom-left';
-        else newPosition = 'bottom-right';
+        const newPosition: MiniPlayerPosition = getThrowTargetCorner({
+          releaseX: e.clientX,
+          releaseY: e.clientY,
+          velocityX: dragVelocity.current.x,
+          velocityY: dragVelocity.current.y,
+          viewportWidth: screenWidth,
+          viewportHeight: screenHeight,
+        });
 
         // Calculate target position using actual element dimensions
         const targetPos = getTargetPosition(newPosition, screenWidth, screenHeight, elementHeight);
@@ -186,7 +208,7 @@ function MiniPlayerInner() {
         store.setPosition(newPosition);
 
         // Animate to target position using only top/left
-        elementRef.current.style.transition = `all ${SNAP_ANIMATION_DURATION}ms ease-out`;
+        elementRef.current.style.transition = `all ${snapDuration}ms cubic-bezier(0.22, 1, 0.36, 1)`;
         elementRef.current.style.left = `${targetPos.x}px`;
         elementRef.current.style.top = `${targetPos.y}px`;
         elementRef.current.style.bottom = 'auto';
@@ -195,6 +217,7 @@ function MiniPlayerInner() {
         setIsSnapping(true);
         isDraggingRef.current = false;
         setIsDragging(false);
+        dragVelocity.current = { x: 0, y: 0 };
 
         // After animation completes, keep inline top/left styles to maintain position
         setTimeout(() => {
@@ -202,11 +225,12 @@ function MiniPlayerInner() {
             elementRef.current.style.transition = '';
           }
           setIsSnapping(false);
-        }, SNAP_ANIMATION_DURATION);
+        }, snapDuration);
       }
 
       // Reset drag state
       dragStartPos.current = null;
+      previousPointer.current = null;
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -227,11 +251,13 @@ function MiniPlayerInner() {
     return getTargetPosition(store.miniPlayerPosition, window.innerWidth, window.innerHeight, estimatedHeight);
   }, [store.miniPlayerPosition]);
 
+  const isViewingPlayingTask = currentView === 'transcription' && selectedTaskId === store.playingTaskId;
+
   // Don't render if there's no task loaded (but show even when paused)
   // Also hide when the user is currently viewing the playing task's page —
   // the VideoPlayer controls are already visible, showing MiniPlayer simultaneously
   // creates a second play button that can trigger audio duplication.
-  if (!store.playingTaskId || selectedTaskId === store.playingTaskId) {
+  if (!store.playingTaskId || isViewingPlayingTask) {
     return null;
   }
 

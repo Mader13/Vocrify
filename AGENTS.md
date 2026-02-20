@@ -447,6 +447,9 @@ const engine: EnginePreference = "auto";
 - Database/schema changes (if added)
 - Environment variable changes
 - Changes to `tailwind.config.js` or Vite config
+- **Architectural decisions** — When designing system architecture, data flow, or component structure, ask the user which approach to take. Present alternatives with trade-offs.
+- **Feature implementation** — When implementing new features, ask the user which design/flow to use. Present options with pros/cons.
+- **UX/UI design decisions** — When designing interface solutions (layout, user flows, interaction patterns, visual hierarchy), ask the user which option to choose. Present alternatives with trade-offs.
 
 ### Never do
 

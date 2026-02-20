@@ -140,6 +140,11 @@ pnpm-lock.yaml
 .worktrees/
 worktrees/
 
+# Plans
+/plans/
+/my-plans/
+.planning/
+
 # Claude Code / OpenCode / Claude Flow
 .claude/
 .opencode/
@@ -157,6 +162,5 @@ agent-mail.db
 .mcp.json
 claude_desktop_config.json
 test_models.js
-my-plans/
 claude.md
 agents.md

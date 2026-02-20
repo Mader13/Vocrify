@@ -2,7 +2,6 @@ import { Settings, Mic, Database, Archive, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUIStore } from "@/stores";
 import { cn } from "@/lib/utils";
-import { NotificationCenterPanel, NotificationCenterButton } from "@/components/ui/notification-center";
 import { AcknowledgmentsModal } from "@/components/features/AcknowledgmentsModal";
 import { useState } from "react";
 
@@ -64,10 +63,6 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-2">
-        <NotificationCenterPanel>
-          <NotificationCenterButton size="md" />
-        </NotificationCenterPanel>
-
         <Button
           variant="ghost"
           size="icon"

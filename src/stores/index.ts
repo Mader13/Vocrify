@@ -84,6 +84,7 @@ interface TasksState {
   retryTask: (taskId: string) => Promise<void>;
   cancelTask: (taskId: string) => Promise<void>;
   setSpeakerSegments: (taskId: string, speakerSegments: TranscriptionSegment[], speakerTurns: SpeakerTurn[]) => void;
+  updateSpeakerNameMap: (taskId: string, speakerNameMap: Record<string, string>) => void;
 }
 
 const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" | "archiveSettings" | "selectedTaskId"> = {
@@ -268,6 +269,20 @@ export const useTasks = create<TasksState>()(
               },
             };
           }),
+        }));
+      },
+
+      updateSpeakerNameMap: (taskId, speakerNameMap) => {
+        logger.transcriptionInfo("Speaker name map updated", {
+          taskId,
+          mappedSpeakers: Object.keys(speakerNameMap).length,
+        });
+        set((state) => ({
+          tasks: state.tasks.map((task) => (
+            task.id === taskId
+              ? { ...task, speakerNameMap }
+              : task
+          )),
         }));
       },
 
@@ -732,9 +747,12 @@ interface UIState {
   toggleSidebar: () => void;
   displayMode: "segments" | "speakers";
   setDisplayMode: (mode: "segments" | "speakers") => void;
+  completedViewModeByTask: Record<string, "balanced" | "transcript-focus">;
+  getCompletedViewModeForTask: (taskId: string) => "balanced" | "transcript-focus";
+  setCompletedViewModeForTask: (taskId: string, mode: "balanced" | "transcript-focus") => void;
 }
 
-const useUIState = create<UIState>((set) => ({
+const useUIState = create<UIState>((set, get) => ({
   isDragging: false,
   setDragging: (isDragging) => set({ isDragging }),
   isSettingsOpen: false,
@@ -748,6 +766,14 @@ const useUIState = create<UIState>((set) => ({
   toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
   displayMode: "segments",
   setDisplayMode: (mode) => set({ displayMode: mode }),
+  completedViewModeByTask: {},
+  getCompletedViewModeForTask: (taskId) => get().completedViewModeByTask[taskId] ?? "balanced",
+  setCompletedViewModeForTask: (taskId, mode) => set((state) => ({
+    completedViewModeByTask: {
+      ...state.completedViewModeByTask,
+      [taskId]: mode,
+    },
+  })),
 }));
 
 export const useUIStore = useUIState;

@@ -281,7 +281,8 @@ impl TranscriptionManager {
                         merged_turns.len(), merged_segments.len());
 
                     result.speaker_turns = Some(merged_turns);
-                    result.speaker_segments = Some(merged_segments);
+                    result.speaker_segments = Some(merged_segments.clone());
+                    result.segments = merged_segments;
                 }
                 Err(e) => {
                     eprintln!("[WARN] Diarization failed: {}, returning transcription without speakers", e);

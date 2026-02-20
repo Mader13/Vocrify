@@ -43,9 +43,9 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
       <button
         disabled
         className={cn(
-          "h-8 rounded-md flex items-center justify-center gap-1.5",
-          "bg-muted/50 text-muted-foreground cursor-not-allowed",
-          iconOnly ? "w-8 px-0" : "px-2 text-xs font-medium"
+          "inline-flex items-center justify-center gap-1.5 rounded-lg border border-border/70",
+          "h-8 text-xs font-medium text-muted-foreground opacity-70 sm:h-9",
+          iconOnly ? "w-8 px-0 sm:w-9" : "px-2.5 sm:px-3"
         )}
       >
         <Check className="h-4 w-4" />
@@ -60,9 +60,9 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         onClick={() => setIsModalOpen(true)}
         disabled={isArchiving}
         className={cn(
-          "h-8 rounded-md transition-all duration-150 flex items-center justify-center",
-          iconOnly ? "w-8 px-0" : "px-2 gap-1.5 text-xs font-medium",
-          "hover:bg-muted/60 active:bg-muted/80 text-muted-foreground hover:text-foreground",
+          "inline-flex items-center justify-center rounded-lg border border-border/70 transition-colors duration-150",
+          iconOnly ? "h-8 w-8 sm:h-9 sm:w-9" : "h-8 gap-1.5 px-2.5 text-xs font-medium sm:h-9 sm:px-3",
+          "text-foreground hover:bg-muted/70",
           isArchiving && "opacity-50 cursor-not-allowed"
         )}
       >
@@ -71,7 +71,7 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         ) : (
           <Archive className="h-4 w-4" />
         )}
-        {!iconOnly && <span>Archive</span>}
+        {!iconOnly && <span className="hidden lg:inline">Archive</span>}
       </button>
       {createPortal(
         <ArchiveModal

@@ -6,6 +6,10 @@ import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getThemeColors, cacheWaveformPeaks, getCachedWaveformPeaks, formatTime } from "@/lib/utils";
 import { WaveformControls } from "@/components/features/WaveformControls";
+import {
+  DEFAULT_VIDEO_ASPECT_RATIO,
+  normalizeVideoAspectRatio,
+} from "@/components/features/completed-view-layout";
 import { sanitizeSegments } from "@/lib/segment-utils";
 import { getAssetUrl, readFileAsBase64 } from "@/services/tauri";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
@@ -168,6 +172,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [volume, setVolume] = React.useState(1);
   const [playbackRate, setPlaybackRate] = React.useState(1);
+  const [videoAspectRatio, setVideoAspectRatio] = React.useState(DEFAULT_VIDEO_ASPECT_RATIO);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Playback sync with store
@@ -245,6 +250,30 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     // For archived tasks, show video only if keep_all mode (filePath contains archived video)
     return task.archiveMode === "keep_all" && !!task.filePath && task.filePath.length > 0;
   }, [task.filePath, task.archived, task.archiveMode]);
+
+  useEffect(() => {
+    if (!showVideoElement) {
+      setVideoAspectRatio(DEFAULT_VIDEO_ASPECT_RATIO);
+      return;
+    }
+
+    const videoElement = internalVideoRef.current;
+    if (!videoElement) return;
+
+    const updateAspectRatio = () => {
+      const nextRatio = normalizeVideoAspectRatio(videoElement.videoWidth, videoElement.videoHeight);
+      setVideoAspectRatio(nextRatio);
+    };
+
+    updateAspectRatio();
+    videoElement.addEventListener("loadedmetadata", updateAspectRatio);
+    videoElement.addEventListener("resize", updateAspectRatio);
+
+    return () => {
+      videoElement.removeEventListener("loadedmetadata", updateAspectRatio);
+      videoElement.removeEventListener("resize", updateAspectRatio);
+    };
+  }, [assetUrl, showVideoElement]);
 
   /**
    * Generate regions based on color mode and transcription segments
@@ -710,23 +739,27 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     // Event: Video time update - sync waveform
     const handleTimeUpdate = () => {
       const videoEl = internalVideoRef.current;
-      if (!videoEl || !ws || !isWaveformReadyRef.current) return;
+      if (!videoEl) return;
 
       const videoDuration = videoEl.duration;
-      // Skip if duration is not available (NaN, 0, Infinity) - video metadata not loaded yet
-      if (!Number.isFinite(videoDuration) || videoDuration <= 0) return;
+      const hasDuration = Number.isFinite(videoDuration) && videoDuration > 0;
+      if (hasDuration) {
+        setDuration(videoDuration);
+        syncHandleDurationChange(videoDuration);
+      }
 
-      setDuration(videoDuration);
-      syncHandleDurationChange(videoDuration);
+      setCurrentTime(videoEl.currentTime);
+      onTimeUpdate?.(videoEl.currentTime);
+      syncHandleTimeUpdate(videoEl.currentTime);
+
+      // Skip waveform seeking until WaveSurfer is ready.
+      if (!ws || !isWaveformReadyRef.current || !hasDuration) return;
 
       const ratio = videoEl.currentTime / videoDuration;
       // Skip if ratio is not finite (defensive check)
       if (!Number.isFinite(ratio)) return;
 
       ws.seekTo(ratio);
-      setCurrentTime(videoEl.currentTime);
-      onTimeUpdate?.(videoEl.currentTime);
-      syncHandleTimeUpdate(videoEl.currentTime);
     };
 
     if (video) {
@@ -922,21 +955,24 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {/* Video Player - only show if video file exists and not deleted */}
-      {showVideoElement && (
+      {/* Video Player - render only when explicitly visible */}
+      {showVideoElement && isVideoVisible && (
         <div
           className={cn(
-            "relative overflow-hidden rounded-xl border bg-black max-w-5xl mx-auto transition-all duration-300",
-            isVideoVisible
-              ? "animate-in fade-in slide-in-from-top-2"
-              : "sr-only"
+            "relative mx-auto w-full max-w-5xl overflow-hidden rounded-2xl border border-border/60 bg-black/95 shadow-sm transition-all duration-300",
+            "animate-in fade-in slide-in-from-top-2"
           )}
+          style={{
+            aspectRatio: videoAspectRatio,
+            minHeight: "clamp(128px, 22vh, 240px)",
+            maxHeight: "min(46vh, 540px)",
+          }}
         >
           <video
             ref={internalVideoRef}
             src={assetUrl}
             controls={isVideoVisible}
-            className="w-full aspect-video object-contain"
+            className="h-full w-full object-contain"
           />
         </div>
       )}
@@ -949,11 +985,11 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       )}
 
       {/* Waveform Container */}
-      <div className="relative border bg-card overflow-hidden">
+      <div className="relative h-[120px] overflow-hidden rounded-lg border bg-card">
         {/* Waveform */}
         <div
           ref={containerRef}
-          className="w-full"
+          className="h-full w-full"
           onMouseEnter={() => {
             setIsWaveformHovered(true);
             setHoverPreviewTime(null);

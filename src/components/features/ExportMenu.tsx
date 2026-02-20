@@ -10,6 +10,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { applySpeakerNameMapToResult } from "@/lib/speaker-names";
 
 import { selectExportPath, exportTranscription } from "@/services/tauri";
 import { logger } from "@/lib/logger";
@@ -174,8 +175,13 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
       const outputPath = result.data;
 
       // Export the transcription with export mode
-      const exportResult = await exportTranscription(
+      const resultToExport = applySpeakerNameMapToResult(
         task.result,
+        task.speakerNameMap,
+      );
+
+      const exportResult = await exportTranscription(
+        resultToExport,
         selectedFormat,
         outputPath,
         exportMode,
@@ -229,9 +235,9 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
         disabled={isExporting}
         title="Export"
         className={cn(
-          "h-8 rounded-md transition-all duration-150 flex items-center justify-center",
-          iconOnly ? "w-8 px-0" : "px-2 gap-1.5 text-xs font-medium",
-          "hover:bg-muted/60 active:bg-muted/80 text-muted-foreground hover:text-foreground",
+          "inline-flex items-center justify-center rounded-lg border border-border/70 text-xs font-medium transition-colors duration-150",
+          iconOnly ? "h-8 w-8 sm:h-9 sm:w-9" : "h-8 gap-1.5 px-2.5 sm:h-9 sm:px-3",
+          "text-foreground hover:bg-muted/70",
           isExporting && "opacity-50 cursor-not-allowed",
         )}
       >
@@ -245,7 +251,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
           <Download className="h-4 w-4" />
         )}
         {!iconOnly && (
-          <span className="hidden sm:inline">
+          <span className="hidden lg:inline">
             {isExporting ? "Exporting..." : "Export"}
           </span>
         )}

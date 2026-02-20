@@ -1,68 +1,201 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
-
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
+  Clock3,
+  FileText,
+  Languages,
+  Pencil,
   Search,
-  Video,
-  VideoOff,
+  UserRound,
   X,
 } from "lucide-react";
 
-import { ExportMenu } from "@/components/features/ExportMenu";
 import { ArchiveButton } from "@/components/features/ArchiveButton";
+import { ExportMenu } from "@/components/features/ExportMenu";
+import { SpeakerNamesModal } from "@/components/features/SpeakerNamesModal";
 import { TranscriptionSegments } from "@/components/features/TranscriptionSegments";
 import { VideoPlayer } from "@/components/features/VideoPlayer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { applySpeakerNameMapToResult, collectSpeakerLabels } from "@/lib/speaker-names";
 import { sanitizeSegments } from "@/lib/segment-utils";
-import { useUIStore } from "@/stores";
+import { cn, formatTime } from "@/lib/utils";
+import { useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
+import {
+  getCompletedViewLayoutMode,
+  type CompletedViewLayoutMode,
+} from "@/components/features/completed-view-layout";
 
 interface CompletedViewProps {
   task: TranscriptionTask;
 }
 
+interface MetaPillProps {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+}
+
+function MetaPill({ icon: Icon, label, value }: MetaPillProps) {
+  return (
+    <div className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-background/70 px-2 py-1 text-[11px] text-muted-foreground sm:gap-2 sm:px-2.5 sm:py-1.5 sm:text-xs">
+      <Icon className="h-3.5 w-3.5" />
+      <span>{label}</span>
+      <span className="font-medium text-foreground">{value}</span>
+    </div>
+  );
+}
+
+const viewModeLabels: Record<"balanced" | "transcript-focus", string> = {
+  balanced: "Balanced",
+  "transcript-focus": "Transcript focus",
+};
+
+const waveformModeLabels: Record<"segments" | "speakers", string> = {
+  segments: "Segments",
+  speakers: "Speakers",
+};
+
 export const CompletedView = React.memo(function CompletedView({ task }: CompletedViewProps) {
   const displayMode = useUIStore((s) => s.displayMode);
   const setDisplayMode = useUIStore((s) => s.setDisplayMode);
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const segmentsContainerRef = useRef<HTMLDivElement>(null);
+  const isSidebarCollapsed = useUIStore((s) => s.isSidebarCollapsed);
+  const viewMode = useUIStore((s) => s.completedViewModeByTask[task.id] ?? "balanced");
+  const setCompletedViewModeForTask = useUIStore((s) => s.setCompletedViewModeForTask);
+  const updateSpeakerNameMap = useTasks((s) => s.updateSpeakerNameMap);
 
-  const [isVideoVisible, setIsVideoVisible] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const segmentsContainerRef = useRef<HTMLDivElement>(null);
+  const selectedSegmentIndexRef = useRef<number | undefined>(undefined);
+
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState<number | undefined>(undefined);
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedSearchIndex, setHighlightedSearchIndex] = useState<number>(-1);
-  const selectedSegmentIndexRef = useRef<number | undefined>(selectedSegmentIndex);
+  const [layoutMode, setLayoutMode] = useState<CompletedViewLayoutMode>("stacked");
+  const [isSpeakerNamesOpen, setIsSpeakerNamesOpen] = useState(false);
+
+  const mappedResult = useMemo(() => {
+    if (!task.result) {
+      return null;
+    }
+
+    return applySpeakerNameMapToResult(task.result, task.speakerNameMap);
+  }, [task.result, task.speakerNameMap]);
+
+  const availableSpeakers = useMemo(
+    () => collectSpeakerLabels(task.result),
+    [task.result],
+  );
 
   useEffect(() => {
     selectedSegmentIndexRef.current = selectedSegmentIndex;
   }, [selectedSegmentIndex]);
 
-  // Check if video/audio is available
-  const hasVideo = !task.videoDeleted && task.filePath && task.filePath.length > 0;
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateLayoutMode = (width: number) => {
+      setLayoutMode(
+        getCompletedViewLayoutMode(width, {
+          sidebarCollapsed: isSidebarCollapsed,
+        }),
+      );
+    };
+
+    updateLayoutMode(container.clientWidth);
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => updateLayoutMode(container.clientWidth);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      updateLayoutMode(entry.contentRect.width);
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [isSidebarCollapsed]);
 
   const sanitizedSegments = useMemo(
-    () => sanitizeSegments(task?.result?.segments),
-    [task?.result?.segments]
+    () => sanitizeSegments(mappedResult?.segments),
+    [mappedResult?.segments],
   );
 
   const sanitizedSpeakerSegments = useMemo(
-    () => sanitizeSegments(task?.result?.speakerSegments),
-    [task?.result?.speakerSegments]
+    () => sanitizeSegments(mappedResult?.speakerSegments),
+    [mappedResult?.speakerSegments],
   );
 
-  // Check if speaker diarization is available
-  const hasSpeakerData = sanitizedSpeakerSegments.length > 0 || (task.result?.speakerTurns && task.result.speakerTurns.length > 0);
+  const hasSpeakerData =
+    sanitizedSpeakerSegments.length > 0 || (mappedResult?.speakerTurns && mappedResult.speakerTurns.length > 0);
 
   const waveformMode: WaveformColorMode =
     displayMode === "speakers" && !hasSpeakerData ? "segments" : displayMode;
 
-  const displaySegments = waveformMode === "segments"
-    ? sanitizedSegments
-    : (sanitizedSpeakerSegments.length > 0 ? sanitizedSpeakerSegments : sanitizedSegments);
+  const displaySegments = useMemo(() => {
+    if (waveformMode === "segments") {
+      return sanitizedSegments;
+    }
+
+    if (sanitizedSpeakerSegments.length > 0) {
+      return sanitizedSpeakerSegments;
+    }
+
+    return sanitizedSegments;
+  }, [sanitizedSegments, sanitizedSpeakerSegments, waveformMode]);
+
+  const matchingSegmentsCount = useMemo(() => {
+    if (!searchQuery || !displaySegments) return 0;
+    const query = searchQuery.toLowerCase();
+    return displaySegments.filter(
+      (segment) =>
+        segment.text.toLowerCase().includes(query) ||
+        (segment.speaker && segment.speaker.toLowerCase().includes(query)),
+    ).length;
+  }, [displaySegments, searchQuery]);
+
+  const speakerCount = useMemo(() => {
+    const speakers = new Set<string>();
+
+    mappedResult?.speakerTurns?.forEach((turn) => {
+      if (turn.speaker?.trim()) {
+        speakers.add(turn.speaker);
+      }
+    });
+
+    sanitizedSpeakerSegments.forEach((segment) => {
+      if (segment.speaker?.trim()) {
+        speakers.add(segment.speaker);
+      }
+    });
+
+    return speakers.size;
+  }, [mappedResult?.speakerTurns, sanitizedSpeakerSegments]);
+
+  const durationLabel = useMemo(() => {
+    if (!task.result?.duration || task.result.duration <= 0) {
+      return "--:--";
+    }
+    return formatTime(task.result.duration);
+  }, [task.result?.duration]);
+
+  const languageLabel = useMemo(() => {
+    const resultLanguage = task.result?.language;
+    if (resultLanguage && resultLanguage.trim().length > 0) {
+      return resultLanguage.toUpperCase();
+    }
+    return task.options.language.toUpperCase();
+  }, [task.options.language, task.result?.language]);
 
   useEffect(() => {
     if (displayMode === "speakers" && !hasSpeakerData) {
@@ -70,45 +203,41 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     }
   }, [displayMode, hasSpeakerData, setDisplayMode]);
 
-  const matchingSegmentsCount = useMemo(() => {
-    if (!searchQuery || !displaySegments) return 0;
-    const query = searchQuery.toLowerCase();
-    return displaySegments.filter(segment =>
-      segment.text.toLowerCase().includes(query) ||
-      (segment.speaker && segment.speaker.toLowerCase().includes(query))
-    ).length;
-  }, [displaySegments, searchQuery]);
-
   const handleSegmentClick = useCallback((index: number, startTime: number) => {
     setSelectedSegmentIndex(index);
     setCurrentTime(startTime);
+
     const videoElement = videoRef.current;
     if (videoElement) {
       videoElement.currentTime = startTime;
     }
   }, []);
 
-  const handlePlayerTimeUpdate = useCallback((time: number) => {
-    setCurrentTime(time);
+  const handlePlayerTimeUpdate = useCallback(
+    (time: number) => {
+      setCurrentTime(time);
 
-    const selectedIndex = selectedSegmentIndexRef.current;
-    if (selectedIndex === undefined) {
-      return;
-    }
-    const selectedSegment = displaySegments[selectedIndex];
-    if (!selectedSegment || time > selectedSegment.end + 0.05) {
-      setSelectedSegmentIndex(undefined);
-    }
-  }, [displaySegments]);
+      const selectedIndex = selectedSegmentIndexRef.current;
+      if (selectedIndex === undefined) {
+        return;
+      }
+
+      const selectedSegment = displaySegments[selectedIndex];
+      if (!selectedSegment || time > selectedSegment.end + 0.05) {
+        setSelectedSegmentIndex(undefined);
+      }
+    },
+    [displaySegments],
+  );
 
   const goToPreviousSearch = useCallback(() => {
     if (matchingSegmentsCount === 0) return;
-    setHighlightedSearchIndex(prev => prev <= 0 ? matchingSegmentsCount - 1 : prev - 1);
+    setHighlightedSearchIndex((prev) => (prev <= 0 ? matchingSegmentsCount - 1 : prev - 1));
   }, [matchingSegmentsCount]);
 
   const goToNextSearch = useCallback(() => {
     if (matchingSegmentsCount === 0) return;
-    setHighlightedSearchIndex(prev => prev >= matchingSegmentsCount - 1 ? 0 : prev + 1);
+    setHighlightedSearchIndex((prev) => (prev >= matchingSegmentsCount - 1 ? 0 : prev + 1));
   }, [matchingSegmentsCount]);
 
   const scrollToSegment = useCallback((index: number) => {
@@ -116,19 +245,21 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
       const container = segmentsContainerRef.current;
       if (!container) return;
 
-      const segmentElements = container.querySelectorAll<HTMLElement>('[data-segment-index]');
+      const segmentElements = container.querySelectorAll<HTMLElement>("[data-segment-index]");
       const targetElement = segmentElements[index];
-      if (targetElement) {
-        const containerRect = container.getBoundingClientRect();
-        const targetRect = targetElement.getBoundingClientRect();
-        const targetTop = container.scrollTop + (targetRect.top - containerRect.top);
-        const centeredTop = targetTop - (container.clientHeight / 2) + (targetElement.clientHeight / 2);
-
-        container.scrollTo({
-          top: Math.max(0, centeredTop),
-          behavior: "smooth",
-        });
+      if (!targetElement) {
+        return;
       }
+
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = targetElement.getBoundingClientRect();
+      const targetTop = container.scrollTop + (targetRect.top - containerRect.top);
+      const centeredTop = targetTop - container.clientHeight / 2 + targetElement.clientHeight / 2;
+
+      container.scrollTo({
+        top: Math.max(0, centeredTop),
+        behavior: "smooth",
+      });
     }, 100);
   }, []);
 
@@ -139,12 +270,12 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   useEffect(() => {
     if (!searchQuery) return;
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
 
-      if ((e.ctrlKey || e.metaKey) && key === "g") {
-        e.preventDefault();
-        if (e.shiftKey) {
+      if ((event.ctrlKey || event.metaKey) && key === "g") {
+        event.preventDefault();
+        if (event.shiftKey) {
           goToPreviousSearch();
         } else {
           goToNextSearch();
@@ -152,8 +283,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
       }
 
       if (key === "f3") {
-        e.preventDefault();
-        if (e.shiftKey) {
+        event.preventDefault();
+        if (event.shiftKey) {
           goToPreviousSearch();
         } else {
           goToNextSearch();
@@ -163,7 +294,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [searchQuery, goToPreviousSearch, goToNextSearch]);
+  }, [goToNextSearch, goToPreviousSearch, searchQuery]);
 
   useEffect(() => {
     setCurrentTime(0);
@@ -172,177 +303,377 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     setHighlightedSearchIndex(-1);
   }, [task?.id]);
 
+  const actionButtonClass =
+    "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 px-2.5 text-xs font-medium text-foreground transition-colors motion-safe:duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:px-3";
+  const effectiveViewMode = viewMode;
+  const showMediaColumn = layoutMode === "stacked" || (layoutMode === "split" && effectiveViewMode === "balanced");
+  const showCollapsedMediaBar = layoutMode === "split" && effectiveViewMode === "transcript-focus";
+  const collapsedMediaLabel = `${formatTime(currentTime)} / ${durationLabel}`;
+
   return (
-    <div className="flex flex-col gap-4 h-full overflow-y-auto">
-      <Card className="shrink-0 flex flex-col">
-        <CardHeader className="border-b px-4 py-2">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <CardTitle className="text-lg truncate">{task.fileName}</CardTitle>
-            <div className="flex items-center gap-1">
-              {hasVideo && (
-                <button
-                  type="button"
-                  onClick={() => setIsVideoVisible(!isVideoVisible)}
-                  className="h-8 px-2 text-xs font-medium rounded-md hover:bg-muted/60 active:bg-muted/80 transition-all duration-150 flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-                >
-                  {isVideoVisible ? (
-                    <>
-                      <VideoOff className="h-4 w-4" />
-                      <span className="hidden sm:inline">Hide Video</span>
-                    </>
-                  ) : (
-                    <>
-                      <Video className="h-4 w-4" />
-                      <span className="hidden sm:inline">Show Video</span>
-                    </>
-                  )}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  const newMode = waveformMode === "segments" ? "speakers" : "segments";
-                  setDisplayMode(newMode);
-                }}
-                disabled={!hasSpeakerData}
-                className={cn(
-                  "h-8 px-3 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
-                  !hasSpeakerData && "opacity-50 cursor-not-allowed",
-                  waveformMode === "segments"
-                    ? "bg-muted/60 text-muted-foreground hover:bg-muted/80"
-                    : "bg-primary/10 text-primary hover:bg-primary/20"
+    <div
+      ref={containerRef}
+      className={cn(
+        "flex h-full min-h-0 flex-col gap-3 sm:gap-4",
+        layoutMode === "split" ? "overflow-hidden" : "overflow-y-auto pr-1",
+      )}
+    >
+      <Card className="shrink-0 border-border/70">
+        <CardHeader className="border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle className="line-clamp-2 break-all text-[15px] font-semibold leading-tight sm:text-lg">
+                  {task.fileName}
+                </CardTitle>
+              </div>
+
+              <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+                {hasSpeakerData && (
+                  <button
+                    type="button"
+                    onClick={() => setIsSpeakerNamesOpen(true)}
+                    className={cn(actionButtonClass, "h-8 sm:h-9")}
+                    title="Rename speakers"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    <span>Speaker&apos;s names</span>
+                  </button>
                 )}
-                title={!hasSpeakerData ? "No speaker data available" : "Toggle waveform color mode"}
-              >
-                <span>{waveformMode === "segments" ? "Segments View" : "Speakers View"}</span>
-              </button>
-              <ExportMenu task={task} />
-              <ArchiveButton task={task} />
+                <ExportMenu task={task} />
+                <ArchiveButton task={task} />
+              </div>
             </div>
-          </div>
-          
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                  <MetaPill icon={Clock3} label="Duration" value={durationLabel} />
+                  <MetaPill icon={FileText} label="Segments" value={String(displaySegments.length)} />
+                  <MetaPill icon={UserRound} label="Speakers" value={String(speakerCount)} />
+                  <MetaPill icon={Languages} label="Language" value={languageLabel} />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
+                    {(["segments", "speakers"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setDisplayMode(mode)}
+                        disabled={mode === "speakers" && !hasSpeakerData}
+                        className={cn(
+                          "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
+                          displayMode === mode
+                            ? "bg-foreground text-card-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                            : "text-muted-foreground hover:text-foreground",
+                          mode === "speakers" && !hasSpeakerData && "cursor-not-allowed opacity-45",
+                        )}
+                        aria-pressed={displayMode === mode}
+                        title={
+                          mode === "speakers" && !hasSpeakerData
+                            ? "No speaker data available"
+                            : `Show ${waveformModeLabels[mode]} waveform`
+                        }
+                      >
+                        {waveformModeLabels[mode]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
+                    {(["balanced", "transcript-focus"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setCompletedViewModeForTask(task.id, mode)}
+                        className={cn(
+                          "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
+                          viewMode === mode
+                            ? "bg-foreground text-card-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                        aria-pressed={viewMode === mode}
+                      >
+                        {viewModeLabels[mode]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
         </CardHeader>
-        <CardContent className="p-0">
-          <VideoPlayer
-            ref={videoRef}
-            task={task}
-            colorMode={waveformMode}
-            onTimeUpdate={handlePlayerTimeUpdate}
-            isVideoVisible={isVideoVisible}
-            className="w-full"
-          />
-        </CardContent>
       </Card>
 
-      <Card className={cn(
-        "flex flex-col min-h-50",
-        isVideoVisible ? "shrink-0" : "flex-1"
-      )}>
-        <CardHeader className="border-b px-4 py-2 shrink-0">
-          <div className="flex flex-col gap-3">
-            <CardTitle className="text-lg">Transcription</CardTitle>
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search in transcription..."
-                  className={cn(
-                    "w-full h-9 pl-9 pr-20 text-sm rounded-md border",
-                    "bg-background",
-                    "border-input",
-                    "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                    "placeholder:text-muted-foreground",
-                    "transition-all duration-150"
-                  )}
-                />
-                {searchQuery && (
-                  <>
-                    <span className="absolute right-12 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-mono">
-                      {matchingSegmentsCount > 0 ? (
-                        <span className={cn(
-                          "transition-colors",
-                          highlightedSearchIndex >= 0 ? "text-primary font-semibold" : ""
-                        )}>
-                          {highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/{matchingSegmentsCount}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">0/0</span>
+      {showMediaColumn ? (
+        <div
+          className={cn(
+            "grid min-h-0 gap-3 sm:gap-4",
+            layoutMode === "split"
+              ? "flex-1 grid-cols-[minmax(320px,0.9fr)_minmax(520px,1.1fr)]"
+              : "grid-cols-1",
+          )}
+        >
+          <Card
+            className={cn(
+              "flex flex-col border-border/70",
+              layoutMode === "split" && "h-full min-h-0 overflow-hidden",
+            )}
+          >
+            <CardHeader className="border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
+              <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Media Dock
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-2.5 sm:p-4 lg:p-5">
+              <VideoPlayer
+                ref={videoRef}
+                task={task}
+                colorMode={waveformMode}
+                onTimeUpdate={handlePlayerTimeUpdate}
+                isVideoVisible
+                className="w-full"
+              />
+            </CardContent>
+          </Card>
+
+          <Card
+            className={cn(
+              "flex flex-col border-border/70",
+              layoutMode === "split" && "h-full min-h-0",
+            )}
+          >
+            <CardHeader className="shrink-0 border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Transcript
+                  </CardTitle>
+                  <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[11px] text-muted-foreground sm:px-2.5 sm:text-xs">
+                    {displaySegments.length} entries
+                  </span>
+                </div>
+
+                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search transcript or speaker"
+                      className={cn(
+                        "h-9 w-full rounded-lg border border-input bg-background px-10 pr-24 text-sm sm:h-10",
+                        "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                        "transition-colors motion-safe:duration-150",
                       )}
+                    />
+
+                    <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums text-muted-foreground">
+                      {searchQuery &&
+                        `${highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/${matchingSegmentsCount}`
+                      }
                     </span>
+
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-1 rounded-lg border border-border/70 bg-background/70 p-1">
                     <button
                       type="button"
-                      onClick={() => setSearchQuery("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-sm hover:bg-muted/60 transition-colors"
-                      aria-label="Clear search"
+                      onClick={goToPreviousSearch}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                      title="Previous result (Shift+F3 or Ctrl+Shift+G)"
+                      disabled={!searchQuery || matchingSegmentsCount === 0}
                     >
-                      <X className="h-3.5 w-3.5 text-muted-foreground" />
+                      <ChevronUp className="h-4 w-4" />
                     </button>
-                  </>
-                )}
+
+                    <button
+                      type="button"
+                      onClick={goToNextSearch}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                      title="Next result (F3 or Ctrl+G)"
+                      disabled={!searchQuery || matchingSegmentsCount === 0}
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
-              {searchQuery && matchingSegmentsCount > 0 && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={goToPreviousSearch}
-                    className={cn(
-                      "h-9 px-2 text-sm font-medium rounded-md transition-all duration-150",
-                      "hover:bg-muted/60 active:bg-muted/80",
-                      "flex items-center gap-1",
-                      "disabled:opacity-50 disabled:cursor-not-allowed"
-                    )}
-                    title="Previous result (Shift+F3 or Ctrl+Shift+G)"
-                  >
-                    <ChevronUp className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={goToNextSearch}
-                    className={cn(
-                      "h-9 px-2 text-sm font-medium rounded-md transition-all duration-150",
-                      "hover:bg-muted/60 active:bg-muted/80",
-                      "flex items-center gap-1",
-                      "disabled:opacity-50 disabled:cursor-not-allowed"
-                    )}
-                    title="Next result (F3 or Ctrl+G)"
-                  >
-                    <ChevronDown className="h-4 w-4" />
-                  </button>
+            </CardHeader>
+
+            <CardContent
+              className={cn(
+                "flex flex-col p-0",
+                layoutMode === "split" && "min-h-0 flex-1",
+              )}
+            >
+              {displaySegments.length > 0 ? (
+                <div
+                  ref={segmentsContainerRef}
+                  className={cn(layoutMode === "split" && "flex-1 min-h-0")}
+                >
+                  <TranscriptionSegments
+                    segments={displaySegments}
+                    currentTime={currentTime}
+                    selectedSegmentIndex={selectedSegmentIndex}
+                    onSegmentClick={handleSegmentClick}
+                    isVideoVisible={showMediaColumn}
+                    layoutMode={layoutMode}
+                    searchQuery={searchQuery}
+                    highlightedSearchIndex={highlightedSearchIndex}
+                    onScrollToSegment={scrollToSegment}
+                  />
+                </div>
+              ) : (
+                <div className="flex h-36 items-center justify-center px-6 text-center">
+                  <p className="text-sm text-muted-foreground">No transcription segments available for this task.</p>
                 </div>
               )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0 flex-1 overflow-hidden flex flex-col">
-          {displaySegments && displaySegments.length > 0 ? (
-            <div
-              className="flex-1 overflow-y-auto"
-              onWheel={(e) => e.stopPropagation()}
-              ref={segmentsContainerRef}
-            >
-              <TranscriptionSegments
-                segments={displaySegments}
-                currentTime={currentTime}
-                selectedSegmentIndex={selectedSegmentIndex}
-                onSegmentClick={handleSegmentClick}
-                isVideoVisible={isVideoVisible}
-                searchQuery={searchQuery}
-                highlightedSearchIndex={highlightedSearchIndex}
-                onScrollToSegment={scrollToSegment}
-              />
-            </div>
-          ) : (
-            <div className="flex h-32 items-center justify-center p-6">
-              <p className="text-muted-foreground">
-                No transcription segments available
-              </p>
-            </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <>
+          {showCollapsedMediaBar && (
+            <Card className="border-border/70">
+              <CardContent className="flex flex-col gap-2 p-2.5 sm:p-3">
+                <div className="flex items-center gap-3 px-0.5">
+                  <div className="leading-tight">
+                    <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Media preview</p>
+                    <p className="mt-0.5 text-sm font-mono text-foreground tabular-nums">{collapsedMediaLabel}</p>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border/60 bg-card/80">
+                  <VideoPlayer
+                    ref={videoRef}
+                    task={task}
+                    colorMode={waveformMode}
+                    onTimeUpdate={handlePlayerTimeUpdate}
+                    isVideoVisible={false}
+                    className="w-full gap-0"
+                  />
+                </div>
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
+
+          <Card className="flex min-h-0 flex-col border-border/70">
+            <CardHeader className="shrink-0 border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Transcript
+                  </CardTitle>
+                  <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[11px] text-muted-foreground sm:px-2.5 sm:text-xs">
+                    {displaySegments.length} entries
+                  </span>
+                </div>
+
+                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                  <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search transcript or speaker"
+                      className={cn(
+                        "h-9 w-full rounded-lg border border-input bg-background px-10 pr-24 text-sm sm:h-10",
+                        "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                        "transition-colors motion-safe:duration-150",
+                      )}
+                    />
+
+                    <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums text-muted-foreground">
+                      {searchQuery &&
+                        `${highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/${matchingSegmentsCount}`
+                      }
+                    </span>
+
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="ml-auto flex items-center gap-1 rounded-lg border border-border/70 bg-background/70 p-1">
+                    <button
+                      type="button"
+                      onClick={goToPreviousSearch}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                      title="Previous result (Shift+F3 or Ctrl+Shift+G)"
+                      disabled={!searchQuery || matchingSegmentsCount === 0}
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={goToNextSearch}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                      title="Next result (F3 or Ctrl+G)"
+                      disabled={!searchQuery || matchingSegmentsCount === 0}
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+              {displaySegments.length > 0 ? (
+                <div
+                  ref={segmentsContainerRef}
+                  className="flex-1 min-h-0"
+                >
+                  <TranscriptionSegments
+                    segments={displaySegments}
+                    currentTime={currentTime}
+                    selectedSegmentIndex={selectedSegmentIndex}
+                    onSegmentClick={handleSegmentClick}
+                    isVideoVisible={false}
+                    layoutMode={layoutMode}
+                    searchQuery={searchQuery}
+                    highlightedSearchIndex={highlightedSearchIndex}
+                    onScrollToSegment={scrollToSegment}
+                  />
+                </div>
+              ) : (
+                <div className="flex h-36 items-center justify-center px-6 text-center">
+                  <p className="text-sm text-muted-foreground">No transcription segments available for this task.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      <SpeakerNamesModal
+        open={isSpeakerNamesOpen}
+        onOpenChange={setIsSpeakerNamesOpen}
+        speakers={availableSpeakers}
+        speakerNameMap={task.speakerNameMap ?? {}}
+        onSave={(speakerNameMap) => {
+          updateSpeakerNameMap(task.id, speakerNameMap);
+        }}
+      />
     </div>
   );
 });
