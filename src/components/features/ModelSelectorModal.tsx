@@ -3,6 +3,7 @@ import { MODEL_ICONS } from "@/types";
 import type { AvailableModel } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { formatSizeMb } from "@/lib/utils";
 
 interface ModelSelectorModalProps {
   isOpen: boolean;
@@ -20,13 +21,6 @@ export function ModelSelectorModal({
   description = "Choose a model for transcription:",
 }: ModelSelectorModalProps) {
   const { availableModels, selectedTranscriptionModel } = useModelsStore();
-
-  const formatSize = (mb: number): string => {
-    if (mb >= 1024) {
-      return `${(mb / 1024).toFixed(1)} GB`;
-    }
-    return `${mb} MB`;
-  };
 
   const handleSelect = (model: AvailableModel) => {
     onSelect(model.name);
@@ -73,7 +67,7 @@ export function ModelSelectorModal({
                   </div>
                   <div className="text-right">
                     <span className="text-sm text-muted-foreground">
-                      {formatSize(model.sizeMb)}
+                      {formatSizeMb(model.sizeMb)}
                     </span>
                     {selectedTranscriptionModel === model.name && (
                       <svg

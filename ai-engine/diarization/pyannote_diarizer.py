@@ -9,8 +9,6 @@ import tempfile
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
-from pydub import AudioSegment
-
 from .base import BaseDiarizer, SpeakerTurn
 from model_registry import ModelRegistry
 
@@ -128,8 +126,17 @@ class PyAnnoteDiarizer(BaseDiarizer):
 
         temp_wav = None
         try:
-            # Convert to WAV for PyAnnote
-            temp_wav = self._convert_to_wav(file_path)
+            # Convert to WAV using Rust audio module (with Python fallback)
+            from utils.rust_audio_bridge import convert_to_wav
+            
+            temp_wav_info = convert_to_wav(file_path)
+            temp_wav = temp_wav_info.get('_output_path', temp_wav)
+            
+            # If rust_audio_bridge returned a path, use it
+            # Otherwise, it may have created the file in-place
+            if not os.path.exists(temp_wav):
+                # Fallback: create temp WAV manually
+                temp_wav = self._convert_to_wav(file_path)
 
             # Prepare diarization parameters
             diarization_params = {}
@@ -208,11 +215,12 @@ class PyAnnoteDiarizer(BaseDiarizer):
         return best_speaker
 
     def _convert_to_wav(self, file_path: str) -> str:
-        """Convert audio to 16kHz mono WAV."""
+        """Convert audio to 16kHz mono WAV using pydub (fallback)."""
         temp_fd, temp_path = tempfile.mkstemp(suffix=".wav")
         os.close(temp_fd)
 
         try:
+            from pydub import AudioSegment
             audio = AudioSegment.from_file(file_path)
             audio = audio.set_frame_rate(16000).set_channels(1)
             audio.export(temp_path, format="wav")

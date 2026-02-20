@@ -31,12 +31,21 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
   miniPlayerPosition: 'bottom-left',
 
   setPlaying: (taskId, fileName, isPlaying) => {
+    const state = get();
+    // Only update if something actually changed
+    if (state.playingTaskId === taskId && state.isPlaying === isPlaying) {
+      return; // No change needed
+    }
+    
+    // Сбрасываем время только при СМЕНЕ задачи, а не при play/pause
+    const isTaskChanged = state.playingTaskId !== taskId;
+    
     set({
       playingTaskId: taskId,
       playingTaskFileName: fileName,
       isPlaying,
-      // При смене задачи сбрасываем время
-      currentTime: 0
+      // При смене задачи сбрасываем время, иначе сохраняем текущую позицию
+      currentTime: isTaskChanged ? 0 : state.currentTime
     });
   },
 
@@ -50,13 +59,21 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
     set({ isPlaying: !isPlaying });
   },
 
-  stop: () => set({
-    playingTaskId: null,
-    playingTaskFileName: null,
-    isPlaying: false,
-    currentTime: 0,
-    duration: 0
-  }),
+  stop: () => {
+    // Pause any playing media before resetting
+    const videoEl = document.querySelector('video');
+    if (videoEl && !videoEl.paused) {
+      videoEl.pause();
+    }
+    
+    set({
+      playingTaskId: null,
+      playingTaskFileName: null,
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0
+    });
+  },
 
   setPosition: (position) => set({ miniPlayerPosition: position }),
 }));

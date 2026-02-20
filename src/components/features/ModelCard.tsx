@@ -5,6 +5,7 @@ import type { AvailableModel, ModelDownloadState } from "@/types";
 import { isPyannoteModel } from "@/types";
 import { Progress } from "@/components/ui/progress";
 import { useTasks } from "@/stores";
+import { formatSizeMb, formatEta } from "@/lib/utils";
 
 const modelCardVariants = cva(
   "relative rounded-xl border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-px",
@@ -66,24 +67,9 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
       ? "downloading"
       : isError
       ? "error"
-      : isInstalled
+      :     isInstalled
       ? "installed"
       : "default";
-
-    const formatSize = (mb: number): string => {
-      if (mb >= 1024) {
-        return `${(mb / 1024).toFixed(1)} GB`;
-      }
-      return `${mb} MB`;
-    };
-
-    const formatEta = (etaS?: number): string | null => {
-      if (!etaS || etaS <= 0) return null;
-      const totalSeconds = Math.round(etaS);
-      const minutes = Math.floor(totalSeconds / 60);
-      const seconds = totalSeconds % 60;
-      return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-    };
 
     const [hasEntered, setHasEntered] = React.useState(false);
 
@@ -121,7 +107,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center rounded-md border border-border/70 bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                      {formatSize(model.sizeMb)}
+                      {formatSizeMb(model.sizeMb)}
                     </span>
 
                     {!isDownloading && !isError && (
@@ -220,7 +206,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
 
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">
-                      {formatSize(download.currentMb)} / {formatSize(download.totalMb)}
+                      {formatSizeMb(download.currentMb)} / {formatSizeMb(download.totalMb)}
                       {download.totalEstimated ? " (estimated)" : ""}
                     </span>
                     <span className="font-medium">{download.progress.toFixed(0)}%</span>

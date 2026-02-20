@@ -1,5 +1,15 @@
-import { useState, useMemo } from "react";
-import { Archive, Trash2, Search, Calendar, ArrowUpDown, X, ChevronLeft, ChevronRight, Sparkles, FolderOpen } from "lucide-react";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { Archive, Trash2, Search, Calendar, ArrowUpDown, X, ChevronLeft, ChevronRight, Sparkles, FolderOpen, AlertTriangle } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { formatFileSize, formatDateTime } from "@/lib/utils";
 import { useArchivedTasks, useTasks, useUIStore } from "@/stores";
@@ -11,6 +21,7 @@ import { openArchiveFolder } from "@/services/tauri";
 type SortOption = "date-desc" | "date-asc" | "name-asc" | "name-desc";
 
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
+const TABLE_COLUMN_COUNT = 4;
 
 export function ArchiveView() {
   const archivedTasks = useArchivedTasks();
@@ -19,31 +30,49 @@ export function ArchiveView() {
   const setCurrentView = useUIStore((s) => s.setCurrentView);
   
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState<SortOption>("date-desc");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
   const [isCleanupModalOpen, setIsCleanupModalOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [taskToDelete, setTaskToDelete] = useState<string | null>(null);
 
   const getArchivedSize = (task: TranscriptionTask): number => task.archiveSize ?? task.fileSize;
+
+  // Debounced search effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const isValidDate = (dateString: string): boolean => {
+    if (!dateString) return true;
+    const date = new Date(dateString);
+    return !isNaN(date.getTime());
+  };
 
   const filteredAndSortedTasks = useMemo(() => {
     let result = [...archivedTasks];
 
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
+    if (debouncedSearchQuery.trim()) {
+      const query = debouncedSearchQuery.toLowerCase();
       result = result.filter((task) =>
         task.fileName.toLowerCase().includes(query)
       );
     }
 
-    if (dateFrom) {
+    if (dateFrom && isValidDate(dateFrom)) {
       const fromDate = new Date(dateFrom);
       fromDate.setHours(0, 0, 0, 0);
       result = result.filter((task) => new Date(task.createdAt) >= fromDate);
     }
-    if (dateTo) {
+    if (dateTo && isValidDate(dateTo)) {
       const toDate = new Date(dateTo);
       toDate.setHours(23, 59, 59, 999);
       result = result.filter((task) => new Date(task.createdAt) <= toDate);
@@ -63,7 +92,7 @@ export function ArchiveView() {
     });
 
     return result;
-  }, [archivedTasks, searchQuery, sortOption, dateFrom, dateTo]);
+  }, [archivedTasks, debouncedSearchQuery, sortOption, dateFrom, dateTo]);
 
   const totalArchivedSize = useMemo(
     () => archivedTasks.reduce((sum, task) => sum + getArchivedSize(task), 0),
@@ -88,6 +117,19 @@ export function ArchiveView() {
     setCurrentView("transcription");
   };
 
+  const handleDeleteClick = useCallback((taskId: string) => {
+    setTaskToDelete(taskId);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (taskToDelete) {
+      removeTask(taskToDelete);
+      setTaskToDelete(null);
+      setDeleteDialogOpen(false);
+    }
+  }, [taskToDelete, removeTask]);
+
   const handleOpenArchiveFolder = async () => {
     const result = await openArchiveFolder();
     if (!result.success) {
@@ -97,7 +139,7 @@ export function ArchiveView() {
 
   if (archivedTasks.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-8">
+      <div className="flex flex-col items-center justify-center h-full text-center p-8 animate-in fade-in-0 zoom-in-95">
         <div className="rounded-full bg-muted p-4 mb-4">
           <Archive className="h-8 w-8 text-muted-foreground" />
         </div>
@@ -226,15 +268,16 @@ export function ArchiveView() {
           <tbody>
             {paginatedTasks.length === 0 ? (
               <tr>
-                <td colSpan={4} className="py-8 text-center text-muted-foreground">
+                <td colSpan={TABLE_COLUMN_COUNT} className="py-8 text-center text-muted-foreground">
                   No results found for the specified filters
                 </td>
               </tr>
             ) : (
-              paginatedTasks.map((task) => (
+              paginatedTasks.map((task, index) => (
                 <tr
                   key={task.id}
-                  className="border-b last:border-b-0 hover:bg-muted/30 cursor-pointer transition-colors"
+                  className="border-b last:border-b-0 hover:bg-muted/30 cursor-pointer transition-colors animate-in fade-in-0 slide-in-from-bottom-2"
+                  style={{ animationDelay: `${index * 20}ms` }}
                   onClick={() => handleTaskClick(task.id)}
                 >
                   <td className="py-3 px-4">
@@ -254,10 +297,10 @@ export function ArchiveView() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                         onClick={(e) => {
                           e.stopPropagation();
-                          removeTask(task.id);
+                          handleDeleteClick(task.id);
                         }}
                         title="Delete"
                       >
@@ -271,6 +314,31 @@ export function ArchiveView() {
           </tbody>
         </table>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete Archived Transcription?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this archived transcription? This action cannot be undone.
+              The transcription and all associated files will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Pagination */}
       {filteredAndSortedTasks.length > 0 && (

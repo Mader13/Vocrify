@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Upload, AlertCircle, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout";
-import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer } from "@/components/features";
-import { useTasks, useUIStore, useSetupStore } from "@/stores";
+import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer, VideoPlayer } from "@/components/features";
+import { useTasks, useUIStore, useSetupStore, usePlaybackStore } from "@/stores";
 import {
   onProgressUpdate,
   onTranscriptionError,
@@ -26,6 +26,53 @@ interface SelectedFile {
   path: string;
   name: string;
   size: number;
+}
+
+/**
+ * BackgroundPlayer keeps the audio/video element alive (in the DOM) when the user
+ * navigates away from the playing task's page. Without this, the media element
+ * is unmounted and audio stops. This hidden player maintains playback so MiniPlayer
+ * controls (play/pause) still work across navigation.
+ */
+function BackgroundPlayer() {
+  const playingTaskId = usePlaybackStore((s) => s.playingTaskId);
+  const selectedTaskId = useUIStore((s) => s.selectedTaskId);
+  const tasks = useTasks((s) => s.tasks);
+
+  // Only render when there's a playing task that is NOT currently visible on screen
+  const shouldRender = playingTaskId !== null && playingTaskId !== selectedTaskId;
+  const task = shouldRender
+    ? tasks.find((t) => t.id === playingTaskId && t.status === "completed")
+    : undefined;
+
+  if (!task) return null;
+
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: "fixed",
+        // opacity:0 (not visibility:hidden) keeps the element geometrically
+        // present so IntersectionObserver fires and WaveSurfer initializes.
+        // audio/video playback continues normally while invisible to the user.
+        opacity: 0,
+        pointerEvents: "none",
+        // Give enough width so WaveSurfer can measure its container
+        width: "300px",
+        height: "100px",
+        zIndex: -1,
+        top: 0,
+        left: 0,
+        overflow: "hidden",
+      }}
+    >
+      <VideoPlayer
+        task={task}
+        colorMode="segments"
+        isVideoVisible={false}
+      />
+    </div>
+  );
 }
 
 function LoadingScreen() {
@@ -71,7 +118,7 @@ function MainApplication() {
   });
 
   useEffect(() => {
-    if (currentView === "archive") {
+    if (currentView === "archive" || currentView === "models" || currentView === "settings") {
       setSelectedTask(null);
     } else if (currentView === "transcription") {
       // Clear selection if the selected task doesn't exist (but allow archived tasks)
@@ -322,6 +369,7 @@ function MainApplication() {
     <div className="flex h-screen flex-col bg-background">
       <Header />
       <MiniPlayer />
+      <BackgroundPlayer />
 
       {currentView === "transcription" || currentView === "archive" ? (
         <main
@@ -351,9 +399,13 @@ function MainApplication() {
             {selectedTaskId ? <TranscriptionView /> : (currentView === "archive" ? <ArchiveView /> : <TranscriptionView />)}
           </div>
         </main>
-      ) : (
+      ) : currentView === "models" ? (
         <main className="flex-1 overflow-hidden">
           <ModelsManagement />
+        </main>
+      ) : (
+        <main className="flex-1 overflow-hidden">
+          {/* Settings view - SettingsPanel renders as modal */}
         </main>
       )}
 

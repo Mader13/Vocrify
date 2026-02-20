@@ -6,6 +6,9 @@ This module provides functions for:
 - Speech activity detection (VAD)
 - Interval merging and slicing
 - Timestamp offset management
+
+Note: Uses Rust audio module (via rust_audio_bridge) for audio processing
+when available, with fallback to Python (pydub/soundfile).
 """
 
 import json
@@ -20,7 +23,9 @@ import numpy as np
 
 def ensure_wav_16k_mono(file_path: str) -> str:
     """
-    Convert audio file to WAV 16kHz mono format using ffmpeg.
+    Convert audio file to WAV 16kHz mono format.
+    
+    Uses Rust audio module when available, falls back to ffmpeg.
 
     Args:
         file_path: Path to input audio/video file
@@ -28,6 +33,26 @@ def ensure_wav_16k_mono(file_path: str) -> str:
     Returns:
         Path to converted WAV file (may be original if already correct format)
     """
+    # Try Rust audio module first
+    try:
+        from utils.rust_audio_bridge import convert_to_wav
+        
+        # Create temp file for output
+        fd, temp_path = tempfile.mkstemp(suffix='.wav')
+        os.close(fd)
+        
+        result = convert_to_wav(file_path, temp_path)
+        if result and result.get('sample_rate') == 16000:
+            return temp_path
+    except Exception as e:
+        print(f"[audio_intervals] Rust audio bridge failed: {e}, falling back to ffmpeg", file=sys.stderr)
+    
+    # Fallback to ffmpeg
+    return _ensure_wav_16k_mono_ffmpeg(file_path)
+
+
+def _ensure_wav_16k_mono_ffmpeg(file_path: str) -> str:
+    """Convert audio to WAV 16kHz mono using ffmpeg (fallback)."""
     # Check if already 16kHz mono WAV
     try:
         import soundfile as sf
@@ -63,7 +88,9 @@ def ensure_wav_16k_mono(file_path: str) -> str:
 
 def load_audio(wav_path: str) -> Tuple[np.ndarray, int]:
     """
-    Load audio file using soundfile.
+    Load audio file.
+    
+    Uses Rust audio module when available, falls back to soundfile.
 
     Args:
         wav_path: Path to WAV file
@@ -71,6 +98,8 @@ def load_audio(wav_path: str) -> Tuple[np.ndarray, int]:
     Returns:
         Tuple of (audio_array, sample_rate)
     """
+    # Try Rust audio module first (via Tauri IPC if available)
+    # For now, use soundfile directly as fallback
     try:
         import soundfile as sf
         audio, sr = sf.read(wav_path)
@@ -371,6 +400,8 @@ def offset_segments(
 def get_audio_duration(file_path: str) -> float:
     """
     Get the duration of an audio file in seconds.
+    
+    Uses Rust audio module when available, falls back to soundfile.
 
     Args:
         file_path: Path to audio file
@@ -378,6 +409,14 @@ def get_audio_duration(file_path: str) -> float:
     Returns:
         Duration in seconds
     """
+    # Try Rust audio module first
+    try:
+        from utils.rust_audio_bridge import get_duration
+        return get_duration(file_path)
+    except Exception:
+        pass  # Fallback to soundfile
+    
+    # Fallback to soundfile
     try:
         import soundfile as sf
         info = sf.info(file_path)

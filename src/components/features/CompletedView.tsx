@@ -14,11 +14,10 @@ import { ArchiveButton } from "@/components/features/ArchiveButton";
 import { TranscriptionSegments } from "@/components/features/TranscriptionSegments";
 import { VideoPlayer } from "@/components/features/VideoPlayer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn, formatTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { sanitizeSegments } from "@/lib/segment-utils";
 import { useUIStore } from "@/stores";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
-import { MODEL_NAMES } from "@/types";
 
 interface CompletedViewProps {
   task: TranscriptionTask;
@@ -31,7 +30,6 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const videoRef = useRef<HTMLVideoElement>(null);
   const segmentsContainerRef = useRef<HTMLDivElement>(null);
 
-  const [colorMode, setColorMode] = useState<WaveformColorMode>("segments");
   const [isVideoVisible, setIsVideoVisible] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState<number | undefined>(undefined);
@@ -59,9 +57,18 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   // Check if speaker diarization is available
   const hasSpeakerData = sanitizedSpeakerSegments.length > 0 || (task.result?.speakerTurns && task.result.speakerTurns.length > 0);
 
-  const displaySegments = displayMode === "segments"
+  const waveformMode: WaveformColorMode =
+    displayMode === "speakers" && !hasSpeakerData ? "segments" : displayMode;
+
+  const displaySegments = waveformMode === "segments"
     ? sanitizedSegments
     : (sanitizedSpeakerSegments.length > 0 ? sanitizedSpeakerSegments : sanitizedSegments);
+
+  useEffect(() => {
+    if (displayMode === "speakers" && !hasSpeakerData) {
+      setDisplayMode("segments");
+    }
+  }, [displayMode, hasSpeakerData, setDisplayMode]);
 
   const matchingSegmentsCount = useMemo(() => {
     if (!searchQuery || !displaySegments) return 0;
@@ -88,7 +95,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     if (selectedIndex === undefined) {
       return;
     }
-    const selectedSegment = selectedIndex !== undefined ? displaySegments[selectedIndex] : undefined;
+    const selectedSegment = displaySegments[selectedIndex];
     if (!selectedSegment || time > selectedSegment.end + 0.05) {
       setSelectedSegmentIndex(undefined);
     }
@@ -133,7 +140,9 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     if (!searchQuery) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+      const key = e.key.toLowerCase();
+
+      if ((e.ctrlKey || e.metaKey) && key === "g") {
         e.preventDefault();
         if (e.shiftKey) {
           goToPreviousSearch();
@@ -141,7 +150,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
           goToNextSearch();
         }
       }
-      if (e.key === 'F3') {
+
+      if (key === "f3") {
         e.preventDefault();
         if (e.shiftKey) {
           goToPreviousSearch();
@@ -151,8 +161,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [searchQuery, goToPreviousSearch, goToNextSearch]);
 
   useEffect(() => {
@@ -171,6 +181,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
             <div className="flex items-center gap-1">
               {hasVideo && (
                 <button
+                  type="button"
                   onClick={() => setIsVideoVisible(!isVideoVisible)}
                   className="h-8 px-2 text-xs font-medium rounded-md hover:bg-muted/60 active:bg-muted/80 transition-all duration-150 flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
                 >
@@ -188,39 +199,34 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                 </button>
               )}
               <button
+                type="button"
                 onClick={() => {
-                  const newMode = colorMode === "segments" ? "speakers" : "segments";
-                  setColorMode(newMode);
+                  const newMode = waveformMode === "segments" ? "speakers" : "segments";
                   setDisplayMode(newMode);
                 }}
                 disabled={!hasSpeakerData}
                 className={cn(
                   "h-8 px-3 text-xs font-medium rounded-md transition-all duration-150 flex items-center gap-1.5",
                   !hasSpeakerData && "opacity-50 cursor-not-allowed",
-                  colorMode === "segments"
+                  waveformMode === "segments"
                     ? "bg-muted/60 text-muted-foreground hover:bg-muted/80"
                     : "bg-primary/10 text-primary hover:bg-primary/20"
                 )}
                 title={!hasSpeakerData ? "No speaker data available" : "Toggle waveform color mode"}
               >
-                <span>{colorMode === "segments" ? "Segments View" : "Speakers View"}</span>
+                <span>{waveformMode === "segments" ? "Segments View" : "Speakers View"}</span>
               </button>
               <ExportMenu task={task} />
               <ArchiveButton task={task} />
             </div>
           </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <span>Duration: {formatTime(task.result?.duration ?? 0)}</span>
-            <span>Language: {task.result?.language}</span>
-            <span>Segments: {sanitizedSegments.length}</span>
-            <span>Model: {MODEL_NAMES[task.options.model] || task.options.model}</span>
-          </div>
+          
         </CardHeader>
         <CardContent className="p-0">
           <VideoPlayer
             ref={videoRef}
             task={task}
-            colorMode={colorMode}
+            colorMode={waveformMode}
             onTimeUpdate={handlePlayerTimeUpdate}
             isVideoVisible={isVideoVisible}
             className="w-full"
@@ -267,6 +273,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                       )}
                     </span>
                     <button
+                      type="button"
                       onClick={() => setSearchQuery("")}
                       className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-sm hover:bg-muted/60 transition-colors"
                       aria-label="Clear search"
@@ -279,6 +286,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
               {searchQuery && matchingSegmentsCount > 0 && (
                 <div className="flex items-center gap-1">
                   <button
+                    type="button"
                     onClick={goToPreviousSearch}
                     className={cn(
                       "h-9 px-2 text-sm font-medium rounded-md transition-all duration-150",
@@ -291,6 +299,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                     <ChevronUp className="h-4 w-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={goToNextSearch}
                     className={cn(
                       "h-9 px-2 text-sm font-medium rounded-md transition-all duration-150",

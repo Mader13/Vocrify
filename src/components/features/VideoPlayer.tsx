@@ -486,6 +486,10 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       barRadius: 2,
       minPxPerSec: 0.5,   // Limit detail level for performance
       backend: 'WebAudio', // Use WebAudio for better performance
+      // Mute WaveSurfer when a <video> element exists: WaveSurfer is used only for
+      // waveform visualization; audio comes exclusively from the <video> element.
+      // Without this, both play simultaneously causing duplicate audio.
+      muted: !!video,
     };
 
     // Use cached peaks if available
@@ -511,6 +515,13 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
         ws = WaveSurferLib.create(wsOptions);
         wavesurferRef.current = ws;
         console.log("[VideoPlayer DEBUG] WaveSurfer created successfully");
+
+        // Belt-and-suspenders: if a <video> element exists, WaveSurfer is only used
+        // for waveform visualization. Mute it via API to guarantee no audio output,
+        // regardless of whether the `muted` creation option was honoured.
+        if (video) {
+          ws.setVolume(0);
+        }
 
         // Register regions plugin after WaveSurfer is created (v7 API)
         const regions = ws.registerPlugin(RegionsPluginLib.create());
@@ -675,6 +686,11 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
           if (videoEl) {
             videoEl.currentTime = position;
           }
+          // Also sync time to store - for audio-only tasks or when seeking while paused
+          // Use position directly since ws gives us the time position directly
+          setCurrentTime(position);
+          onTimeUpdate?.(position);
+          syncHandleTimeUpdate(position);
         });
 
         // Event: Time update from WaveSurfer (more accurate than video for cursor)
@@ -715,6 +731,8 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
     if (video) {
       video.addEventListener("timeupdate", handleTimeUpdate);
+      // Also listen for seeked events - they fire after user seeks (even when paused)
+      video.addEventListener("seeked", handleTimeUpdate);
     }
 
     // Cleanup
@@ -723,6 +741,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       isWaveformReadyRef.current = false;
       if (video) {
         video.removeEventListener("timeupdate", handleTimeUpdate);
+        video.removeEventListener("seeked", handleTimeUpdate);
       }
       ws?.destroy();
     };
@@ -794,7 +813,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       ws.on("play", handlePlay);
       ws.on("pause", handlePause);
 
-      // Set initial state
+      // Set initial state from WaveSurfer
       setIsPlaying(ws.isPlaying());
 
       return () => {
@@ -817,7 +836,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     videoElement.addEventListener("play", handlePlay);
     videoElement.addEventListener("pause", handlePause);
 
-    // Set initial state
+    // Set initial state from video element
     setIsPlaying(!videoElement.paused);
 
     return () => {
@@ -930,7 +949,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       )}
 
       {/* Waveform Container */}
-      <div className="relative rounded-xl border bg-card overflow-hidden">
+      <div className="relative border bg-card overflow-hidden">
         {/* Waveform */}
         <div
           ref={containerRef}

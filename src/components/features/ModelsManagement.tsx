@@ -9,6 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { openModelsFolder } from "@/services/tauri";
 import { MODEL_NAMES } from "@/types";
 import { logger } from "@/lib/logger";
+import { formatSizeMb, formatEta } from "@/lib/utils";
 
 export function ModelsManagement() {
   const {
@@ -38,26 +39,6 @@ export function ModelsManagement() {
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const formatSize = (mb: number | undefined): string => {
-    if (mb === undefined || mb === null || isNaN(mb)) {
-      return "N/A";
-    }
-    if (mb >= 1024) {
-      return `${(mb / 1024).toFixed(1)} GB`;
-    }
-    return `${mb} MB`;
-  };
-
-  const formatEta = (etaS?: number): string | null => {
-    if (!etaS || etaS <= 0) {
-      return null;
-    }
-    const totalSeconds = Math.round(etaS);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-  };
 
   const totalDownloads = Object.values(downloads).filter(
     (d) => d.status === "downloading",
@@ -130,7 +111,7 @@ export function ModelsManagement() {
                   Disk Usage
                 </p>
                 <p className="text-xl font-semibold">
-                  {formatSize(diskUsage?.totalSizeMb)}
+                  {formatSizeMb(diskUsage?.totalSizeMb)}
                 </p>
               </div>
             </div>
@@ -165,8 +146,8 @@ export function ModelsManagement() {
                   </div>
                   <Progress value={download.progress} className="h-2" />
                   <p className="text-xs text-muted-foreground">
-                    {formatSize(download.currentMb)} /{" "}
-                    {formatSize(download.totalMb)}
+                    {formatSizeMb(download.currentMb)} /{" "}
+                    {formatSizeMb(download.totalMb)}
                     {download.totalEstimated ? " (estimated)" : ""}
                     {download.speedMbS > 0 && ` - ${download.speedMbS.toFixed(1)} MB/s`}
                     {formatEta(download.etaS) && ` - ~${formatEta(download.etaS)} remaining`}

@@ -1,12 +1,10 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
-import { TaskList, ModelWarning } from "@/components/features";
-import { Button } from "@/components/ui/button";
+import { useCallback } from "react";
+import { TaskList, ModelWarning, SidebarToggle, AddFilesButton } from "@/components/features";
 import { cn } from "@/lib/utils";
 import { useTasks, useUIStore } from "@/stores";
 import { selectMediaFiles } from "@/services/tauri";
 import { useNotificationStore } from "@/services/notifications";
-import { useModelValidation } from "@/hooks";
+import { useModelValidation, useResizable } from "@/hooks";
 
 const MIN_SIDEBAR_WIDTH = 320;
 const MAX_SIDEBAR_WIDTH = 460;
@@ -24,68 +22,17 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const { validateModelSelection, selectedModel } = useModelValidation();
 
+  const { width: sidebarWidth, isResizing, containerRef, handleResizeStart } = useResizable({
+    initialWidth: DEFAULT_SIDEBAR_WIDTH,
+    minWidth: MIN_SIDEBAR_WIDTH,
+    maxWidth: MAX_SIDEBAR_WIDTH,
+    storageKey: SIDEBAR_WIDTH_STORAGE_KEY,
+  });
+
   const visibleTasks = tasks.filter((task) => !task.archived);
   const queuedTasks = visibleTasks.filter((task) => task.status === "queued").length;
   const activeTasks = visibleTasks.filter((task) => task.status === "processing").length;
   const completedTasks = visibleTasks.filter((task) => task.status === "completed").length;
-
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const savedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
-    if (!Number.isFinite(savedWidth)) {
-      return DEFAULT_SIDEBAR_WIDTH;
-    }
-
-    return Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, savedWidth));
-  });
-  const [isResizing, setIsResizing] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const handleResizeStart = useCallback(() => {
-    setIsResizing(true);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, []);
-
-  const handleResizeEnd = useCallback(() => {
-    setIsResizing(false);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-  }, []);
-
-  const handleResize = useCallback(
-    (e: MouseEvent) => {
-      if (!isResizing || !containerRef.current) return;
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const newWidth = e.clientX - rect.left;
-      const clampedWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, newWidth));
-      setSidebarWidth(clampedWidth);
-    },
-    [isResizing],
-  );
-
-  useEffect(() => {
-    if (isResizing) {
-      window.addEventListener("mousemove", handleResize);
-      window.addEventListener("mouseup", handleResizeEnd);
-      return () => {
-        window.removeEventListener("mousemove", handleResize);
-        window.removeEventListener("mouseup", handleResizeEnd);
-      };
-    }
-  }, [isResizing, handleResize, handleResizeEnd]);
-
-  useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-  }, [sidebarWidth]);
-
-  useEffect(
-    () => () => {
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    },
-    [],
-  );
 
   const handleFilesSelected = useCallback(
     (files: Array<{ path: string; name: string; size: number }>) => {
@@ -93,7 +40,7 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
     },
     [onFilesSelected],
   );
-    
+
   const handleAddFiles = useCallback(async () => {
     if (!validateModelSelection()) {
       useNotificationStore.getState().addNotification({
@@ -128,19 +75,18 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
         ref={containerRef}
         className={cn(
           "group/sidebar hidden h-full shrink-0 border-r border-border/70 bg-background lg:flex",
-          "transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]",
+          "transition-[width] duration-300 ease-[cubic-bezier(0.4,0,0,2,1)]",
           isResizing && "select-none",
-          isSidebarCollapsed ? "items-center" : "overflow-hidden"
+          isSidebarCollapsed ? "items-center" : "overflow-hidden",
         )}
         style={{ width: isSidebarCollapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarWidth }}
       >
         <div className="relative flex h-full w-full flex-col">
-
           {/* Expanded content wrapper */}
           <div
             className={cn(
               "flex flex-1 flex-col min-h-0",
-              isSidebarCollapsed ? "absolute inset-0" : ""
+              isSidebarCollapsed ? "absolute inset-0" : "",
             )}
             style={{
               clipPath: isSidebarCollapsed ? "inset(0 100% 0 0)" : "inset(0 0 0 0)",
@@ -152,28 +98,13 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
             <div className="flex-none px-5 pt-4">
               <div className="flex items-center justify-between gap-2">
                 <p className="truncate text-xl font-semibold tracking-tight">Workspace</p>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleSidebar}
-                  className="h-11 w-11 shrink-0 rounded-xl border border-transparent transition-all duration-200 hover:border-border hover:bg-muted"
-                  title="Collapse sidebar"
-                  aria-label="Collapse sidebar"
-                >
-                  <PanelLeftClose className="h-5 w-5" />
-                </Button>
+                <SidebarToggle isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />
               </div>
             </div>
 
             {/* Add files button */}
             <div className="flex-none px-5 py-4">
-              <Button
-                onClick={handleAddFiles}
-                className="h-10 w-full justify-start gap-2 rounded-xl text-sm font-medium transition-all duration-200 hover:-translate-y-px"
-              >
-                <Plus className="h-4 w-4" />
-                Add media files
-              </Button>
+              <AddFilesButton onClick={handleAddFiles} />
               <p className="mt-1 text-xs text-muted-foreground">
                 Or simply drag & drop the file anywhere in the application window.
               </p>
@@ -183,9 +114,7 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 pb-4">
               <div className="space-y-4">
                 {!selectedModel && (
-                  <ModelWarning
-                    onGoToModels={() => useUIStore.getState().setCurrentView("models")}
-                  />
+                  <ModelWarning onGoToModels={() => useUIStore.getState().setCurrentView("models")} />
                 )}
                 <TaskList
                   queuedCount={queuedTasks}
@@ -200,7 +129,6 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
           <div
             className={cn(
               "flex flex-1 flex-col items-center absolute inset-0",
-              !isSidebarCollapsed ? "" : ""
             )}
             style={{
               clipPath: !isSidebarCollapsed ? "inset(0 100% 0 0)" : "inset(0 0 0 0)",
@@ -209,29 +137,11 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
             }}
           >
             <div className="flex-none px-5 pt-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={toggleSidebar}
-                className="h-11 w-11 shrink-0 rounded-xl border border-transparent transition-all duration-200 hover:border-border hover:bg-muted"
-                title="Expand sidebar"
-                aria-label="Expand sidebar"
-              >
-                <PanelLeftOpen className="h-5 w-5" />
-              </Button>
+              <SidebarToggle isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />
             </div>
 
             <div className="flex-none px-5 py-4">
-              <Button
-                variant="default"
-                size="icon"
-                className="h-11 w-11 rounded-xl transition-all duration-200 hover:scale-[1.02]"
-                onClick={handleAddFiles}
-                title="Add files"
-                aria-label="Add files"
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
+              <AddFilesButton onClick={handleAddFiles} variant="icon" />
             </div>
 
             <div className="mt-3 mb-1 h-px w-8 bg-border" />
@@ -252,10 +162,7 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
               Файлы можно перетаскивать прямо в окно приложения
             </p>
           </div>
-          <Button onClick={handleAddFiles} size="sm" className="h-9 rounded-lg px-3">
-            <Plus className="mr-1.5 h-4 w-4" />
-            Add
-          </Button>
+          <AddFilesButton onClick={handleAddFiles} variant="mobile" />
         </div>
 
         {!selectedModel && (

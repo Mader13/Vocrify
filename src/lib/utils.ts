@@ -83,6 +83,32 @@ export function formatFileSize(bytes: number): string {
 }
 
 /**
+ * Format size in MB to human readable format (e.g., "1.5 GB" or "500 MB")
+ */
+export function formatSizeMb(mb: number | undefined | null): string {
+  if (mb === undefined || mb === null || !Number.isFinite(mb)) {
+    return "N/A";
+  }
+  if (mb >= 1024) {
+    return `${(mb / 1024).toFixed(1)} GB`;
+  }
+  return `${Math.round(mb)} MB`;
+}
+
+/**
+ * Format ETA in seconds to human readable format (e.g., "2m 30s" or "45s")
+ */
+export function formatEta(etaS?: number): string | null {
+  if (!etaS || etaS <= 0 || !Number.isFinite(etaS)) {
+    return null;
+  }
+  const totalSeconds = Math.round(etaS);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+/**
  * Get file extension from path
  */
 export function getFileExtension(path: string): string {

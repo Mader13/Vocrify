@@ -143,9 +143,9 @@ fn validate_ffmpeg_extraction(extract_dir: &PathBuf, ffmpeg_name: &str) -> Resul
 fn get_ffmpeg_urls() -> (String, String) {
     // gyan.dev provides static builds that don't require DLL dependencies
     if cfg!(windows) {
-        // Using essentials build (smaller, includes only essentials)
-        let url = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.1-essentials_build.zip".to_string();
-        let version = "7.1".to_string();
+        // Using release essentials build (version 8.0.1)
+        let url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".to_string();
+        let version = "8.0.1".to_string();
         (url, version)
     } else if cfg!(target_os = "macos") {
         // For macOS, use homebrew-style or BtbN static

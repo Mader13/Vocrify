@@ -82,7 +82,9 @@ def check_dependencies():
                 if installed >= required:
                     print(f"✅ {module_name:25s} {version:15s} (OK)")
                 else:
-                    print(f"⚠️  {module_name:25s} {version:15s} (old, requires {min_version}+)")
+                    print(
+                        f"⚠️  {module_name:25s} {version:15s} (old, requires {min_version}+)"
+                    )
                     all_ok = False
             except (ValueError, AttributeError):
                 print(f"✅ {module_name:25s} {version:15s} (version check skipped)")
@@ -136,7 +138,9 @@ def check_parakeet_dependencies():
                     if installed >= required:
                         print(f"✅ {module_name:25s} {version:15s} (OK)")
                     else:
-                        print(f"⚠️  {module_name:25s} {version:15s} (old, requires {min_version}+)")
+                        print(
+                            f"⚠️  {module_name:25s} {version:15s} (old, requires {min_version}+)"
+                        )
                         all_ok = False
                 except (ValueError, AttributeError):
                     print(f"✅ {module_name:25s} {version:15s} (version check skipped)")
@@ -174,20 +178,38 @@ def check_ffmpeg():
     print("FFmpeg Check")
     print("=" * 70)
 
+    import os
     import shutil
 
     ffmpeg_path = shutil.which("ffmpeg")
+
+    # Also check in app data directory (downloaded FFmpeg)
+    if not ffmpeg_path:
+        app_data = os.environ.get("APPDATA", "")
+        if app_data:
+            downloaded_ffmpeg = os.path.join(
+                app_data, "com.vocrify.app", "Vocrify", "ffmpeg", "ffmpeg.exe"
+            )
+            if os.path.exists(downloaded_ffmpeg):
+                ffmpeg_path = downloaded_ffmpeg
+        # Also check local app data (development)
+        if not ffmpeg_path:
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if local_app_data:
+                downloaded_ffmpeg = os.path.join(
+                    local_app_data, "com.vocrify.app", "Vocrify", "ffmpeg", "ffmpeg.exe"
+                )
+                if os.path.exists(downloaded_ffmpeg):
+                    ffmpeg_path = downloaded_ffmpeg
 
     if ffmpeg_path:
         print(f"✅ FFmpeg found at: {ffmpeg_path}")
 
         try:
             import subprocess
+
             result = subprocess.run(
-                ["ffmpeg", "-version"],
-                capture_output=True,
-                text=True,
-                timeout=5
+                ["ffmpeg", "-version"], capture_output=True, text=True, timeout=5
             )
             if result.returncode == 0:
                 version_line = result.stdout.split("\n")[0]
@@ -200,7 +222,7 @@ def check_ffmpeg():
         print("\n📖 Solution:")
         print("   1. Download from https://www.gyan.dev/ffmpeg/builds/")
         print("   2. Extract to C:\\ffmpeg")
-        print("   3. Add to PATH: setx PATH \"%PATH%;C:\\ffmpeg\\bin\"")
+        print('   3. Add to PATH: setx PATH "%PATH%;C:\\ffmpeg\\bin"')
         print("   4. Restart terminal")
 
     return False
@@ -253,7 +275,9 @@ def check_cuda():
             print("ℹ️  CUDA NOT available (CPU-only mode)")
             print("   Transcription will work but be slower")
             print("\n📖 For GPU acceleration:")
-            print("   1. Install CUDA Toolkit: https://developer.nvidia.com/cuda-downloads")
+            print(
+                "   1. Install CUDA Toolkit: https://developer.nvidia.com/cuda-downloads"
+            )
             print("   2. Reinstall torch with CUDA support")
             print("   3. See PYTHON_SETUP.md for details")
     except ImportError:

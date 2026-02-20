@@ -559,36 +559,38 @@ impl TranscriptionManager {
         ))
     }
 
-    /// Load and preprocess audio file
+    /// Load and preprocess audio file using the new audio module
     #[cfg(feature = "rust-transcribe")]
     #[allow(dead_code)]
     async fn load_audio_file(&self, audio_path: &Path) -> Result<Vec<f32>, TranscriptionError> {
-        use audrey::read::BufFileReader;
+        use crate::audio;
 
-        eprintln!("[INFO] Loading audio file: {:?}", audio_path);
+        eprintln!("[INFO] Loading audio file using audio module: {:?}", audio_path);
 
-        let mut reader = BufFileReader::open(audio_path)
-            .map_err(|e| TranscriptionError::Transcription(format!("Failed to open audio: {}", e)))?;
+        // Load audio using symphonia-based loader (supports all formats)
+        let audio_buffer = audio::loader::load(audio_path)
+            .map_err(|e| TranscriptionError::Transcription(format!("Failed to load audio: {}", e)))?;
 
-        let mut samples: Vec<f32> = reader.samples()
-            .map(|s: Result<i16, _>| s.unwrap_or(0) as f32 / i16::MAX as f32)
-            .collect();
+        // Convert to mono if needed
+        let mono = if audio_buffer.channels > 1 {
+            eprintln!("[INFO] Converting {} channels to mono", audio_buffer.channels);
+            audio_buffer.to_mono()
+        } else {
+            audio_buffer
+        };
 
-        // Convert stereo to mono if needed
-        let desc = reader.description();
-        if desc.channel_count() == 2 {
-            samples = samples.chunks(2)
-                .map(|c| (c[0] + c[1]) / 2.0)
-                .collect();
-        }
-
-        // Resample to 16kHz if needed (simplified - assumes input is 16kHz)
-        // For proper resampling, we'd need a resampling library
+        // Resample to 16kHz if needed (Whisper requires 16kHz)
+        let resampled = if mono.sample_rate != 16000 {
+            eprintln!("[INFO] Resampling from {}Hz to 16000Hz", mono.sample_rate);
+            mono.resample(16000)
+        } else {
+            mono
+        };
 
         eprintln!("[INFO] Loaded {} samples ({:.2}s)",
-            samples.len(), samples.len() as f64 / 16000.0);
+            resampled.samples.len(), resampled.samples.len() as f64 / 16000.0);
 
-        Ok(samples)
+        Ok(resampled.samples)
     }
 
     /// Stub implementation when rust-transcribe feature is disabled

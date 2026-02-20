@@ -53,8 +53,11 @@ torchvision==0.20.1 --extra-index-url https://download.pytorch.org/whl/cu121
 # AUDIO PROCESSING
 # ============================================================================
 # Audio loading and resampling
+# Note: pydub and soundfile are now used as fallback when Rust audio module
+# is not available. Primary audio processing is done via Rust (symphonia/hound).
 librosa==0.10.1
 soundfile==0.12.1
+pydub>=0.25.1
 
 # FFmpeg Python bindings (requires ffmpeg system binary)
 ffmpeg-python==0.2.0

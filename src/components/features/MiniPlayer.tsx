@@ -1,89 +1,266 @@
-import React, { useCallback, useState, memo } from 'react';
+import { useCallback, useState, memo, useEffect, useRef, useMemo } from 'react';
 import { Play, Pause, X, GripVertical, FileAudio } from 'lucide-react';
 import { cn, formatTime } from '@/lib/utils';
 import { usePlaybackStore, type MiniPlayerPosition } from '@/stores/playbackStore';
 import { useUIStore } from '@/stores';
 
-const positionClasses: Record<MiniPlayerPosition, string> = {
-  'top-left': 'top-4 left-4',
-  'top-right': 'top-4 right-4',
-  'bottom-left': 'bottom-4 left-4',
-  'bottom-right': 'bottom-4 right-4',
+// Target positions for each corner (with smooth snapping)
+const getTargetPosition = (position: MiniPlayerPosition, viewportWidth: number, viewportHeight: number, elementHeight: number) => {
+  const gap = 16; // 1rem = 4 * 4 = 16px (matches tailwind's top-4/left-4)
+  const headerHeight = 56; // h-14 = 14 * 4px = 56px
+
+  switch (position) {
+    case 'top-left':
+      return { x: gap, y: headerHeight + gap };
+    case 'top-right':
+      return { x: viewportWidth - 288 - gap, y: headerHeight + gap };
+    case 'bottom-left':
+      return { x: gap, y: viewportHeight - elementHeight - gap };
+    case 'bottom-right':
+      return { x: viewportWidth - 288 - gap, y: viewportHeight - elementHeight - gap };
+  }
 };
+
+const DRAG_THRESHOLD = 8; // Minimum pixels to move before considering it a drag
+const SNAP_ANIMATION_DURATION = 300; // ms
 
 function MiniPlayerInner() {
   const store = usePlaybackStore();
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
+  const setCurrentView = useUIStore((s) => s.setCurrentView);
+  // Hide MiniPlayer when the user is already viewing the playing task's page
+  const selectedTaskId = useUIStore((s) => s.selectedTaskId);
+  const elementRef = useRef<HTMLDivElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
-
-  // Don't render if nothing is playing
-  if (!store.playingTaskId || !store.isPlaying) {
-    return null;
-  }
+  const [isSnapping, setIsSnapping] = useState(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
+  const isDraggingRef = useRef(false);
 
   const handleClose = useCallback(() => {
     store.stop();
   }, [store]);
 
   const handleTogglePlayPause = useCallback(() => {
-    store.togglePlayPause();
+    if (!store.playingTaskId) return;
+
+    if (store.isPlaying) {
+      // Pause
+      window.dispatchEvent(new CustomEvent('miniplayer-pause', {
+        detail: { taskId: store.playingTaskId }
+      }));
+      store.setPlaying(store.playingTaskId, store.playingTaskFileName, false);
+    } else {
+      // Play
+      window.dispatchEvent(new CustomEvent('miniplayer-play', {
+        detail: { taskId: store.playingTaskId }
+      }));
+      store.setPlaying(store.playingTaskId, store.playingTaskFileName, true);
+    }
   }, [store]);
 
   const handleGoToTask = useCallback(() => {
     if (store.playingTaskId) {
       setSelectedTask(store.playingTaskId);
+      setCurrentView('transcription');
     }
-  }, [store.playingTaskId, setSelectedTask]);
+  }, [store.playingTaskId, setSelectedTask, setCurrentView]);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    // Only prevent default for left mouse button
+    if (e.button !== 0) return;
+    
     e.preventDefault();
-    setIsDragging(true);
+
+    // Store initial mouse position for drag threshold check
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+
+    // Calculate offset from the top-left corner of the element
+    const rect = elementRef.current?.getBoundingClientRect();
+    if (rect) {
+      dragOffset.current = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+    }
+
+    // Reset any bottom/right positioning to use only top/left
+    if (elementRef.current) {
+      elementRef.current.style.bottom = 'auto';
+      elementRef.current.style.right = 'auto';
+    }
   }, []);
 
-  const handleDragEnd = useCallback((e: React.MouseEvent) => {
-    if (!isDragging) return;
+  // Set initial position based on store position
+  useEffect(() => {
+    // Don't override position during/just after drag
+    if (isDraggingRef.current || isSnapping) return;
 
-    const screenWidth = window.innerWidth;
-    const screenHeight = window.innerHeight;
+    // Wait for element to be mounted before setting position
+    if (!elementRef.current) return;
 
-    // Determine which quadrant of mouse is in
-    const isLeft = e.clientX < screenWidth / 2;
-    const isTop = e.clientY < screenHeight / 2;
+    const applyPosition = () => {
+      if (!elementRef.current) return;
 
-    let newPosition: MiniPlayerPosition;
-    if (isTop && isLeft) newPosition = 'top-left';
-    else if (isTop && !isLeft) newPosition = 'top-right';
-    else if (!isTop && isLeft) newPosition = 'bottom-left';
-    else newPosition = 'bottom-right';
+      const elementHeight = elementRef.current.offsetHeight;
 
-    store.setPosition(newPosition);
-    setIsDragging(false);
-  }, [isDragging, store]);
+      // Wait until element has actual height (not 0)
+      if (elementHeight === 0) {
+        requestAnimationFrame(applyPosition);
+        return;
+      }
+
+      const screenWidth = window.innerWidth;
+      const screenHeight = window.innerHeight;
+      const targetPos = getTargetPosition(store.miniPlayerPosition, screenWidth, screenHeight, elementHeight);
+
+      elementRef.current.style.left = `${targetPos.x}px`;
+      elementRef.current.style.top = `${targetPos.y}px`;
+      elementRef.current.style.bottom = 'auto';
+      elementRef.current.style.right = 'auto';
+    };
+
+    // Use requestAnimationFrame to ensure element is rendered
+    requestAnimationFrame(applyPosition);
+
+    // Update position on window resize
+    const handleResize = () => {
+      if (isDraggingRef.current || isSnapping) return;
+      applyPosition();
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [store.miniPlayerPosition, isSnapping]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStartPos.current || !elementRef.current) return;
+      
+      // Check if mouse has moved enough to start dragging (threshold)
+      const dx = e.clientX - dragStartPos.current.x;
+      const dy = e.clientY - dragStartPos.current.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < DRAG_THRESHOLD) return;
+
+      // Only start dragging if not already
+      if (!isDraggingRef.current) {
+        isDraggingRef.current = true;
+        setIsDragging(true);
+      }
+
+      e.preventDefault();
+      // Directly update element position without re-render
+      elementRef.current.style.left = `${e.clientX - dragOffset.current.x}px`;
+      elementRef.current.style.top = `${e.clientY - dragOffset.current.y}px`;
+      elementRef.current.style.transition = 'none';
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!dragStartPos.current) return;
+
+      // If we were dragging, snap to position
+      if (isDraggingRef.current && elementRef.current) {
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        const elementHeight = elementRef.current.offsetHeight;
+
+        // Determine which quadrant of mouse is in
+        const isLeft = e.clientX < screenWidth / 2;
+        const isTop = e.clientY < screenHeight / 2;
+
+        let newPosition: MiniPlayerPosition;
+        if (isTop && isLeft) newPosition = 'top-left';
+        else if (isTop && !isLeft) newPosition = 'top-right';
+        else if (!isTop && isLeft) newPosition = 'bottom-left';
+        else newPosition = 'bottom-right';
+
+        // Calculate target position using actual element dimensions
+        const targetPos = getTargetPosition(newPosition, screenWidth, screenHeight, elementHeight);
+
+        store.setPosition(newPosition);
+
+        // Animate to target position using only top/left
+        elementRef.current.style.transition = `all ${SNAP_ANIMATION_DURATION}ms ease-out`;
+        elementRef.current.style.left = `${targetPos.x}px`;
+        elementRef.current.style.top = `${targetPos.y}px`;
+        elementRef.current.style.bottom = 'auto';
+        elementRef.current.style.right = 'auto';
+
+        setIsSnapping(true);
+        isDraggingRef.current = false;
+        setIsDragging(false);
+
+        // After animation completes, keep inline top/left styles to maintain position
+        setTimeout(() => {
+          if (elementRef.current) {
+            elementRef.current.style.transition = '';
+          }
+          setIsSnapping(false);
+        }, SNAP_ANIMATION_DURATION);
+      }
+
+      // Reset drag state
+      dragStartPos.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [store]);
 
   const progress = store.duration > 0 ? (store.currentTime / store.duration) * 100 : 0;
 
-  // Don't render if nothing is playing
-  if (!store.playingTaskId || !store.isPlaying) {
+  // Calculate initial position for first render (must be before conditional return)
+  const initialPosition = useMemo(() => {
+    // Default to bottom-left with estimated height for first render
+    const estimatedHeight = 80;
+    return getTargetPosition(store.miniPlayerPosition, window.innerWidth, window.innerHeight, estimatedHeight);
+  }, [store.miniPlayerPosition]);
+
+  // Don't render if there's no task loaded (but show even when paused)
+  // Also hide when the user is currently viewing the playing task's page —
+  // the VideoPlayer controls are already visible, showing MiniPlayer simultaneously
+  // creates a second play button that can trigger audio duplication.
+  if (!store.playingTaskId || selectedTaskId === store.playingTaskId) {
     return null;
   }
 
   return (
     <div
+      ref={elementRef}
       className={cn(
         'fixed z-50 flex items-center gap-3 px-4 py-3 rounded-xl',
         'bg-card border shadow-lg backdrop-blur-sm',
-        'transition-all duration-200',
-        'w-72 select-none',
-        positionClasses[store.miniPlayerPosition],
-        isDragging ? 'opacity-80 scale-105' : ''
+        'w-72 select-none h-fit',
+        // Don't use positionClasses - we use inline styles for dynamic positioning
+        isDragging ? 'opacity-80 scale-105' : '',
+        isSnapping ? '' : 'transition-all duration-200'
       )}
-      style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      style={{
+        cursor: isDragging ? 'grabbing' : 'grab',
+        // Initial position to prevent appearing at (0,0)
+        left: `${initialPosition.x}px`,
+        top: `${initialPosition.y}px`,
+      }}
       onMouseDown={handleDragStart}
-      onMouseUp={handleDragEnd}
+      draggable={false}
     >
       {/* Drag handle */}
-      <div className="text-muted-foreground/50 cursor-grab">
+      <div 
+        className="text-muted-foreground/50 cursor-grab flex items-center justify-center"
+        draggable={false}
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+      >
         <GripVertical className="h-4 w-4" />
       </div>
 
@@ -107,6 +284,7 @@ function MiniPlayerInner() {
       <div
         className="flex-1 min-w-0 cursor-pointer"
         onClick={handleGoToTask}
+        draggable={false}
       >
         <div className="flex items-center gap-2 mb-1">
           <FileAudio className="h-3.5 w-3.5 text-muted-foreground shrink-0" />

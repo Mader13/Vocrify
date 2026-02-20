@@ -35,6 +35,7 @@ pub mod transcription_manager;
 pub mod python_installer;
 pub mod performance_config;
 pub mod model_downloader;
+pub mod audio;
 
 // Re-export FFmpeg types for frontend
 pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgressEvent, get_ffmpeg_status, get_ffmpeg_path, download_ffmpeg};
@@ -2024,6 +2025,117 @@ async fn get_huggingface_token_command(app: AppHandle) -> Result<Option<String>,
     get_huggingface_token(&app).await
 }
 
+// ============================================================================
+// Audio Processing Commands (Rust-native audio module)
+// ============================================================================
+
+/// Audio information response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioInfo {
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub duration: f64,
+    pub format: String,
+}
+
+/// Convert audio file to WAV format (16kHz mono)
+#[tauri::command]
+async fn convert_audio_to_wav(
+    input_path: String,
+    output_path: String,
+) -> Result<AudioInfo, String> {
+    let input = PathBuf::from(&input_path);
+    let output = PathBuf::from(&output_path);
+
+    eprintln!("[AUDIO CMD] Converting {:?} to WAV at {:?}", input, output);
+
+    // Validate input path
+    if !input.exists() {
+        return Err(format!("Input file does not exist: {}", input_path));
+    }
+
+    // Convert audio to WAV format
+    let audio = crate::audio::converter::convert_to_wav(&input, &output)
+        .map_err(|e| format!("Failed to convert audio: {}", e))?;
+
+    Ok(AudioInfo {
+        sample_rate: audio.sample_rate,
+        channels: audio.channels,
+        duration: audio.duration(),
+        format: "wav".to_string(),
+    })
+}
+
+/// Get audio file duration
+#[tauri::command]
+async fn get_audio_duration(file_path: String) -> Result<f64, String> {
+    let path = PathBuf::from(&file_path);
+
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", file_path));
+    }
+
+    crate::audio::utils::get_duration(&path)
+        .map_err(|e| format!("Failed to get duration: {}", e))
+}
+
+/// Extract audio segment and save as WAV
+#[tauri::command]
+async fn extract_audio_segment(
+    file_path: String,
+    start_ms: u64,
+    end_ms: u64,
+    output_path: String,
+) -> Result<AudioInfo, String> {
+    let input = PathBuf::from(&file_path);
+    let output = PathBuf::from(&output_path);
+
+    if !input.exists() {
+        return Err(format!("Input file does not exist: {}", file_path));
+    }
+
+    eprintln!("[AUDIO CMD] Extracting segment from {}ms to {}ms", start_ms, end_ms);
+
+    // Extract segment
+    let segment = crate::audio::utils::slice_audio(&input, start_ms, end_ms)
+        .map_err(|e| format!("Failed to extract segment: {}", e))?;
+
+    // Save as WAV
+    crate::audio::converter::save_wav(&segment, &output)
+        .map_err(|e| format!("Failed to save segment: {}", e))?;
+
+    Ok(AudioInfo {
+        sample_rate: segment.sample_rate,
+        channels: segment.channels,
+        duration: segment.duration(),
+        format: "wav".to_string(),
+    })
+}
+
+/// Get audio file metadata
+#[tauri::command]
+async fn get_audio_metadata(file_path: String) -> Result<AudioInfo, String> {
+    let path = PathBuf::from(&file_path);
+
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", file_path));
+    }
+
+    let audio = crate::audio::loader::load(&path)
+        .map_err(|e| format!("Failed to load audio: {}", e))?;
+
+    Ok(AudioInfo {
+        sample_rate: audio.sample_rate,
+        channels: audio.channels,
+        duration: audio.duration(),
+        format: path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("unknown")
+            .to_string(),
+    })
+}
+
 /// Get models directory
 #[tauri::command]
 async fn get_models_dir_command(app: AppHandle) -> Result<String, AppError> {
@@ -3502,54 +3614,68 @@ async fn transcribe_rust(
         .map_err(|e| e.to_string())?;
 
     // Check if file needs conversion to WAV for Rust transcription
-    // Rust's audrey library can't decode mp4, m4a, mov, mkv, avi, webm
+    // Symphonia supports: wav, flac, mp3, m4a/aac, ogg, alac
+    // FFmpeg conversion needed for: mp4, mov, mkv, avi, webm (video containers)
     let needs_conversion = {
         let ext = std::path::Path::new(&validated_path)
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase())
             .unwrap_or_default();
-        matches!(ext.as_str(), "mp4" | "m4a" | "mov" | "mkv" | "avi" | "webm" | "flac" | "aac" | "ogg")
+        // Video containers need conversion to extract audio
+        matches!(ext.as_str(), "mp4" | "mov" | "mkv" | "avi" | "webm")
     };
 
     let audio_path = if needs_conversion {
-        // Convert to WAV using FFmpeg
+        // Convert to WAV using Rust audio module (with FFmpeg fallback)
         eprintln!("[INFO] Converting {} to WAV for Rust transcription", validated_path.display());
-        
-        let ffmpeg_path = match ffmpeg_manager::get_ffmpeg_path(&app).await {
-            Ok(p) => p,
-            Err(e) => {
-                return Err(format!(
-                    "FFmpeg not available for conversion: {}. Please install FFmpeg or convert the file to WAV manually.", 
-                    e
-                ));
-            }
-        };
 
         // Create temp WAV file
         let temp_dir = std::env::temp_dir();
         let wav_path = temp_dir.join(format!("transcribe_video_{}.wav", task_id));
-        
-        let output = std::process::Command::new(&ffmpeg_path)
-            .args([
-                "-y",  // Overwrite output
-                "-i", validated_path.to_str().unwrap(),
-                "-vn", // No video
-                "-acodec", "pcm_s16le", // PCM codec
-                "-ar", "16000", // 16kHz sample rate
-                "-ac", "1", // Mono
-                wav_path.to_str().unwrap(),
-            ])
-            .output()
-            .map_err(|e| format!("Failed to run FFmpeg: {}", e))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("FFmpeg conversion failed: {}", stderr));
+        // Try Rust audio conversion first
+        match crate::audio::converter::convert_to_wav(&validated_path, &wav_path) {
+            Ok(_) => {
+                eprintln!("[INFO] Rust audio conversion complete: {}", wav_path.display());
+                wav_path
+            }
+            Err(e) => {
+                eprintln!("[WARN] Rust audio conversion failed: {}, trying FFmpeg", e);
+                
+                // Fallback to FFmpeg
+                let ffmpeg_path = match ffmpeg_manager::get_ffmpeg_path(&app).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return Err(format!(
+                            "FFmpeg not available for conversion: {}. Please install FFmpeg or convert the file to WAV manually.",
+                            e
+                        ));
+                    }
+                };
+
+                let output = std::process::Command::new(&ffmpeg_path)
+                    .args([
+                        "-y",  // Overwrite output
+                        "-i", validated_path.to_str().unwrap(),
+                        "-vn", // No video
+                        "-acodec", "pcm_s16le", // PCM codec
+                        "-ar", "16000", // 16kHz sample rate
+                        "-ac", "1", // Mono
+                        wav_path.to_str().unwrap(),
+                    ])
+                    .output()
+                    .map_err(|e| format!("Failed to run FFmpeg: {}", e))?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(format!("FFmpeg conversion failed: {}", stderr));
+                }
+
+                eprintln!("[INFO] FFmpeg conversion complete: {}", wav_path.display());
+                wav_path
+            }
         }
-
-        eprintln!("[INFO] Conversion complete: {}", wav_path.display());
-        wav_path
     } else {
         validated_path.clone()
     };
@@ -4166,6 +4292,11 @@ pub fn run() {
             save_huggingface_token,
             get_huggingface_token_command,
             read_file_as_base64,
+            // Audio processing commands (Rust-native)
+            convert_audio_to_wav,
+            get_audio_duration,
+            extract_audio_segment,
+            get_audio_metadata,
             // Archive commands
             get_file_size,
             delete_file,

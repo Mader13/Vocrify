@@ -110,6 +110,29 @@ def check_ffmpeg() -> dict[str, Any]:
         ffmpeg_path = shutil.which("ffmpeg")
 
         if not ffmpeg_path:
+            # Also check in app data directory (downloaded FFmpeg)
+            app_data = os.environ.get("APPDATA", "")
+            if app_data:
+                downloaded_ffmpeg = os.path.join(
+                    app_data, "com.vocrify.app", "Vocrify", "ffmpeg", "ffmpeg.exe"
+                )
+                if os.path.exists(downloaded_ffmpeg):
+                    ffmpeg_path = downloaded_ffmpeg
+            # Also check local app data (development)
+            if not ffmpeg_path:
+                local_app_data = os.environ.get("LOCALAPPDATA", "")
+                if local_app_data:
+                    downloaded_ffmpeg = os.path.join(
+                        local_app_data,
+                        "com.vocrify.app",
+                        "Vocrify",
+                        "ffmpeg",
+                        "ffmpeg.exe",
+                    )
+                    if os.path.exists(downloaded_ffmpeg):
+                        ffmpeg_path = downloaded_ffmpeg
+
+        if not ffmpeg_path:
             return {
                 "status": "error",
                 "installed": False,
@@ -260,9 +283,7 @@ def check_models(cache_dir: Optional[str] = None) -> dict[str, Any]:
             message = "Модели не установлены. Рекомендуется скачать whisper-base."
         elif not has_required:
             status = "warning"
-            message = (
-                f"Установлено {len(installed_models)} моделей, но нет моделей транскрипции."
-            )
+            message = f"Установлено {len(installed_models)} моделей, но нет моделей транскрипции."
         else:
             status = "ok"
             model_names = [m["name"] for m in transcription_models]

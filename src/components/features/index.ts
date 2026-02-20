@@ -17,6 +17,8 @@ export { DiarizationOptionsModal } from "./DiarizationOptionsModal";
 export type { FileWithSettings } from "./DiarizationOptionsModal";
 export { ModelWarning } from "./ModelWarning";
 export { Sidebar } from "./Sidebar";
+export { SidebarToggle } from "./SidebarToggle";
+export { AddFilesButton } from "./AddFilesButton";
 export { StageBadges } from "./StageBadges";
 export { ProgressMetricsDisplay } from "./ProgressMetrics";
 export { MiniPlayer } from "./MiniPlayer";
