@@ -5,10 +5,13 @@ vi.mock("@/services/tauri", () => ({
   checkModelsStatus: vi.fn(),
   checkPythonEnvironment: vi.fn(),
   checkRuntimeReadiness: vi.fn(),
+  downloadFFmpeg: vi.fn(),
   getAvailableDevices: vi.fn(),
   isSetupComplete: vi.fn(),
   isSetupCompleteFast: vi.fn(),
   markSetupComplete: vi.fn(),
+  onFFmpegProgress: vi.fn(),
+  onFFmpegStatus: vi.fn(),
   resetSetup: vi.fn(),
 }));
 
@@ -17,10 +20,13 @@ import {
   checkModelsStatus,
   checkPythonEnvironment,
   checkRuntimeReadiness,
+  downloadFFmpeg,
   getAvailableDevices,
   isSetupComplete,
   isSetupCompleteFast,
   markSetupComplete,
+  onFFmpegProgress,
+  onFFmpegStatus,
   resetSetup,
 } from "@/services/tauri";
 import { useSetupStore } from "@/stores/setupStore";
@@ -29,10 +35,13 @@ const mockedCheckFFmpegStatus = vi.mocked(checkFFmpegStatus);
 const mockedCheckModelsStatus = vi.mocked(checkModelsStatus);
 const mockedCheckPythonEnvironment = vi.mocked(checkPythonEnvironment);
 const mockedCheckRuntimeReadiness = vi.mocked(checkRuntimeReadiness);
+const mockedDownloadFFmpeg = vi.mocked(downloadFFmpeg);
 const mockedGetAvailableDevices = vi.mocked(getAvailableDevices);
 const mockedIsSetupComplete = vi.mocked(isSetupComplete);
 const mockedIsSetupCompleteFast = vi.mocked(isSetupCompleteFast);
 const mockedMarkSetupComplete = vi.mocked(markSetupComplete);
+const mockedOnFFmpegProgress = vi.mocked(onFFmpegProgress);
+const mockedOnFFmpegStatus = vi.mocked(onFFmpegStatus);
 const mockedResetSetup = vi.mocked(resetSetup);
 
 function resetStore() {
@@ -45,6 +54,8 @@ function resetStore() {
     deviceCheck: null,
     modelCheck: null,
     runtimeReadiness: null,
+    ffmpegProgress: null,
+    ffmpegInstallStatus: "idle",
     error: null,
   });
 }
@@ -117,6 +128,9 @@ describe("setupStore", () => {
         checkedAt: "2026-02-16T00:00:00.000Z",
       },
     });
+    mockedDownloadFFmpeg.mockResolvedValue({ success: true });
+    mockedOnFFmpegProgress.mockResolvedValue(() => undefined);
+    mockedOnFFmpegStatus.mockResolvedValue(() => undefined);
     mockedMarkSetupComplete.mockResolvedValue({ success: true });
     mockedResetSetup.mockResolvedValue({ success: true });
   });
@@ -228,6 +242,44 @@ describe("setupStore", () => {
     expect(mockedMarkSetupComplete).not.toHaveBeenCalled();
   });
 
+  it("completeSetup fails when FFmpeg check is not ready", async () => {
+    mockedCheckFFmpegStatus.mockResolvedValueOnce({
+      success: true,
+      data: {
+        status: "error",
+        installed: false,
+        path: null,
+        version: null,
+        message: "ffmpeg missing",
+      },
+    });
+
+    await useSetupStore.getState().checkPython();
+    await useSetupStore.getState().checkFFmpeg();
+
+    await useSetupStore.getState().completeSetup();
+
+    const state = useSetupStore.getState();
+    expect(state.isComplete).toBe(false);
+    expect(state.error).toContain("FFmpeg check not completed or failed");
+    expect(mockedMarkSetupComplete).not.toHaveBeenCalled();
+  });
+
+  it("completeSetup reports backend failure from markSetupComplete", async () => {
+    mockedMarkSetupComplete.mockResolvedValueOnce({
+      success: false,
+      error: "backend unavailable",
+    });
+
+    await useSetupStore.getState().checkPython();
+    await useSetupStore.getState().checkFFmpeg();
+    await useSetupStore.getState().completeSetup();
+
+    const state = useSetupStore.getState();
+    expect(state.isComplete).toBe(false);
+    expect(state.error).toContain("backend unavailable");
+  });
+
   it("skipSetup does not mark store complete", () => {
     useSetupStore.getState().skipSetup();
 
@@ -251,6 +303,24 @@ describe("setupStore", () => {
     expect(state.error).toBe(null);
   });
 
+  it("backgroundValidate re-opens setup when live validation fails", async () => {
+    useSetupStore.setState({ isComplete: true });
+    mockedIsSetupComplete.mockResolvedValueOnce({ success: true, data: false });
+
+    await useSetupStore.getState().backgroundValidate();
+
+    expect(useSetupStore.getState().isComplete).toBe(false);
+  });
+
+  it("backgroundValidate keeps setup complete on transient backend errors", async () => {
+    useSetupStore.setState({ isComplete: true });
+    mockedIsSetupComplete.mockRejectedValueOnce(new Error("timeout"));
+
+    await useSetupStore.getState().backgroundValidate();
+
+    expect(useSetupStore.getState().isComplete).toBe(true);
+  });
+
   it("checkPython handles error gracefully", async () => {
     mockedCheckPythonEnvironment.mockResolvedValueOnce({
       success: false,
@@ -262,5 +332,26 @@ describe("setupStore", () => {
     const state = useSetupStore.getState();
     expect(state.pythonCheck?.status).toBe("error");
     expect(state.pythonCheck?.message).toBe("Python not found");
+  });
+
+  it("installFFmpeg marks installation completed on successful download", async () => {
+    await useSetupStore.getState().installFFmpeg();
+
+    const state = useSetupStore.getState();
+    expect(state.ffmpegInstallStatus).toBe("completed");
+    expect(state.ffmpegCheck?.status).toBe("ok");
+    expect(state.isChecking).toBe(false);
+  });
+
+  it("installFFmpeg marks installation failed when download command fails", async () => {
+    mockedDownloadFFmpeg.mockResolvedValueOnce({ success: false, error: "network fail" });
+
+    await useSetupStore.getState().installFFmpeg();
+
+    const state = useSetupStore.getState();
+    expect(state.ffmpegInstallStatus).toBe("failed");
+    expect(state.ffmpegCheck?.status).toBe("error");
+    expect(state.ffmpegCheck?.message).toContain("network fail");
+    expect(state.isChecking).toBe(false);
   });
 });

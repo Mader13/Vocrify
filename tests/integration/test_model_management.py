@@ -89,21 +89,16 @@ class TestModelDownload:
         model_dir = Path(cache_dir) / "whisper-tiny"
         assert model_dir.exists(), "Model directory should exist"
 
-    def test_download_with_invalid_token(self, cache_dir):
-        """Test download fails with invalid HuggingFace token."""
+    def test_download_with_invalid_model(self, cache_dir):
+        """Test download fails with invalid model name."""
         pytest.skip("Requires network - mark as @network to run")
-
-        # Create invalid token file
-        token_file = Path(cache_dir) / "invalid_token.txt"
-        token_file.write_text("invalid_token_12345")
 
         process = subprocess.Popen(
             [
                 PYTHON_EXE, AI_ENGINE_PATH,
-                "--download-model", "pyannote-diarization",
+                "--download-model", "nonexistent-model",
                 "--cache-dir", cache_dir,
                 "--model-type", "diarization",
-                "--token-file", str(token_file)
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -128,7 +123,7 @@ class TestModelDownload:
 
         # Should get error event
         error_events = [e for e in events if e.get("type") == "error"]
-        assert len(error_events) > 0, "Expected error event with invalid token"
+        assert len(error_events) > 0, "Expected error event for invalid model"
 
     def test_download_sherpa_onnx_model(self, cache_dir):
         """Test downloading Sherpa-ONNX models from GitHub."""
@@ -218,7 +213,6 @@ class TestModelDownload:
         ("whisper-tiny", "whisper"),
         ("whisper-base", "whisper"),
         ("whisper-small", "whisper"),
-        ("pyannote-diarization", "diarization"),
         ("sherpa-onnx-diarization", "diarization"),
     ])
     def test_download_all_model_types(self, cache_dir, model_name, model_type):
@@ -269,7 +263,7 @@ class TestModelListing:
         cache.mkdir()
 
         # Create fake model directories
-        models = ["whisper-tiny", "whisper-base", "pyannote-diarization"]
+        models = ["whisper-tiny", "whisper-base", "sherpa-onnx-diarization"]
         for model in models:
             model_dir = cache / model
             model_dir.mkdir()
@@ -298,7 +292,7 @@ class TestModelListing:
         model_names = {m["name"] for m in models}
         assert "whisper-tiny" in model_names
         assert "whisper-base" in model_names
-        assert "pyannote-diarization" in model_names
+        assert "sherpa-onnx-diarization" in model_names
 
         # Verify all have size info
         for model in models:

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  FolderOpen,
   RotateCcw,
   AlertTriangle,
   Cpu,
@@ -26,7 +25,7 @@ import {
   DialogClose,
 } from "@/components/ui";
 import { useUIStore, useTasks, useSetupStore } from "@/stores";
-import { selectOutputDirectory, clearCache } from "@/services/tauri";
+import { clearCache } from "@/services/tauri";
 import { logger } from "@/lib/logger";
 import { DEVICE_NAMES, LANGUAGE_NAMES } from "@/types";
 import type { DeviceType, Language } from "@/types";
@@ -180,17 +179,6 @@ export function SettingsPanel() {
     updateSettings({ maxConcurrentTasks: parseInt(e.target.value, 10) });
   };
 
-  const handleSelectOutputDirectory = async () => {
-    const result = await selectOutputDirectory();
-    if (result.success && result.data) {
-      updateSettings({ outputDirectory: result.data });
-    }
-  };
-
-  const handleClearOutputDirectory = () => {
-    updateSettings({ outputDirectory: "" });
-  };
-
   const handleReset = () => {
     resetSettings();
   };
@@ -255,13 +243,6 @@ export function SettingsPanel() {
           deviceCheck.recommended ? `Recommended: ${deviceCheck.recommended.toUpperCase()}` : "",
         ].filter(Boolean)
     : ["Checking..."];
-
-  const getOutputPathDisplay = () => {
-    if (!settings.outputDirectory) {
-      return "Next to source file";
-    }
-    return settings.outputDirectory;
-  };
 
   return (
     <>
@@ -398,52 +379,6 @@ export function SettingsPanel() {
               </Select>
             </div>
 
-            {/* Output Directory - Enhanced */}
-            <div className="space-y-3 pt-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                Output Directory
-              </label>
-
-              <div className={`rounded-lg border-2 p-4 transition-all ${
-                settings.outputDirectory
-                  ? "border-primary/30 bg-primary/5"
-                  : "border-dashed border-muted-foreground/30 bg-muted/30"
-              }`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium ${settings.outputDirectory ? "text-foreground" : "text-muted-foreground"}`}>
-                      {getOutputPathDisplay()}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {settings.outputDirectory
-                        ? "All transcriptions will be saved to this folder"
-                        : "By default, files are saved next to the source video"}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    {settings.outputDirectory && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleClearOutputDirectory}
-                        className="h-8 text-xs"
-                      >
-                        Default
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleSelectOutputDirectory}
-                      className="h-8"
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* Setup Wizard Section */}

@@ -48,6 +48,10 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   const {
     currentStep,
     error,
+    pythonCheck,
+    ffmpegCheck,
+    deviceCheck,
+    modelCheck,
     checkAll,
     fetchDevices,
     nextStep,
@@ -58,10 +62,14 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
 
   // Run Python/FFmpeg checks on mount, and fetch devices on-demand
   useEffect(() => {
-    checkAll();
-    fetchDevices(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!pythonCheck || !ffmpegCheck || !modelCheck) {
+      void checkAll();
+    }
+
+    if (!deviceCheck) {
+      void fetchDevices(false);
+    }
+  }, [pythonCheck, ffmpegCheck, modelCheck, deviceCheck, checkAll, fetchDevices]);
 
 
   // Get current step index
@@ -84,14 +92,17 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   // Handle complete setup
   const handleComplete = async () => {
     await completeSetup();
-    // Call onComplete immediately after completeSetup resolves, before Guard re-renders
-    onComplete?.();
+    if (useSetupStore.getState().isComplete) {
+      onComplete?.();
+    }
   };
 
   // Handle skip
   const handleSkip = () => {
     skipSetup();
-    onSkip?.();
+    if (!useSetupStore.getState().error) {
+      onSkip?.();
+    }
   };
 
   // Render current step content
@@ -226,34 +237,13 @@ export interface SetupWizardGuardProps extends SetupWizardProps {
 }
 
 export function SetupWizardGuard({ children, ...wizardProps }: SetupWizardGuardProps) {
-  const { isComplete } = useSetupStore();
-  const [showMainContent, setShowMainContent] = React.useState(false);
+  const isComplete = useSetupStore((state) => state.isComplete);
 
-  // Reset transition state when unmounting
-  React.useEffect(() => {
-    return () => {
-      setShowMainContent(false);
-    };
-  }, []);
-
-  // Start transition when setup completes
-  React.useEffect(() => {
-    if (isComplete) {
-      // Small delay to allow UI to update before switching views
-      const timer = setTimeout(() => {
-        setShowMainContent(true);
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isComplete]);
-
-  // Show wizard if setup is not complete or during transition
-  if (!showMainContent) {
-    return <SetupWizard {...wizardProps} />;
+  if (isComplete) {
+    return <>{children}</>;
   }
 
-  // Show main content after transition is complete
-  return <>{children}</>;
+  return <SetupWizard {...wizardProps} />;
 }
 
 export default SetupWizard;

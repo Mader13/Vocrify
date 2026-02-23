@@ -47,7 +47,7 @@ def handle_transcribe(args, validate_language) -> int:
     if args.diarization and args.diarization_provider == "none":
         emit_error(
             "Diarization is enabled but diarization_provider is set to 'none'. "
-            "Please specify 'pyannote' or 'sherpa-onnx'"
+            "Please specify 'sherpa-onnx'"
         )
         return 1
 

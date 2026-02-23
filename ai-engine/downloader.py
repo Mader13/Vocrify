@@ -1134,24 +1134,8 @@ def download_model(
             emit_download_complete(model_name, size_mb, str(nemo_path))
 
         elif model_type == "diarization":
-            # Handle diarization models
-            if model_name == "pyannote-diarization":
-                # Download both models
-                segmentation_dir = downloader.download_from_huggingface(
-                    repo_id="pyannote/segmentation-3.0",
-                    model_name="pyannote-segmentation-3.0",
-                )
-
-                embedding_dir = downloader.download_from_huggingface(
-                    repo_id="pyannote/embedding", model_name="pyannote-embedding-3.0"
-                )
-
-                # Combine paths for completion
-                target_dir = downloader.cache_dir / model_name
-                size_mb = get_model_size_mb(str(target_dir))
-                emit_download_complete(model_name, size_mb, str(target_dir))
-
-            elif model_name == "sherpa-onnx-diarization":
+            # Handle diarization models (only sherpa-onnx is supported)
+            if model_name == "sherpa-onnx-diarization":
                 # Download from GitHub to sherpa-onnx-diarization/ subdirectory
                 # This matches the path expected by model_registry.py
                 segmentation_url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"

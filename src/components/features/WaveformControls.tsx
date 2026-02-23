@@ -27,6 +27,7 @@ export function WaveformControls({
   className,
 }: WaveformControlsProps) {
   const isMuted = volume === 0;
+  const volumePercent = Math.round(volume * 100);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVolume = parseFloat(e.target.value);
@@ -106,8 +107,11 @@ export function WaveformControls({
             value={volume}
             onChange={handleVolumeChange}
             className="volume-slider h-1.5 w-full cursor-pointer sm:w-24"
-            title={`Volume: ${Math.round(volume * 100)}%`}
+            title={`Volume: ${volumePercent}%`}
           />
+          <span className="min-w-[38px] text-right text-xs font-medium text-muted-foreground sm:text-sm">
+            {volumePercent}%
+          </span>
         </div>
       </div>
     </div>

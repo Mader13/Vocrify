@@ -9,19 +9,17 @@ export { ModelsManagement } from "./ModelsManagement";
 export { ArchiveView } from "./ArchiveView";
 export { HuggingFaceTokenCard } from "./HuggingFaceTokenCard";
 export { VideoPlayer } from "./VideoPlayer";
-export { CustomVideoControls } from "./CustomVideoControls";
 export { TranscriptionSegments } from "./TranscriptionSegments";
 export { ExportMenu } from "./ExportMenu";
-export { FFmpegDownloader } from "./FFmpegDownloader";
 export { DiarizationOptionsModal } from "./DiarizationOptionsModal";
 export type { FileWithSettings } from "./DiarizationOptionsModal";
 export { ModelWarning } from "./ModelWarning";
 export { Sidebar } from "./Sidebar";
 export { SidebarToggle } from "./SidebarToggle";
 export { AddFilesButton } from "./AddFilesButton";
-export { StageBadges } from "./StageBadges";
 export { ProgressMetricsDisplay } from "./ProgressMetrics";
 export { MiniPlayer } from "./MiniPlayer";
+export { PlayerErrorBoundary } from "./PlayerErrorBoundary";
 
 // Setup Wizard
 export { SetupWizard, SetupWizardGuard } from "./SetupWizard";

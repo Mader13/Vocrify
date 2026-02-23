@@ -14,7 +14,7 @@ export interface UseModelValidationReturn {
  * Eliminates code duplication across components
  */
 export function useModelValidation(): UseModelValidationReturn {
-  const { selectedTranscriptionModel, availableModels } = useModelsStore();
+  const { selectedTranscriptionModel, availableModels, pendingModelDeletions } = useModelsStore();
   const [modelError, setModelError] = useState<DialogState>({
     open: false,
     title: "",
@@ -42,8 +42,17 @@ export function useModelValidation(): UseModelValidationReturn {
       return false;
     }
 
+    if (pendingModelDeletions[selectedTranscriptionModel]) {
+      setModelError({
+        open: true,
+        title: "Model Scheduled For Deletion",
+        message: `The selected model "${selectedTranscriptionModel}" is scheduled for deletion and cannot be used for new transcriptions. Pick another model in the "Models" section.`,
+      });
+      return false;
+    }
+
     return true;
-  }, [selectedTranscriptionModel, availableModels]);
+  }, [selectedTranscriptionModel, availableModels, pendingModelDeletions]);
 
   return {
     validateModelSelection,

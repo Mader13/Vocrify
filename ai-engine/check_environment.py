@@ -10,6 +10,9 @@ Usage:
 """
 
 import sys
+import os
+import shutil
+import subprocess
 import importlib
 from pathlib import Path
 
@@ -35,7 +38,7 @@ def check_python_version():
 
         if version.minor >= 13:
             print("\n⚠️  CRITICAL: Python 3.13+ is NOT supported")
-            print("   Key dependencies (faster-whisper, pyannote.audio)")
+            print("   Key dependencies (faster-whisper, sherpa-onnx)")
             print("   do not support Python 3.13+ yet.")
             print("\n📖 Solution:")
             print("   1. Install Python 3.12 from https://www.python.org/downloads/")
@@ -55,10 +58,8 @@ def check_dependencies():
     # Core dependencies
     core_deps = {
         "faster_whisper": "1.0.3",
-        "pyannote.audio": "3.3.1",
-        "torch": "2.2.2",
+        "sherpa_onnx": "1.10.0",
         "numpy": "1.24.4",
-        "librosa": "0.10.1",
         "soundfile": "0.12.1",
         "huggingface_hub": "0.23.4",
     }
@@ -163,7 +164,6 @@ def check_parakeet_dependencies():
         print("✅ All Parakeet dependencies installed")
         print("\n📖 Parakeet models are available:")
         print("   - parakeet-tdt-0.6b-v3 (multilingual)")
-        print("   - parakeet-tdt-1.1b-v1 (larger model)")
     else:
         print("⚠️  Some Parakeet dependencies missing or outdated")
         print("\n📖 To fix:")
@@ -172,16 +172,84 @@ def check_parakeet_dependencies():
     return all_ok
 
 
+def _get_windows_path_from_registry() -> list[str]:
+    """Read PATH from Windows registry (HKCU and HKLM)."""
+    import winreg
+
+    paths: list[str] = []
+
+    keys_to_check = [
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+        (
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        ),
+    ]
+
+    for hkey, subkey in keys_to_check:
+        try:
+            with winreg.OpenKey(hkey, subkey, 0, winreg.KEY_READ) as key:
+                try:
+                    value, _ = winreg.QueryValueEx(key, "Path")
+                    if value:
+                        paths.extend(value.split(os.pathsep))
+                except FileNotFoundError:
+                    pass
+        except Exception:
+            pass
+
+    return paths
+
+
+def _find_ffmpeg_in_paths(paths: list[str]) -> str | None:
+    """Find ffmpeg.exe in a list of paths."""
+    for path in paths:
+        if not path:
+            continue
+        try:
+            expanded = os.path.expandvars(path)
+        except Exception:
+            expanded = path
+        expanded = expanded.strip('"').strip("'")
+
+        if not os.path.isdir(expanded):
+            continue
+        ffmpeg_candidate = os.path.join(expanded, "ffmpeg.exe")
+        if os.path.isfile(ffmpeg_candidate):
+            return ffmpeg_candidate
+        bin_candidate = os.path.join(expanded, "bin", "ffmpeg.exe")
+        if os.path.isfile(bin_candidate):
+            return bin_candidate
+    return None
+
+
 def check_ffmpeg():
     """Check if FFmpeg is available."""
+    import platform
+
     print("\n" + "=" * 70)
     print("FFmpeg Check")
     print("=" * 70)
 
-    import os
-    import shutil
-
     ffmpeg_path = shutil.which("ffmpeg")
+
+    # Also check registry PATH on Windows
+    if not ffmpeg_path and platform.system() == "Windows":
+        registry_paths = _get_windows_path_from_registry()
+        if registry_paths:
+            ffmpeg_path = _find_ffmpeg_in_paths(registry_paths)
+
+        # Check winget links directory
+        if not ffmpeg_path:
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if local_app_data:
+                winget_links = os.path.join(
+                    local_app_data, "Microsoft", "WinGet", "Links"
+                )
+                if os.path.isdir(winget_links):
+                    winget_ffmpeg = os.path.join(winget_links, "ffmpeg.exe")
+                    if os.path.isfile(winget_ffmpeg):
+                        ffmpeg_path = winget_ffmpeg
 
     # Also check in app data directory (downloaded FFmpeg)
     if not ffmpeg_path:
@@ -206,30 +274,41 @@ def check_ffmpeg():
         print(f"✅ FFmpeg found at: {ffmpeg_path}")
 
         try:
-            import subprocess
-
             result = subprocess.run(
-                ["ffmpeg", "-version"], capture_output=True, text=True, timeout=5
+                [ffmpeg_path, "-version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                shell=False,
             )
             if result.returncode == 0:
                 version_line = result.stdout.split("\n")[0]
                 print(f"   {version_line}")
                 return True
+            else:
+                print(f"⚠️  FFmpeg found but returned error code: {result.returncode}")
+        except FileNotFoundError:
+            print(f"⚠️  FFmpeg found but not executable: {ffmpeg_path}")
         except Exception as e:
             print(f"⚠️  FFmpeg found but error running: {e}")
     else:
         print("❌ FFmpeg NOT found")
-        print("\n📖 Solution:")
+        print("\n📖 Solution (choose one):")
+        print("\n   Option 1 - Winget (recommended for Windows):")
+        print("   winget install -e --id Gyan.FFmpeg")
+        print("\n   Option 2 - Manual download:")
         print("   1. Download from https://www.gyan.dev/ffmpeg/builds/")
         print("   2. Extract to C:\\ffmpeg")
         print('   3. Add to PATH: setx PATH "%PATH%;C:\\ffmpeg\\bin"')
         print("   4. Restart terminal")
+        print("\n   Option 3 - Chocolatey:")
+        print("   choco install ffmpeg")
 
     return False
 
 
 def check_huggingface_token():
-    """Check if HuggingFace token is configured."""
+    """Check if HuggingFace token is configured (optional)."""
     print("\n" + "=" * 70)
     print("HuggingFace Token Check")
     print("=" * 70)
@@ -240,15 +319,11 @@ def check_huggingface_token():
 
     if token:
         print(f"✅ HuggingFace token found (length: {len(token)} chars)")
-        print("   Token is set for PyAnnote diarization models")
         return True
     else:
-        print("⚠️  HuggingFace token NOT found")
-        print("\n📖 Required for PyAnnote speaker diarization:")
+        print("ℹ️  HuggingFace token NOT found (optional for sherpa-onnx)")
+        print("\n📖 Token is optional - needed only for private HuggingFace repos:")
         print("   1. Get token: https://huggingface.co/settings/tokens")
-        print("   2. Accept licenses:")
-        print("      - https://huggingface.co/pyannote/speaker-diarization-3.1")
-        print("      - https://huggingface.co/pyannote/segmentation-3.0")
         print("   3. Login: huggingface-cli login")
         print("   4. Or set env var: set HUGGINGFACE_ACCESS_TOKEN=your_token")
 

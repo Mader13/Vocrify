@@ -80,10 +80,10 @@ pub use transcription_manager::{
 pub use sherpa_diarizer::{SherpaDiarizer, DiarizationProvider, SpeakerSegment};
 
 // Re-export PythonBridge types for frontend
-pub use python_bridge::{PythonBridge, PythonTranscriptionResult, SpeakerSegment as PythonSpeakerSegment};
+pub use python_bridge::{PythonBridge, SpeakerSegment as PythonSpeakerSegment};
 
 // Re-export EngineRouter types for frontend
-pub use engine_router::{EngineRouter, EnginePreference, EngineChoice, RouterTranscriptionOptions, RouterTranscriptionResult};
+pub use engine_router::{EngineRouter, EnginePreference};
 
 // Re-export PerformanceConfig types for frontend
 pub use performance_config::PerformanceConfig;
@@ -114,8 +114,6 @@ fn get_model_size(model_name: &str) -> &str {
     if model_name.contains("parakeet") {
         if model_name.contains("0.6b") || model_name.contains("06b") {
             return "0.6b";
-        } else if model_name.contains("1.1b") || model_name.contains("11b") {
-            return "1.1b";
         } else {
             return "0.6b"; // Default Parakeet
         }
@@ -132,7 +130,6 @@ fn get_max_concurrent_tasks(device: &str, model_size: &str) -> usize {
         ("cpu", "base") => 4,
         ("cpu", "small") => 3,
         ("cpu", "0.6b") => 4,  // Parakeet 0.6B
-        ("cpu", "1.1b") => 3,  // Parakeet 1.1B
         ("cpu", _) => 2,       // medium, large, or unknown
 
         // GPU: Can handle many more concurrent tasks
@@ -140,7 +137,6 @@ fn get_max_concurrent_tasks(device: &str, model_size: &str) -> usize {
         ("cuda", "base") => 8,
         ("cuda", "small") => 6,
         ("cuda", "0.6b") => 8,  // Parakeet 0.6B
-        ("cuda", "1.1b") => 6,  // Parakeet 1.1B
         ("cuda", "medium") => 4,
         ("cuda", "large") => 2,
 
@@ -1042,24 +1038,6 @@ async fn spawn_transcription(
         if let Some(provider) = &options.diarization_provider {
             eprintln!("[INFO] Diarization provider: {}", provider);
             cmd.arg("--diarization-provider").arg(provider);
-
-            // Pass HuggingFace token for pyannote diarization
-            if provider == "pyannote" {
-                eprintln!("[INFO] PyAnnote provider - fetching HuggingFace token...");
-                match get_huggingface_token(&app).await {
-                    Ok(Some(token)) => {
-                        eprintln!("[DEBUG] Found HuggingFace token (length: {}), setting as environment variable", token.len());
-                        cmd.env("HUGGINGFACE_ACCESS_TOKEN", &token);
-                        cmd.env("HF_TOKEN", &token);
-                    }
-                    Ok(None) => {
-                        eprintln!("[WARN] No HuggingFace token found in store for pyannote diarization");
-                    }
-                    Err(e) => {
-                        eprintln!("[ERROR] Failed to read HuggingFace token: {}", e);
-                    }
-                }
-            }
         } else {
             eprintln!("[WARN] Diarization enabled but no provider specified!");
         }
@@ -1398,7 +1376,7 @@ async fn start_transcription(
         match &options.diarization_provider {
             None => {
                 eprintln!("[ERROR] Diarization enabled but provider is None!");
-                let error_msg = "Diarization is enabled but no provider is selected. Please select 'pyannote' or 'sherpa-onnx' provider.";
+                let error_msg = "Diarization is enabled but no provider is selected. Please select 'sherpa-onnx' as the diarization provider.";
                 let _ = app.emit("transcription-error", serde_json::json!({
                     "taskId": task_id,
                     "error": error_msg,
@@ -1407,7 +1385,7 @@ async fn start_transcription(
             }
             Some(provider) if provider == "none" => {
                 eprintln!("[ERROR] Diarization enabled but provider is 'none'!");
-                let error_msg = "Diarization is enabled but provider is set to 'none'. Please select 'pyannote' or 'sherpa-onnx' provider.";
+                let error_msg = "Diarization is enabled but provider is set to 'none'. Please select 'sherpa-onnx' as the diarization provider.";
                 let _ = app.emit("transcription-error", serde_json::json!({
                     "taskId": task_id,
                     "error": error_msg,
@@ -2200,18 +2178,13 @@ async fn open_archive_folder_command(app: AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Spawn a model download — Rust-native for Whisper/Parakeet/SherpaONNX, Python for PyAnnote.
+/// Spawn a model download — all models downloaded via Rust-native ModelDownloader.
 ///
-/// # Routing
-///
-/// | condition                               | engine   |
-/// |-----------------------------------------|----------|
-/// | `diarization` + `pyannote-diarization`  | Python   |
-/// | everything else                         | Rust     |
-///
-/// PyAnnote needs `huggingface_hub` + gated-repo access and a specific
-/// local cache layout the `pyannote` library reads at runtime.
-/// All other models are downloaded via `reqwest` in `model_downloader.rs`.
+/// | model type      | engine |
+/// |-----------------|--------|
+/// | whisper         | Rust   |
+/// | parakeet        | Rust   |
+/// | sherpa-onnx     | Rust   |
 async fn spawn_model_download(
     app: AppHandle,
     model_name: String,
@@ -2220,334 +2193,12 @@ async fn spawn_model_download(
     token_file: Option<PathBuf>,
     child_arc: Arc<Mutex<Option<tokio::process::Child>>>,
     cancel: Arc<AtomicBool>,
-) -> Result<(), AppError> {
-    // ── Rust-native path ───────────────────────────────────────────────────
-    let is_pyannote = model_type == "diarization" && model_name == "pyannote-diarization";
-    if !is_pyannote {
-        let downloader = model_downloader::ModelDownloader::new(app, cache_dir);
-        return downloader
-            .download(&model_name, &model_type, cancel)
-            .await
-            .map_err(Into::into);
-    }
-
-    // ── PyAnnote: Python subprocess ────────────────────────────────────────
-    let download_completed = Arc::new(AtomicBool::new(false));
-
-    let engine_path = get_python_engine_path(&app);
-    let python_exe = get_python_executable(&app);
-    let engine_dir = engine_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| AppError::PythonError(format!("Invalid Python engine path: {:?}", engine_path)))?;
-
-    ensure_python_download_dependencies(&python_exe).await?;
-    
-    eprintln!("[DEBUG] PyAnnote download - Python: {:?}, Engine: {:?}", python_exe, engine_path);
-
-    // Bootstrap script injects engine dir into sys.path for embeddable Python.
-    let bootstrap = r#"
-import runpy
-import sys
-from pathlib import Path
-engine = Path(sys.argv[1])
-sys.path.insert(0, str(engine.parent))
-sys.argv = [str(engine)] + sys.argv[2:]
-runpy.run_path(str(engine), run_name="__main__")
-"#;
-    
-    let mut cmd = create_hidden_command(&python_exe);
-    cmd.current_dir(&engine_dir)
-        .arg("-c")
-        .arg(bootstrap)
-        .arg(engine_path.to_string_lossy().to_string())
-        .arg("--download-model")
-        .arg(&model_name)
-        .arg("--cache-dir")
-        .arg(cache_dir.to_string_lossy().to_string())
-        .arg("--model-type")
-        .arg(&model_type)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    
-    // Debug: log the command being executed
-    eprintln!("[DEBUG] Spawning download command: {:?}", cmd);
-    eprintln!("[DEBUG] Python exe: {:?}", python_exe);
-    eprintln!("[DEBUG] Engine path: {:?}", engine_path);
-    eprintln!("[DEBUG] Model: {}, Type: {}, Cache: {:?}", model_name, model_type, cache_dir);
-    
-    // HIGH-7: Use token file instead of env var for security
-    if let Some(token_path) = token_file {
-        cmd.arg("--token-file").arg(token_path.to_string_lossy().to_string());
-    }
-    
-    let mut child = cmd.spawn()
-        .map_err(|e| {
-            AppError::PythonError(format!("Failed to spawn Python process: {}", e))
-        })?;
-    
-    // Check if process started successfully
-    println!("[DEBUG] Checking if process started successfully...");
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    
-    match child.try_wait() {
-        Ok(Some(exit_status)) => {
-            println!("[DEBUG] Process exited immediately with status: {:?}", exit_status);
-            let output = child
-                .wait_with_output()
-                .await
-                .map_err(AppError::IoError)?;
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let details = if !stderr.trim().is_empty() {
-                stderr.trim().to_string()
-            } else if !stdout.trim().is_empty() {
-                stdout.trim().to_string()
-            } else {
-                "no additional output".to_string()
-            };
-            return Err(AppError::PythonError(format!(
-                "Python process exited immediately ({:?}): {}",
-                exit_status, details
-            )));
-        }
-        Ok(None) => {
-            println!("[DEBUG] Process appears to be running");
-        }
-        Err(e) => {
-            println!("[DEBUG] Error checking process status: {}", e);
-            return Err(AppError::PythonError(format!("Error checking Python process: {}", e)));
-        }
-    }
-    
-    // Take stdout/stderr before moving child into scopeguard
-    let stdout = child.stdout.take().expect("Failed to capture stdout");
-    let stderr = child.stderr.take().expect("Failed to capture stderr");
-    
-    // Store child in shared Arc so cancel_model_download can kill it.
-    {
-        let mut guard = child_arc.lock().await;
-        *guard = Some(child);
-    }
-
-    // CRITICAL FIX: Use scopeguard to ensure process cleanup on panic/unwind.
-    // Pull the child back out of the Arc — we own it for the rest of this function.
-    let raw_child = {
-        let mut guard = child_arc.lock().await;
-        guard.take()
-    };
-    let child_guard = scopeguard::guard(raw_child, |opt_child| {
-        if let Some(mut c) = opt_child {
-            let _ = c.start_kill();
-        }
-    });
-    let mut reader = BufReader::new(stdout).lines();
-    let mut stderr_reader = BufReader::new(stderr).lines();
-    
-    // Read stderr in background and emit errors to frontend
-    let app_clone = app.clone();
-    let model_name_clone = model_name.clone();
-    let download_completed_for_stderr = download_completed.clone();
-    let _stderr_handle = tokio::spawn(async move {
-        let mut line_count = 0;
-        let mut error_buffer = String::new();
-        while let Ok(Some(line)) = stderr_reader.next_line().await {
-            line_count += 1;
-            println!("[PYTHON STDERR] Line {}: {}", line_count, line);
-            error_buffer.push_str(&line);
-            error_buffer.push('\n');
-            
-            // Emit error only for actual errors, not for warnings or info
-            // Look for specific patterns that indicate real failures
-            let line_lower = line.to_lowercase();
-            let is_actual_error = line_lower.contains("error:")
-                || line_lower.contains("error: ")
-                || line_lower.starts_with("error")
-                || line_lower.contains("failed:")
-                || line_lower.starts_with("failed")
-                || line_lower.contains("traceback")
-                || line_lower.contains("exception:");
-
-            // Detect retryable network errors (temporary issues that tenacity will retry)
-            let is_retryable_error = line_lower.contains("connectionerror")
-                || line_lower.contains("connection error")
-                || line_lower.contains("timeout")
-                || line_lower.contains("connectionreset")
-                || line_lower.contains("connection aborted")
-                || line_lower.contains("retry");
-
-            if is_actual_error {
-                if is_retryable_error {
-                    // Retryable error: emit retrying event instead of fatal error
-                    // UI should keep showing "downloading" status
-                    let _ = app_clone.emit("model-download-retrying", serde_json::json!({
-                        "modelName": &model_name_clone,
-                        "message": format!("Retrying due to network error..."),
-                    }));
-                    eprintln!("[INFO] Retryable error detected for {}, emitting retrying event", model_name_clone);
-                } else if !download_completed_for_stderr.load(Ordering::Relaxed) {
-                    // Avoid hard-failing from stderr heuristics; authoritative errors are
-                    // structured JSON "error" messages from Python stdout or non-zero exit.
-                    eprintln!(
-                        "[WARN] Potential stderr error for {}: {}",
-                        model_name_clone,
-                        line
-                    );
-                }
-            }
-        }
-        
-        println!("[DEBUG] stderr reader finished. Total lines: {}", line_count);
-        // Only emit errors for critical issues, not for warnings or debug logs
-        // Real errors are already emitted above when detected
-    });
-    
-    while let Some(line) = reader.next_line().await? {
-        if line.is_empty() {
-            continue;
-        }
-        
-        // Skip non-JSON lines (e.g. NeMo/PyTorch log lines that leak to stdout)
-        if !line.starts_with('{') {
-            eprintln!("[DEBUG] Skipping non-JSON line from Python: {}", line);
-            continue;
-        }
-
-        match serde_json::from_str::<serde_json::Value>(&line) {
-            Ok(msg) => {
-                println!("[DEBUG] Received Python message: {}", msg);
-                
-                // Handle debug messages (don't process as errors)
-                if msg.get("type") == Some(&serde_json::json!("debug")) {
-                    println!("[DEBUG] Debug message: {:?}", msg.get("message"));
-                    continue;
-                }
-
-                let msg_type = msg
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-
-                if msg_type == "progress" {
-                    if let Some(progress_data) = msg.get("data") {
-                        let current_mb_f = progress_data
-                            .get("current")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        let total_mb_f = progress_data
-                            .get("total")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        let mut percent = progress_data
-                            .get("percent")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-
-                        // Fallback: compute percent from current/total when available
-                        if percent <= 0.0 && total_mb_f > 0.0 && current_mb_f > 0.0 {
-                            percent = (current_mb_f / total_mb_f * 100.0).clamp(0.0, 100.0);
-                        }
-
-                        let progress = ModelDownloadProgress {
-                            model_name: model_name.clone(),
-                            current_mb: current_mb_f.max(0.0).round() as u64,
-                            total_mb: total_mb_f.max(0.0).round() as u64,
-                            percent,
-                            speed_mb_s: progress_data.get("speed_mb_s").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                            status: "downloading".to_string(),
-                            eta_s: progress_data.get("eta_s").and_then(|v| v.as_f64()),
-                            total_estimated: progress_data.get("total_estimated").and_then(|v| v.as_bool()).unwrap_or(false),
-                        };
-
-                        println!("[DEBUG] Emitting progress: {}% for {}", progress.percent, model_name);
-                        let _ = app.emit("model-download-progress", progress);
-                    }
-                }
-
-                if msg_type == "download_stage" {
-                    if let Some(stage_data) = msg.get("data") {
-                        let _ = app.emit("model-download-stage", serde_json::json!({
-                            "modelName": model_name,
-                            "stage": stage_data.get("stage").and_then(|v| v.as_str()).unwrap_or(""),
-                            "submodelName": stage_data.get("submodel_name").and_then(|v| v.as_str()).unwrap_or(""),
-                            "currentMb": stage_data.get("current").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                            "totalMb": stage_data.get("total").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                            "percent": stage_data.get("percent").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                            "speedMbS": stage_data.get("speed_mb_s").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        }));
-                    }
-                }
-
-                if msg_type == "DownloadComplete" {
-                    println!("[DEBUG] Download complete emitted for {}", model_name);
-                    download_completed.store(true, Ordering::Relaxed);
-                    // Extract data from DownloadComplete message
-                    let size_mb = msg.get("data")
-                        .and_then(|d| d.get("size_mb"))
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    let path = msg.get("data")
-                        .and_then(|d| d.get("path"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    
-                    println!("[DEBUG] Download complete details - size: {}MB, path: {}", size_mb, path);
-                    
-                    let _ = app.emit("model-download-complete", serde_json::json!({
-                        "modelName": model_name,
-                        "size": size_mb,
-                        "path": path,
-                    }));
-                }
-
-                if msg_type == "error" {
-                    let error_msg = msg.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error");
-                    println!("[DEBUG] Error emitted from Python: {}", error_msg);
-                    let _ = app.emit("model-download-error", serde_json::json!({
-                        "modelName": model_name,
-                        "error": error_msg,
-                    }));
-                    return Err(AppError::ModelError(error_msg.to_string()));
-                }
-            }
-            Err(e) => {
-                eprintln!("Failed to parse Python output: {} - line: {}", e, line);
-            }
-        }
-    }
-    
-    // Release the guard. child_guard wraps Option<Child> since cancel may have taken it.
-    match scopeguard::ScopeGuard::into_inner(child_guard) {
-        None => {
-            // Process was taken by cancel_model_download — nothing to wait on.
-            eprintln!("[INFO] PyAnnote download for '{}' was cancelled (no child to wait)", model_name);
-            return Ok(());
-        }
-        Some(mut child) => {
-            let status = child.wait().await.map_err(AppError::IoError)?;
-            if !status.success() {
-                let exit_code = status.code().unwrap_or(-1);
-                if download_completed.load(Ordering::Relaxed) {
-                    eprintln!(
-                        "[WARN] Python exited with code {} after DownloadComplete for {}. Treating as success.",
-                        exit_code,
-                        model_name
-                    );
-                    return Ok(());
-                }
-                let error_msg = format!(
-                    "Model download failed with exit code: {}. \
-                    Check your internet connection and HuggingFace token. \
-                    See application logs for detailed error output.",
-                    exit_code
-                );
-                println!("[DEBUG] {}", error_msg);
-                return Err(AppError::PythonError(error_msg));
-            }
-        }
-    }
-
-    Ok(())
+) -> Result<(), String> {
+    let downloader = model_downloader::ModelDownloader::new(app, cache_dir);
+    downloader
+        .download(&model_name, &model_type, cancel)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Download a model
@@ -2572,9 +2223,9 @@ async fn download_model(
 
     let models_dir = get_models_dir(&app)?;
 
-    // Create secure temp file for HuggingFace token (PyAnnote path only)
-    let token_file = if let Some(token) = hugging_face_token {
-        Some(pass_token_securely(&token)?)
+    // Token file parameter kept for API compatibility but no longer used (sherpa-onnx is open, no token needed)
+    let token_file: Option<std::path::PathBuf> = if hugging_face_token.is_some() {
+        None // token not needed for any current model
     } else {
         None
     };
@@ -2762,7 +2413,7 @@ async fn cancel_model_download(
         token.store(true, Ordering::Relaxed);
     }
 
-    // 2. Kill Python child process if running (PyAnnote path)
+    // 2. Kill Python child process if running (legacy, kept for safety)
     if let Some(arc) = child_arc {
         let mut guard = arc.lock().await;
         if let Some(child) = guard.as_mut() {
@@ -3543,7 +3194,6 @@ fn model_rtf_estimate(model: &str) -> f64 {
         "whisper-large" | "whisper-large-v2" | "whisper-large-v3" => 0.9,
         "parakeet" => 4.0,
         "parakeet-tdt-0.6b-v3" => 4.2,
-        "parakeet-tdt-1.1b" => 2.2,
         "moonshine-tiny" => 3.5,
         "moonshine-base" => 2.0,
         _ => 1.5,
@@ -3945,56 +3595,6 @@ async fn get_current_model_rust(
     }
 }
 
-/// ============================================================================
-// Python Diarization Commands (for integration with Rust transcription)
-// ============================================================================
-
-/// Run PyAnnote diarization via Python subprocess
-#[tauri::command]
-async fn diarize_pyannote(
-    app: AppHandle,
-    task_id: String,
-    audio_path: String,
-    hf_token: Option<String>,
-    num_speakers: Option<i32>,
-) -> Result<Vec<crate::python_bridge::SpeakerSegment>, String> {
-    eprintln!("[INFO] diarize_pyannote called: task_id={}, audio={}", task_id, audio_path);
-
-    // Validate file path
-    let validated_path = validate_file_path(&audio_path)
-        .map_err(|e| e.to_string())?;
-
-    // Get Python executable and engine path
-    let python_exe = get_python_executable(&app);
-    let engine_path = get_python_engine_path(&app);
-
-    // Emit progress
-    let _ = app.emit("progress-update", serde_json::json!({
-        "taskId": task_id,
-        "progress": 50,
-        "stage": "diarization",
-        "message": "Running PyAnnote diarization...",
-    }));
-
-    // Create Python bridge and run diarization
-    let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
-    let bridge = crate::python_bridge::PythonBridge::new(&python_exe, &engine_path, &models_dir);
-
-    let result = bridge.diarize_pyannote(&validated_path, hf_token.as_deref(), num_speakers).await
-        .map_err(|e| {
-            eprintln!("[ERROR] PyAnnote diarization failed: {}", e);
-
-            let _ = app.emit("transcription-error", serde_json::json!({
-                "taskId": task_id,
-                "error": format!("PyAnnote diarization failed: {}", e),
-            }));
-            e.to_string()
-        })?;
-
-    eprintln!("[INFO] PyAnnote diarization complete: {} segments", result.len());
-    Ok(result as Vec<crate::python_bridge::SpeakerSegment>)
-}
-
 /// Run Sherpa-ONNX diarization via Python subprocess
 #[tauri::command]
 async fn diarize_sherpa(
@@ -4324,7 +3924,6 @@ pub fn run() {
             is_model_loaded_rust,
             get_current_model_rust,
             // Python Diarization commands
-            diarize_pyannote,
             diarize_sherpa,
             // Setup Wizard commands
             check_python_environment,
@@ -4356,8 +3955,6 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
     
     // Individual diarization components to skip - they're handled separately
     let skip_individual: std::collections::HashSet<&str> = std::collections::HashSet::from([
-        "pyannote-segmentation-3.0",
-        "pyannote-embedding-3.0",
         "sherpa-onnx-segmentation",
         "sherpa-onnx-embedding",
     ]);
@@ -4443,8 +4040,19 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         let is_valid_model = if model_type == "whisper" {
             // Whisper models require model.bin file
             path.join("model.bin").exists()
+        } else if model_type == "parakeet" {
+            // Parakeet ONNX models - multiple naming conventions
+            let has_encoder = path.join("encoder.onnx").exists()
+                || path.join("encoder-model.onnx").exists()
+                || path.join("encoder-model.int8.onnx").exists()
+                || path.join("encoder-int8.onnx").exists();
+            let has_decoder = path.join("decoder.onnx").exists()
+                || path.join("decoder_joint.onnx").exists()
+                || path.join("decoder_joint-model.onnx").exists()
+                || path.join("decoder_joint-model.int8.onnx").exists();
+            has_encoder && has_decoder
         } else {
-            // Parakeet and other models - directory existence is enough
+            // Other models - directory existence is enough
             true
         };
         
@@ -4467,118 +4075,8 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
             path: Some(path.to_string_lossy().to_string()),
         });
     }
-    
-    // Check for Parakeet models in nemo/ directory
-    // Parakeet models are stored as .nemo files in nemo/{org_name}/
-    let nemo_dir = models_dir.join("nemo");
-    if nemo_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&nemo_dir) {
-            for entry_result in entries {
-                let entry = match entry_result {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                };
-
-                let path = entry.path();
-
-                // Skip non-directory entries
-                if !path.is_dir() {
-                    continue;
-                }
-
-                let org_name = entry.file_name().to_string_lossy().to_string();
-
-                // Check if this is a Parakeet model directory (nvidia_parakeet-tdt-*)
-                if org_name.contains("parakeet") || org_name.contains("nvidia") {
-                    // Recursively find .nemo files (some repos place them in nested folders).
-                    let mut stack = vec![path.clone()];
-                    while let Some(current_dir) = stack.pop() {
-                        let entries = match std::fs::read_dir(&current_dir) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
-
-                        for child in entries.flatten() {
-                            let child_path = child.path();
-                            if child_path.is_dir() {
-                                stack.push(child_path);
-                                continue;
-                            }
-
-                            let nemo_filename = child.file_name().to_string_lossy().to_string();
-                            if !nemo_filename.ends_with(".nemo") {
-                                continue;
-                            }
-
-                            // Extract canonical frontend model name.
-                            let lower_filename = nemo_filename.to_lowercase();
-                            let lower_org = org_name.to_lowercase();
-                            let model_name = if lower_filename.contains("parakeet-tdt-0.6b")
-                                || lower_org.contains("parakeet-tdt-0.6b")
-                            {
-                                "parakeet-tdt-0.6b-v3".to_string()
-                            } else if lower_filename.contains("parakeet-tdt-1.1b")
-                                || lower_org.contains("parakeet-tdt-1.1b")
-                            {
-                                "parakeet-tdt-1.1b".to_string()
-                            } else if lower_filename.contains("parakeet") {
-                                nemo_filename.replace(".nemo", "")
-                            } else {
-                                continue;
-                            };
-
-                            let size_mb = if let Ok(metadata) = child.metadata() {
-                                metadata.len() / (1024 * 1024)
-                            } else {
-                                0
-                            };
-
-                            // Avoid duplicate entries for the same model name.
-                            if models.iter().any(|m| m.name == model_name) {
-                                continue;
-                            }
-
-                            eprintln!("[DEBUG] Found Parakeet model: {} in nemo cache", model_name);
-
-                            models.push(LocalModel {
-                                name: model_name,
-                                size_mb,
-                                model_type: "parakeet".to_string(),
-                                installed: true,
-                                path: Some(path.to_string_lossy().to_string()),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     // Check for diarization models (flat structure: segmentation + embedding in cache root)
-    // PyAnnote diarization
-    let seg_path = models_dir.join("pyannote-segmentation-3.0");
-    let emb_path = models_dir.join("pyannote-embedding-3.0");
-    if seg_path.exists() && emb_path.exists() {
-        let mut total_size = 0u64;
-        for p in [&seg_path, &emb_path] {
-            // Graceful error handling - don't break loop on error
-            if let Ok(entries) = std::fs::read_dir(p) {
-                for entry in entries.flatten() {
-                    if let Ok(meta) = entry.metadata() {
-                        total_size += meta.len();
-                    }
-                }
-            }
-        }
-        models.push(LocalModel {
-            name: "pyannote-diarization".to_string(),
-            size_mb: total_size / (1024 * 1024),
-            model_type: "diarization".to_string(),
-            installed: true,
-            path: None, // No single path
-        });
-    }
-    
     // Sherpa-ONNX diarization - check both flat and nested structures
     // Nested: models/sherpa-onnx-diarization/sherpa-onnx-segmentation/
     // Flat: models/sherpa-onnx-segmentation/
@@ -4631,14 +4129,15 @@ mod tests {
         std::fs::create_dir_all(&whisper_path).unwrap();
         std::fs::write(whisper_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
         
-        // Create pyannote diarization components
-        let seg_path = temp_dir.join("pyannote-segmentation-3.0");
+        // Create sherpa-onnx diarization components (nested structure)
+        let diar_base = temp_dir.join("sherpa-onnx-diarization");
+        let seg_path = diar_base.join("sherpa-onnx-segmentation");
         std::fs::create_dir_all(&seg_path).unwrap();
-        std::fs::write(seg_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
+        std::fs::write(seg_path.join("model.onnx"), vec![0u8; 1024 * 1024]).unwrap();
         
-        let emb_path = temp_dir.join("pyannote-embedding-3.0");
+        let emb_path = diar_base.join("sherpa-onnx-embedding");
         std::fs::create_dir_all(&emb_path).unwrap();
-        std::fs::write(emb_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
+        std::fs::write(emb_path.join("model.onnx"), vec![0u8; 1024 * 1024]).unwrap();
     }
     
     #[test]
@@ -4649,7 +4148,7 @@ mod tests {
         // Test detection
         let models = get_local_models_internal(temp_dir.path()).unwrap();
         
-        // Should have whisper-base and pyannote-diarization
+        // Should have whisper-base and sherpa-onnx-diarization
         assert_eq!(models.len(), 2, "Should detect 2 models");
         
         // Check whisper model
@@ -4660,8 +4159,8 @@ mod tests {
         assert!(whisper.path.is_some());
         
         // Check diarization model
-        let diarization = models.iter().find(|m| m.name == "pyannote-diarization");
-        assert!(diarization.is_some(), "Should find pyannote-diarization");
+        let diarization = models.iter().find(|m| m.name == "sherpa-onnx-diarization");
+        assert!(diarization.is_some(), "Should find sherpa-onnx-diarization");
         let diarization = diarization.unwrap();
         assert_eq!(diarization.model_type, "diarization");
         assert!(diarization.path.is_none(), "Diarization should have no single path");
@@ -4673,9 +4172,9 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         
         // Create only individual components (no complete diarization)
-        let seg_path = temp_dir.path().join("pyannote-segmentation-3.0");
+        let seg_path = temp_dir.path().join("sherpa-onnx-segmentation");
         std::fs::create_dir_all(&seg_path).unwrap();
-        std::fs::File::create(seg_path.join("model.bin")).unwrap();
+        std::fs::File::create(seg_path.join("model.onnx")).unwrap();
         
         // Should not detect any models (individual components are skipped)
         let models = get_local_models_internal(temp_dir.path()).unwrap();

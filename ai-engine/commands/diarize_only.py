@@ -21,7 +21,7 @@ def handle_diarize_only(args) -> int:
 
     provider = (args.provider or args.diarization_provider or "none").lower()
     if provider == "none":
-        emit_error("--provider (pyannote|sherpa-onnx) is required for --diarize-only")
+        emit_error("--provider sherpa-onnx is required for --diarize-only")
         return 1
 
     requested_device = normalize_inference_device(args.device)

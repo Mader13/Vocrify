@@ -118,19 +118,17 @@ def detect_speech_intervals(
     file_path: str,
     pad_ms: int = 200,
     min_silence_ms: int = 300,
-    min_speech_ms: int = 250,
-    hf_token: Optional[str] = None
+    min_speech_ms: int = 250
 ) -> List[Tuple[float, float]]:
     """
     Detect speech intervals using the specified VAD provider.
 
     Args:
-        provider: VAD provider - "pyannote", "sherpa-onnx", or "none"
+        provider: VAD provider - "sherpa-onnx", or "none"
         file_path: Path to audio file (should be 16kHz mono for best results)
         pad_ms: Padding in milliseconds to add around speech segments
         min_silence_ms: Minimum silence duration to split segments
         min_speech_ms: Minimum speech duration to keep a segment
-        hf_token: HuggingFace token for pyannote
 
     Returns:
         List of (start, end) tuples in seconds
@@ -148,11 +146,6 @@ def detect_speech_intervals(
             duration = len(audio) / sr
             return [(0.0, duration)]
 
-    elif provider == "pyannote":
-        return _detect_speech_pyannote(
-            file_path, pad_ms, min_silence_ms, min_speech_ms, hf_token
-        )
-
     elif provider == "sherpa-onnx":
         return _detect_speech_sherpa(
             file_path, pad_ms, min_silence_ms, min_speech_ms
@@ -162,62 +155,7 @@ def detect_speech_intervals(
         raise ValueError(f"Unknown VAD provider: {provider}")
 
 
-def _detect_speech_pyannote(
-    file_path: str,
-    pad_ms: int,
-    min_silence_ms: int,
-    min_speech_ms: int,
-    hf_token: Optional[str]
-) -> List[Tuple[float, float]]:
-    """
-    Detect speech intervals using pyannote.segmentation.
 
-    Uses the segmentation model directly for VAD.
-    """
-    try:
-        from pyannote.audio import Pipeline
-    except ImportError:
-        raise ImportError("pyannote.audio is required. Install with: pip install pyannote.audio")
-
-    if not hf_token:
-        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_ACCESS_TOKEN")
-
-    if not hf_token:
-        raise ValueError("HF_TOKEN is required for pyannote VAD")
-
-    try:
-        # Load segmentation pipeline (lighter than full diarization)
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/segmentation-3.0",
-            use_auth_token=hf_token
-        )
-
-        # Run segmentation
-        output = pipeline(file_path)
-
-        # Extract speech intervals
-        intervals = []
-        for segment, _ in output.itertracks(yield_label=True):
-            intervals.append((float(segment.start), float(segment.end)))
-
-        print(json.dumps({
-            "type": "debug",
-            "message": f"PyAnnote VAD detected {len(intervals)} raw speech intervals"
-        }), flush=True, file=sys.stderr)
-
-        # Merge intervals and apply padding
-        return merge_intervals(intervals, pad_ms, min_silence_ms)
-
-    except Exception as e:
-        print(json.dumps({
-            "type": "warning",
-            "message": f"PyAnnote VAD failed: {e}, falling back to full audio"
-        }), flush=True, file=sys.stderr)
-
-        # Fallback to full audio
-        audio, sr = load_audio(file_path)
-        duration = len(audio) / sr
-        return [(0.0, duration)]
 
 
 def _detect_speech_sherpa(
@@ -234,8 +172,7 @@ def _detect_speech_sherpa(
     try:
         from sherpa_onnx import (
             OfflineSpeakerSegmentation,
-            OfflineSpeakerSegmentationConfig,
-            OfflineSpeakerSegmentationPyannoteModelConfig
+            OfflineSpeakerSegmentationConfig
         )
     except ImportError:
         raise ImportError("sherpa_onnx is required. Install with: pip install sherpa-onnx")

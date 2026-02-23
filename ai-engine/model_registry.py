@@ -33,7 +33,6 @@ class ModelRegistry:
       ├── nemo/                  # NeMo .nemo files
       └── diarization/           # Diarization models
           ├── sherpa-onnx/
-          └── pyannote/
     """
 
     # Model repository IDs
@@ -58,14 +57,8 @@ class ModelRegistry:
 
     PARAKEET_MODELS = {
         "0.6b": "nvidia/parakeet-tdt-0.6b-v3",
-        "1.1b": "nvidia/parakeet-tdt-1.1b",
     }
 
-    PYANNOTE_REPOS = {
-        "segmentation": "pyannote/segmentation-3.0",
-        "embedding": "pyannote/wespeaker-voxceleb-resnet34-LM",
-        "speaker-diarization": "pyannote/speaker-diarization-3.1",
-    }
 
     SHERPA_DIARIZATION_URLS = {
         "segmentation": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
@@ -90,7 +83,6 @@ class ModelRegistry:
         self.nemo_cache.mkdir(parents=True, exist_ok=True)
         self.diarization_cache.mkdir(parents=True, exist_ok=True)
         (self.diarization_cache / "sherpa-onnx").mkdir(exist_ok=True)
-        (self.diarization_cache / "pyannote").mkdir(exist_ok=True)
 
     def get_whisper_path(self, model_size: str) -> Tuple[Optional[Path], str]:
         """
@@ -213,11 +205,7 @@ class ModelRegistry:
 
         # Segmentation model: sherpa-onnx-diarization/sherpa-onnx-segmentation/model.int8.onnx
         # Note: The archive extracts directly to sherpa-onnx-segmentation/ without the nested folder
-        seg_path = (
-            sherpa_dir
-            / "sherpa-onnx-segmentation"
-            / "model.int8.onnx"
-        )
+        seg_path = sherpa_dir / "sherpa-onnx-segmentation" / "model.int8.onnx"
 
         # Embedding model: sherpa-onnx-diarization/sherpa-onnx-embedding/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx
         # Note: The embedding is downloaded as a single .onnx file, not in a subdirectory
@@ -232,27 +220,7 @@ class ModelRegistry:
             "embedding": emb_path if emb_path.exists() else None,
         }
 
-    def get_pyannote_diarization_paths(self) -> Dict[str, Tuple[Optional[Path], str]]:
-        """
-        Get paths to PyAnnote diarization models.
 
-        Returns:
-            Dict with model type -> (local_path or None, repo_id)
-        """
-        result = {}
-
-        for model_type, repo_id in self.PYANNOTE_REPOS.items():
-            try:
-                from huggingface_hub import snapshot_download
-
-                local_path = snapshot_download(
-                    repo_id=repo_id, cache_dir=str(self.hf_cache), local_files_only=True
-                )
-                result[model_type] = (Path(local_path), repo_id)
-            except Exception:
-                result[model_type] = (None, repo_id)
-
-        return result
 
     def validate_model(self, provider: str, model_id: str) -> bool:
         """
@@ -339,17 +307,6 @@ class ModelRegistry:
             )
         )
 
-        # PyAnnote diarization
-        pyannote_paths = self.get_pyannote_diarization_paths()
-        models.append(
-            ModelInfo(
-                name="pyannote-diarization",
-                provider="pyannote",
-                available=all(p[0] is not None for p in pyannote_paths.values()),
-                path=self.diarization_cache / "pyannote",
-            )
-        )
-
         return models
 
     def delete_model(self, model_name: str) -> Dict[str, Any]:
@@ -358,7 +315,7 @@ class ModelRegistry:
 
         Args:
             model_name: Model name (e.g., "whisper-base", "distil-large-v3",
-                        "parakeet-0.6b", "sherpa-onnx-diarization", "pyannote-diarization")
+                        "parakeet-0.6b", "sherpa-onnx-diarization")
 
         Returns:
             Dict with 'success' (bool), 'message' (str), and 'deleted_paths' (list of str)
@@ -487,7 +444,8 @@ class ModelRegistry:
                     }
 
         elif model_name.startswith("parakeet-"):
-            # Parakeet models - check direct directory first
+            # Parakeet ONNX models - check direct directory
+            # Structure: {cache_dir}/parakeet-tdt-0.6b-v3/{encoder.onnx, decoder.onnx, ...}
             target_dir = self.cache_dir / model_name
             if target_dir.exists():
                 try:
@@ -500,7 +458,7 @@ class ModelRegistry:
                         "deleted_paths": deleted_paths,
                     }
             else:
-                # Fallback: Check nemo cache structure
+                # Also check for legacy nemo cache structure (for backwards compatibility)
                 size = model_name.replace("parakeet-", "")
                 model_name_full = self.PARAKEET_MODELS.get(size)
                 if model_name_full:
@@ -516,18 +474,12 @@ class ModelRegistry:
                                 "message": f"Failed to delete {model_name}: {str(e)}",
                                 "deleted_paths": deleted_paths,
                             }
-                    else:
-                        return {
-                            "success": False,
-                            "message": f"Model not found: {model_name}",
-                            "deleted_paths": deleted_paths,
-                        }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"Unknown Parakeet model: {model_name}",
-                        "deleted_paths": deleted_paths,
-                    }
+                # Model not found - not an error if it was already deleted
+                return {
+                    "success": True,
+                    "message": f"Model {model_name} not found (may have been already deleted)",
+                    "deleted_paths": deleted_paths,
+                }
 
         elif model_name == "sherpa-onnx-diarization":
             # Sherpa diarization - models are in {cache_dir}/sherpa-onnx-diarization/
@@ -599,74 +551,6 @@ class ModelRegistry:
                     "deleted_paths": deleted_paths,
                 }
 
-        elif model_name == "pyannote-diarization":
-            # PyAnnote diarization - check individual model directories first
-            # Downloader creates: {cache_dir}/pyannote-segmentation-3.0/ and {cache_dir}/pyannote-embedding-3.0/
-
-            # Segmentation model
-            seg_dir = self.cache_dir / "pyannote-segmentation-3.0"
-            if seg_dir.exists():
-                try:
-                    shutil.rmtree(seg_dir)
-                    deleted_paths.append(str(seg_dir))
-                except Exception as e:
-                    return {
-                        "success": False,
-                        "message": f"Failed to delete pyannote segmentation: {str(e)}",
-                        "deleted_paths": deleted_paths,
-                    }
-
-            # Embedding model
-            emb_dir = self.cache_dir / "pyannote-embedding-3.0"
-            if emb_dir.exists():
-                try:
-                    shutil.rmtree(emb_dir)
-                    deleted_paths.append(str(emb_dir))
-                except Exception as e:
-                    return {
-                        "success": False,
-                        "message": f"Failed to delete pyannote embedding: {str(e)}",
-                        "deleted_paths": deleted_paths,
-                    }
-
-            # Fallback: Check direct model directory and HF cache
-            if not deleted_paths:
-                target_dir = self.cache_dir / model_name
-                if target_dir.exists():
-                    try:
-                        shutil.rmtree(target_dir)
-                        deleted_paths.append(str(target_dir))
-                    except Exception as e:
-                        return {
-                            "success": False,
-                            "message": f"Failed to delete {model_name}: {str(e)}",
-                            "deleted_paths": deleted_paths,
-                        }
-                else:
-                    # Delete all pyannote models from HF cache
-                    hub_dir = self.hf_cache / "hub"
-                    if hub_dir.exists():
-                        # Find all pyannote model directories
-                        for item in hub_dir.iterdir():
-                            if item.is_dir() and item.name.startswith(
-                                "models--pyannote--"
-                            ):
-                                try:
-                                    shutil.rmtree(item)
-                                    deleted_paths.append(str(item))
-                                except Exception as e:
-                                    return {
-                                        "success": False,
-                                        "message": f"Failed to delete pyannote model {item.name}: {str(e)}",
-                                        "deleted_paths": deleted_paths,
-                                    }
-
-            if not deleted_paths:
-                return {
-                    "success": False,
-                    "message": f"PyAnnote models not found",
-                    "deleted_paths": deleted_paths,
-                }
 
         else:
             return {

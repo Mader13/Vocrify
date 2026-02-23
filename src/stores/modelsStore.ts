@@ -27,10 +27,67 @@ import {
 import { AVAILABLE_MODELS } from "@/types";
 import { useSettingsStore } from "./index";
 import { logger } from "@/lib/logger";
+import { countBlockingTasksForModel } from "./utils/model-deletion";
+
+interface PendingModelDeletionState {
+  requestedAt: number;
+  lastAttemptAt?: number;
+  lastError?: string;
+}
+
+const PENDING_MODEL_DELETIONS_STORAGE_KEY = "vocrify-pending-model-deletions";
+
+function loadPendingModelDeletions(): Record<string, PendingModelDeletionState> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PENDING_MODEL_DELETIONS_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, PendingModelDeletionState>;
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return parsed;
+  } catch (error) {
+    logger.modelWarn("Failed to parse pending model deletions from storage", { error });
+    return {};
+  }
+}
+
+function persistPendingModelDeletions(pendingModelDeletions: Record<string, PendingModelDeletionState>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      PENDING_MODEL_DELETIONS_STORAGE_KEY,
+      JSON.stringify(pendingModelDeletions),
+    );
+  } catch (error) {
+    logger.modelWarn("Failed to persist pending model deletions", { error });
+  }
+}
+
+function isModelMissingError(errorMessage: string | undefined): boolean {
+  if (!errorMessage) {
+    return false;
+  }
+
+  return errorMessage.toLowerCase().includes("model not found");
+}
 
 interface ModelsState {
   availableModels: AvailableModel[];
   downloads: Record<string, ModelDownloadState>;
+  deletingModels: Record<string, boolean>;
+  pendingModelDeletions: Record<string, PendingModelDeletionState>;
   diskUsage: DiskUsage;
   selectedTranscriptionModel: string | null;
   selectedDiarizationModel: string | null;
@@ -51,6 +108,8 @@ interface ModelsState {
   updateDownloadStage: (modelName: string, stage: string, submodelName: string, progress: number, currentMb: number, totalMb: number) => void;
   setStageCompleted: (modelName: string, stage: string) => void;
   getInstalledModels: () => AvailableModel[];
+  reconcilePendingModelDeletions: () => Promise<void>;
+  isModelPendingDeletion: (modelName: string) => boolean;
 }
 
 // Valid model names - used for validation
@@ -161,6 +220,8 @@ let unlisteners: UnlistenFn[] = [];
 export const useModelsStore = create<ModelsState>()((set, get) => ({
   availableModels: [...AVAILABLE_MODELS],
   downloads: {},
+  deletingModels: {},
+  pendingModelDeletions: loadPendingModelDeletions(),
   diskUsage: {
     totalSizeMb: 0,
     freeSpaceMb: 0,
@@ -179,6 +240,7 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
         logger.modelDebug("Local models from backend", { models: localModels.map(m => m.name) });
 
         set((state) => {
+          const installedModelNames = new Set(localModels.map((model) => model.name));
           const newModels = state.availableModels.map((model) => {
             const localModel = localModels.find((lm) => lm.name === model.name);
             if (localModel) {
@@ -194,8 +256,30 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
               path: undefined,
             };
           });
+
+          const nextPendingModelDeletions = { ...state.pendingModelDeletions };
+          let pendingChanged = false;
+          for (const modelName of Object.keys(nextPendingModelDeletions)) {
+            if (!installedModelNames.has(modelName)) {
+              delete nextPendingModelDeletions[modelName];
+              pendingChanged = true;
+            }
+          }
+
+          if (pendingChanged) {
+            persistPendingModelDeletions(nextPendingModelDeletions);
+          }
+
           logger.modelDebug("Updated models", { models: newModels.map(m => ({ name: m.name, installed: m.installed })) });
-          return { availableModels: newModels };
+
+          if (!pendingChanged) {
+            return { availableModels: newModels };
+          }
+
+          return {
+            availableModels: newModels,
+            pendingModelDeletions: nextPendingModelDeletions,
+          };
         });
       }
     } catch (error) {
@@ -330,17 +414,72 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
   },
 
   deleteModel: async (name: string) => {
+    const hadSelectedModel =
+      get().selectedTranscriptionModel === name ||
+      get().selectedDiarizationModel === name;
+
+    set((state) => ({
+      deletingModels: {
+        ...state.deletingModels,
+        [name]: true,
+      },
+    }));
+
     try {
+      const blockingTasks = countBlockingTasksForModel(useSettingsStore.getState().tasks, name);
+
+      if (blockingTasks > 0) {
+        logger.modelInfo("Model deletion scheduled after active tasks finish", {
+          modelName: name,
+          blockingTasks,
+        });
+
+        set((state) => {
+          const nextPendingModelDeletions = {
+            ...state.pendingModelDeletions,
+            [name]: {
+              requestedAt: state.pendingModelDeletions[name]?.requestedAt ?? Date.now(),
+              lastAttemptAt: Date.now(),
+            },
+          };
+          persistPendingModelDeletions(nextPendingModelDeletions);
+
+          const nextState: Partial<ModelsState> = {
+            pendingModelDeletions: nextPendingModelDeletions,
+          };
+
+          if (state.selectedTranscriptionModel === name) {
+            nextState.selectedTranscriptionModel = null;
+          }
+
+          if (state.selectedDiarizationModel === name) {
+            nextState.selectedDiarizationModel = null;
+          }
+
+          return nextState;
+        });
+
+        if (hadSelectedModel) {
+          await saveSelectedModel("");
+        }
+        return;
+      }
+
       const result = await deleteModelService(name);
-      if (result.success) {
+      if (result.success || isModelMissingError(result.error)) {
         logger.modelInfo("Model deleted successfully", { modelName: name });
+
         set((state) => {
           const newDownloads = { ...state.downloads };
           delete newDownloads[name];
+          const newPendingModelDeletions = { ...state.pendingModelDeletions };
+          delete newPendingModelDeletions[name];
+          persistPendingModelDeletions(newPendingModelDeletions);
 
           // Clear selected model if the deleted model was selected
           const newState: Partial<ModelsState> = {
             downloads: newDownloads,
+            pendingModelDeletions: newPendingModelDeletions,
           };
 
           if (state.selectedTranscriptionModel === name) {
@@ -355,15 +494,71 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
 
           return newState;
         });
+
+        if (hadSelectedModel) {
+          await saveSelectedModel("");
+        }
         // Force reload models and update UI
         await get().loadModels();
         await get().loadDiskUsage();
         logger.modelDebug("Models and disk usage reloaded after delete");
       } else {
-        logger.modelError("Delete model failed", { error: result.error });
+        logger.modelWarn("Delete model failed, keeping pending deletion", {
+          modelName: name,
+          error: result.error,
+        });
+
+        set((state) => {
+          const nextPendingModelDeletions = {
+            ...state.pendingModelDeletions,
+            [name]: {
+              requestedAt: state.pendingModelDeletions[name]?.requestedAt ?? Date.now(),
+              lastAttemptAt: Date.now(),
+              lastError: result.error,
+            },
+          };
+          persistPendingModelDeletions(nextPendingModelDeletions);
+
+          return {
+            pendingModelDeletions: nextPendingModelDeletions,
+          };
+        });
       }
     } catch (error) {
-      logger.modelError("Failed to delete model", { error });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.modelWarn("Failed to delete model, keeping pending deletion", {
+        modelName: name,
+        error: errorMessage,
+      });
+
+      set((state) => {
+        const nextPendingModelDeletions = {
+          ...state.pendingModelDeletions,
+          [name]: {
+            requestedAt: state.pendingModelDeletions[name]?.requestedAt ?? Date.now(),
+            lastAttemptAt: Date.now(),
+            lastError: errorMessage,
+          },
+        };
+        persistPendingModelDeletions(nextPendingModelDeletions);
+
+        return {
+          pendingModelDeletions: nextPendingModelDeletions,
+        };
+      });
+    } finally {
+      set((state) => {
+        if (!state.deletingModels[name]) {
+          return state;
+        }
+
+        const newDeletingModels = { ...state.deletingModels };
+        delete newDeletingModels[name];
+
+        return {
+          deletingModels: newDeletingModels,
+        };
+      });
     }
   },
 
@@ -374,6 +569,12 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
       logger.modelError("Invalid model selected", { model });
       return;
     }
+
+    if (model && get().pendingModelDeletions[model]) {
+      logger.modelWarn("Cannot select model scheduled for deletion", { modelName: model });
+      return;
+    }
+
     set({ selectedTranscriptionModel: model });
     if (model) {
       await saveSelectedModel(`transcription:${model}`);
@@ -385,6 +586,11 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
   },
 
   setSelectedDiarizationModel: async (model: string | null) => {
+    if (model && get().pendingModelDeletions[model]) {
+      logger.modelWarn("Cannot select diarization model scheduled for deletion", { modelName: model });
+      return;
+    }
+
     set({ selectedDiarizationModel: model });
     if (model) {
       await saveSelectedModel(`diarization:${model}`);
@@ -627,6 +833,35 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
     });
   },
 
+  reconcilePendingModelDeletions: async () => {
+    const pendingModelNames = Object.keys(get().pendingModelDeletions);
+    if (pendingModelNames.length === 0) {
+      return;
+    }
+
+    logger.modelDebug("Reconciling pending model deletions", {
+      pendingCount: pendingModelNames.length,
+      models: pendingModelNames,
+    });
+
+    for (const modelName of pendingModelNames) {
+      if (get().deletingModels[modelName]) {
+        continue;
+      }
+
+      const blockingTasks = countBlockingTasksForModel(useSettingsStore.getState().tasks, modelName);
+      if (blockingTasks > 0) {
+        continue;
+      }
+
+      await get().deleteModel(modelName);
+    }
+  },
+
+  isModelPendingDeletion: (modelName: string) => {
+    return Boolean(get().pendingModelDeletions[modelName]);
+  },
+
   getInstalledModels: () => {
     const state = get();
     return state.availableModels.filter((model) => model.installed);
@@ -677,7 +912,7 @@ export async function initializeModelsStore() {
     }
 
     // Validate the loaded model name - discard if corrupted
-    if (isValidModel(modelName)) {
+    if (isValidModel(modelName) && !store.isModelPendingDeletion(modelName)) {
       if (modelCategory === 'diarization') {
         store.setSelectedDiarizationModel(modelName);
       } else {
@@ -689,6 +924,8 @@ export async function initializeModelsStore() {
       await saveSelectedModel('');
     }
   }
+
+  await store.reconcilePendingModelDeletions();
 }
 
 /**

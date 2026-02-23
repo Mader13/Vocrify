@@ -4,11 +4,11 @@
  * Phase 3: Updated for transcribe-rs
  * This module provides intelligent routing between:
  * - Rust transcribe-rs (Whisper GGML, Parakeet ONNX) - fast, GPU-accelerated
- * - Python engine (PyAnnote diarization only) - diarization support
+ * - Python engine (Sherpa-ONNX diarization only)
  *
  * Routing logic:
  * - Whisper/Parakeet models → Rust transcribe-rs (with auto-fallback to Python)
- * - Diarization → Python (PyAnnote/Sherpa-ONNX)
+ * - Diarization → Python (Sherpa-ONNX)
  */
 
 import type {

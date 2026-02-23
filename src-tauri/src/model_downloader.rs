@@ -11,9 +11,7 @@
 //! | `"parakeet"`  | `parakeet-tdt-0.6b-v3` etc.| HuggingFace CDN (nvidia repos)  |
 //! | `"diarization"` | `sherpa-onnx-diarization`| GitHub Releases (2 files)       |
 //!
-//! **PyAnnote diarization** (`pyannote-diarization`) stays Python-only because
-//! it requires gated HuggingFace repos accessed via `huggingface_hub`, whose
-//! file-layout the `pyannote` library reads at runtime.
+//! All models are downloaded via `reqwest` with Tauri progress events.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -32,6 +30,52 @@ use crate::{AppError, ModelDownloadProgress};
 /// Minimum milliseconds between successive `model-download-progress` events.
 /// Avoids flooding the React event bus without losing perceived smoothness.
 const PROGRESS_INTERVAL_MS: u128 = 150;
+const WHISPER_CPP_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+
+struct ParakeetRegistry {
+    download_url: &'static str,
+    archive_name: &'static str,
+    target_dir: &'static str,
+}
+
+const PARAKEET_REGISTRY: ParakeetRegistry = ParakeetRegistry {
+    download_url: "https://blob.handy.computer/parakeet-v3-int8.tar.gz",
+    archive_name: "parakeet-v3-int8.tar.gz",
+    target_dir: "parakeet-tdt-0.6b-v3",
+};
+
+struct SherpaRegistry {
+    model_name: &'static str,
+    segmentation_dir: &'static str,
+    embedding_dir: &'static str,
+    segmentation_archive_name: &'static str,
+    segmentation_url: &'static str,
+    segmentation_required_file: &'static str,
+    embedding_filename: &'static str,
+    embedding_url: &'static str,
+}
+
+const SHERPA_REGISTRY: SherpaRegistry = SherpaRegistry {
+    model_name: "sherpa-onnx-diarization",
+    segmentation_dir: "sherpa-onnx-segmentation",
+    embedding_dir: "sherpa-onnx-embedding",
+    segmentation_archive_name: "segmentation.tar.bz2",
+    segmentation_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+    segmentation_required_file: "model.int8.onnx",
+    embedding_filename: "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+    embedding_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+};
+
+const WHISPER_GGML_MODELS: [(&str, &str); 8] = [
+    ("tiny", "ggml-tiny.bin"),
+    ("base", "ggml-base.bin"),
+    ("small", "ggml-small.bin"),
+    ("medium", "ggml-medium.bin"),
+    ("large", "ggml-large-v1.bin"),
+    ("large-v1", "ggml-large-v1.bin"),
+    ("large-v2", "ggml-large-v2.bin"),
+    ("large-v3", "ggml-large-v3.bin"),
+];
 
 // ============================================================================
 // Error type
@@ -93,12 +137,18 @@ impl ModelDownloader {
 
     // ── Public dispatch ────────────────────────────────────────────────────
 
+    /// Maximum retry attempts for failed downloads
+    const MAX_RETRIES: u32 = 3;
+    /// Base delay between retries in seconds
+    const RETRY_DELAY_SECS: u64 = 2;
+
     /// Download a model, routing by `model_type` and `model_name`.
     ///
     /// Emits `model-download-progress` during the download and
     /// `model-download-complete` on success.
     ///
     /// Returns `Err(DownloadError::Cancelled)` when `cancel` is set.
+    /// Implements automatic retry (up to 3 attempts) for network errors.
     pub async fn download(
         &self,
         model_name: &str,
@@ -109,18 +159,69 @@ impl ModelDownloader {
             "[ModelDownloader] download(type={}, name={})",
             model_type, model_name
         );
-        match model_type {
-            "whisper" => self.download_whisper(model_name, &cancel).await,
-            "parakeet" => self.download_parakeet_nemo(model_name, &cancel).await,
-            "diarization" if model_name == "sherpa-onnx-diarization" => {
-                self.download_sherpa_onnx(&cancel).await
+
+        let mut last_error_msg: Option<String> = None;
+
+        for attempt in 1..=Self::MAX_RETRIES {
+            // Check for cancellation before each attempt
+            if cancel.load(Ordering::Relaxed) {
+                return Err(DownloadError::Cancelled);
             }
-            _ => Err(DownloadError::Other(format!(
-                "Unsupported: model_type='{}', model_name='{}'. \
-                 PyAnnote must be downloaded via Python engine.",
-                model_type, model_name
-            ))),
+
+            let result = match model_type {
+                "whisper" => self.download_whisper(model_name, &cancel).await,
+                "parakeet" => self.download_parakeet_onnx(model_name, &cancel).await,
+                "diarization" if model_name == "sherpa-onnx-diarization" => {
+                    self.download_sherpa_onnx(&cancel).await
+                }
+                _ => Err(DownloadError::Other(format!(
+                    "Unsupported model: model_type='{}', model_name='{}'.",
+                    model_type, model_name
+                ))),
+            };
+
+            match result {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last_error_msg = Some(e.to_string());
+                    
+                    // Check if error is retryable (network-related)
+                    let is_retryable = matches!(e, DownloadError::Http(_))
+                        || matches!(e, DownloadError::Io(ref io_err) 
+                            if io_err.kind() == std::io::ErrorKind::ConnectionRefused
+                            || io_err.kind() == std::io::ErrorKind::TimedOut
+                            || io_err.kind() == std::io::ErrorKind::NotConnected);
+
+                    // Only retry if error is retryable and we have attempts left
+                    if is_retryable && attempt < Self::MAX_RETRIES {
+                        let delay = Self::RETRY_DELAY_SECS * (2_u64.pow(attempt - 1));
+                        eprintln!(
+                            "[ModelDownloader] Retryable error on attempt {}/{}, retrying in {}s...",
+                            attempt, Self::MAX_RETRIES, delay
+                        );
+                        
+                        // Emit retrying event for UI
+                        let _ = self.app.emit("model-download-retrying", serde_json::json!({
+                            "modelName": model_name,
+                            "message": format!("Retrying download (attempt {}/{})...", attempt + 1, Self::MAX_RETRIES),
+                            "attempt": attempt,
+                            "maxAttempts": Self::MAX_RETRIES,
+                        }));
+
+                        tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
+                        continue;
+                    }
+
+                    // Non-retryable error or out of retries - return error
+                    return Err(e);
+                }
+            }
         }
+
+        // Should not reach here, but handle gracefully
+        Err(last_error_msg
+            .map(DownloadError::Other)
+            .unwrap_or_else(|| DownloadError::Other("Download failed".to_string())))
     }
 
     // ── Whisper GGML ──────────────────────────────────────────────────────
@@ -136,16 +237,18 @@ impl ModelDownloader {
 
         let dest = self.models_dir.join(file_name);
 
+        // Clean up any partial downloads - remove existing file to ensure fresh download
         if dest.exists() {
-            eprintln!("[ModelDownloader] Whisper {} already present, skipping.", model_name);
-            self.emit_complete(model_name, file_size_mb(&dest), &dest);
-            return Ok(());
+            std::fs::remove_file(&dest).map_err(DownloadError::Io)?;
+        }
+        
+        // Also clean up any .tmp files for this model
+        let tmp_file = dest.with_extension("tmp");
+        if tmp_file.exists() {
+            let _ = std::fs::remove_file(&tmp_file);
         }
 
-        let url = format!(
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}",
-            file_name
-        );
+        let url = format!("{}/{}", WHISPER_CPP_BASE_URL, file_name);
 
         eprintln!("[ModelDownloader] Whisper '{}' → {}", model_name, url);
         self.stream_to_file(&url, &dest, model_name, cancel).await?;
@@ -153,39 +256,86 @@ impl ModelDownloader {
         Ok(())
     }
 
-    // ── Parakeet NeMo ─────────────────────────────────────────────────────
+    // ── Parakeet ONNX ─────────────────────────────────────────────────────
 
-    async fn download_parakeet_nemo(
+    async fn download_parakeet_onnx(
         &self,
         model_name: &str,
         cancel: &Arc<AtomicBool>,
     ) -> Result<(), DownloadError> {
-        let (repo_id, nemo_filename) = parakeet_nemo_info(model_name).ok_or_else(|| {
-            DownloadError::Other(format!("Unknown Parakeet model: '{}'", model_name))
-        })?;
+        let target_dir = self.models_dir.join(PARAKEET_REGISTRY.target_dir);
+        let tmp_extract_dir = self
+            .models_dir
+            .join(format!("{}.tmp_extract", PARAKEET_REGISTRY.target_dir));
 
-        // Match path structure produced by Python for backward compatibility:
-        //   {models_dir}/nemo/{safe_repo}/{filename}.nemo
-        let safe_repo = repo_id.replace('/', "_");
-        let nemo_dir = self.models_dir.join("nemo").join(&safe_repo);
-        std::fs::create_dir_all(&nemo_dir)?;
+        cleanup_dir_if_exists(&tmp_extract_dir)?;
+        std::fs::create_dir_all(&tmp_extract_dir).map_err(DownloadError::Io)?;
 
-        let dest = nemo_dir.join(&nemo_filename);
-
-        if dest.exists() {
-            eprintln!("[ModelDownloader] Parakeet {} already present, skipping.", model_name);
-            self.emit_complete(model_name, file_size_mb(&dest), &dest);
-            return Ok(());
-        }
-
-        let url = format!(
-            "https://huggingface.co/{}/resolve/main/{}",
-            repo_id, nemo_filename
+        let archive_path = tmp_extract_dir.join(PARAKEET_REGISTRY.archive_name);
+        eprintln!(
+            "[ModelDownloader] Parakeet '{}' → {}",
+            model_name, PARAKEET_REGISTRY.download_url
         );
 
-        eprintln!("[ModelDownloader] Parakeet '{}' → {}", model_name, url);
-        self.stream_to_file(&url, &dest, model_name, cancel).await?;
-        self.emit_complete(model_name, file_size_mb(&dest), &dest);
+        if let Err(err) = self
+            .stream_to_file(
+                PARAKEET_REGISTRY.download_url,
+                &archive_path,
+                model_name,
+                cancel,
+            )
+            .await
+        {
+            let _ = std::fs::remove_dir_all(&tmp_extract_dir);
+            return Err(err);
+        }
+
+        let extract_result: Result<(), DownloadError> = (|| {
+            eprintln!(
+                "[ModelDownloader] Extracting Parakeet archive to {:?}",
+                tmp_extract_dir
+            );
+            self.extract_tar_gz(&archive_path, &tmp_extract_dir)?;
+            let _ = std::fs::remove_file(&archive_path);
+
+            flatten_single_subdir(&tmp_extract_dir)?;
+
+            if !has_parakeet_required_files(&tmp_extract_dir) {
+                return Err(DownloadError::Other(format!(
+                    "Parakeet ONNX validation failed: missing encoder*/decoder*.onnx in {:?}. Found: {:?}",
+                    tmp_extract_dir,
+                    list_model_files(&tmp_extract_dir)
+                )));
+            }
+
+            Ok(())
+        })();
+
+        if let Err(err) = extract_result {
+            let _ = std::fs::remove_dir_all(&tmp_extract_dir);
+            return Err(err);
+        }
+
+        cleanup_dir_if_exists(&target_dir)?;
+        std::fs::rename(&tmp_extract_dir, &target_dir).map_err(DownloadError::Io)?;
+
+        let size_mb = dir_size_mb(&target_dir);
+        eprintln!("[ModelDownloader] Parakeet ONNX done — {} MB", size_mb);
+        self.emit_complete(model_name, size_mb, &target_dir);
+        Ok(())
+    }
+
+    // Extract tar.gz archive
+    fn extract_tar_gz(&self, archive: &Path, dest_dir: &Path) -> Result<(), DownloadError> {
+        use flate2::read::GzDecoder;
+        use tar::Archive;
+
+        let file = std::fs::File::open(archive).map_err(DownloadError::Io)?;
+        let decoder = GzDecoder::new(file);
+        let mut tarball = Archive::new(decoder);
+        tarball.unpack(dest_dir).map_err(|e| {
+            DownloadError::Other(format!("Failed to extract tar.gz: {}", e))
+        })?;
         Ok(())
     }
 
@@ -198,68 +348,90 @@ impl ModelDownloader {
     /// 2. Embedding — single `.onnx` from GitHub Releases, saved to
     ///    `sherpa-onnx-diarization/sherpa-onnx-embedding/`
     async fn download_sherpa_onnx(&self, cancel: &Arc<AtomicBool>) -> Result<(), DownloadError> {
-        const MODEL_NAME: &str = "sherpa-onnx-diarization";
+        let base_dir = self.models_dir.join(SHERPA_REGISTRY.model_name);
+        let seg_dir = base_dir.join(SHERPA_REGISTRY.segmentation_dir);
+        let emb_dir = base_dir.join(SHERPA_REGISTRY.embedding_dir);
+        let seg_tmp_extract =
+            base_dir.join(format!("{}.tmp_extract", SHERPA_REGISTRY.segmentation_dir));
 
-        let base_dir = self.models_dir.join(MODEL_NAME);
-        let seg_dir = base_dir.join("sherpa-onnx-segmentation");
-        let emb_dir = base_dir.join("sherpa-onnx-embedding");
-        std::fs::create_dir_all(&seg_dir)?;
+        std::fs::create_dir_all(&base_dir)?;
         std::fs::create_dir_all(&emb_dir)?;
 
-        // ── Stage 1: Segmentation model (tar.bz2) ─────────────────────────
-        const SEG_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/\
-            speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2";
-
-        if !has_onnx_files(&seg_dir) {
+        if !has_required_file(&seg_dir, SHERPA_REGISTRY.segmentation_required_file) {
             if cancel.load(Ordering::Relaxed) {
                 return Err(DownloadError::Cancelled);
             }
 
-            // Emit stage info so UI can show "Downloading segmentation model"
-            self.emit_stage(MODEL_NAME, "segmentation", 0.0, 0.0, 0.0);
+            self.emit_stage(SHERPA_REGISTRY.model_name, "segmentation", 0.0, 0.0, 0.0);
 
-            let seg_archive = seg_dir.join("segmentation.tar.bz2");
-            eprintln!("[ModelDownloader] Sherpa segmentation → {}", SEG_URL);
-            self.stream_to_file(SEG_URL, &seg_archive, MODEL_NAME, cancel)
+            cleanup_dir_if_exists(&seg_tmp_extract)?;
+            std::fs::create_dir_all(&seg_tmp_extract).map_err(DownloadError::Io)?;
+
+            let seg_archive = seg_tmp_extract.join(SHERPA_REGISTRY.segmentation_archive_name);
+            eprintln!(
+                "[ModelDownloader] Sherpa segmentation → {}",
+                SHERPA_REGISTRY.segmentation_url
+            );
+            self.stream_to_file(
+                SHERPA_REGISTRY.segmentation_url,
+                &seg_archive,
+                SHERPA_REGISTRY.model_name,
+                cancel,
+            )
                 .await?;
 
             eprintln!(
                 "[ModelDownloader] Extracting segmentation archive to {:?}",
-                seg_dir
+                seg_tmp_extract
             );
-            extract_tar_bz2(&seg_archive, &seg_dir)?;
+            extract_tar_bz2(&seg_archive, &seg_tmp_extract)?;
             let _ = std::fs::remove_file(&seg_archive);
-            // If the tar contained a single top-level directory, flatten it.
-            flatten_single_subdir(&seg_dir)?;
-            self.emit_stage_complete(MODEL_NAME, "segmentation");
+
+            flatten_single_subdir(&seg_tmp_extract)?;
+
+            if !has_required_file(&seg_tmp_extract, SHERPA_REGISTRY.segmentation_required_file) {
+                let _ = std::fs::remove_dir_all(&seg_tmp_extract);
+                return Err(DownloadError::Other(format!(
+                    "Sherpa segmentation validation failed: missing '{}' in {:?}. Found: {:?}",
+                    SHERPA_REGISTRY.segmentation_required_file,
+                    seg_tmp_extract,
+                    list_model_files(&seg_tmp_extract)
+                )));
+            }
+
+            cleanup_dir_if_exists(&seg_dir)?;
+            std::fs::rename(&seg_tmp_extract, &seg_dir).map_err(DownloadError::Io)?;
+            self.emit_stage_complete(SHERPA_REGISTRY.model_name, "segmentation");
         } else {
             eprintln!("[ModelDownloader] Sherpa segmentation already present, skipping.");
         }
 
-        // ── Stage 2: Embedding model (single .onnx) ───────────────────────
-        const EMB_FILENAME: &str =
-            "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx";
-        const EMB_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/\
-            speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx";
-
-        let emb_dest = emb_dir.join(EMB_FILENAME);
+        let emb_dest = emb_dir.join(SHERPA_REGISTRY.embedding_filename);
         if !emb_dest.exists() {
             if cancel.load(Ordering::Relaxed) {
                 return Err(DownloadError::Cancelled);
             }
 
-            self.emit_stage(MODEL_NAME, "embedding", 0.0, 0.0, 0.0);
-            eprintln!("[ModelDownloader] Sherpa embedding → {}", EMB_URL);
-            self.stream_to_file(EMB_URL, &emb_dest, MODEL_NAME, cancel)
+            self.emit_stage(SHERPA_REGISTRY.model_name, "embedding", 0.0, 0.0, 0.0);
+            eprintln!(
+                "[ModelDownloader] Sherpa embedding → {}",
+                SHERPA_REGISTRY.embedding_url
+            );
+            self.stream_to_file(
+                SHERPA_REGISTRY.embedding_url,
+                &emb_dest,
+                SHERPA_REGISTRY.model_name,
+                cancel,
+            )
                 .await?;
-            self.emit_stage_complete(MODEL_NAME, "embedding");
+            self.emit_stage_complete(SHERPA_REGISTRY.model_name, "embedding");
         } else {
             eprintln!("[ModelDownloader] Sherpa embedding already present, skipping.");
         }
 
         let size_mb = dir_size_mb(&base_dir);
         eprintln!("[ModelDownloader] Sherpa-ONNX done — {} MB", size_mb);
-        self.emit_complete(MODEL_NAME, size_mb, &base_dir);
+        self.emit_complete(SHERPA_REGISTRY.model_name, size_mb, &base_dir);
         Ok(())
     }
 
@@ -426,31 +598,9 @@ impl ModelDownloader {
 /// corresponding GGML filename hosted on HuggingFace.
 pub fn whisper_ggml_filename(model_name: &str) -> Option<&'static str> {
     let size = model_name.strip_prefix("whisper-").unwrap_or(model_name);
-    match size {
-        "tiny" => Some("ggml-tiny.bin"),
-        "base" => Some("ggml-base.bin"),
-        "small" => Some("ggml-small.bin"),
-        "medium" => Some("ggml-medium.bin"),
-        "large" | "large-v1" => Some("ggml-large-v1.bin"),
-        "large-v2" => Some("ggml-large-v2.bin"),
-        "large-v3" => Some("ggml-large-v3.bin"),
-        _ => None,
-    }
-}
-
-/// Map a Parakeet model name to its HuggingFace `(repo_id, .nemo filename)`.
-pub fn parakeet_nemo_info(model_name: &str) -> Option<(&'static str, String)> {
-    match model_name {
-        "parakeet-tdt-0.6b-v3" | "parakeet" => Some((
-            "nvidia/parakeet-tdt-0.6b-v3",
-            "parakeet-tdt-0.6b-v3.nemo".to_string(),
-        )),
-        "parakeet-tdt-1.1b" => Some((
-            "nvidia/parakeet-tdt-1.1b",
-            "parakeet-tdt-1.1b.nemo".to_string(),
-        )),
-        _ => None,
-    }
+    WHISPER_GGML_MODELS
+        .iter()
+        .find_map(|(name, filename)| if *name == size { Some(*filename) } else { None })
 }
 
 // ============================================================================
@@ -475,6 +625,10 @@ fn extract_tar_bz2(archive: &Path, dest_dir: &Path) -> Result<(), DownloadError>
 /// This normalises tarballs that wrap everything in a top-level folder (e.g.
 /// `sherpa-onnx-pyannote-segmentation-3-0/`) so downstream code sees files
 /// directly inside `seg_dir`.
+///
+/// NOTE: The tarball folder name still contains "pyannote" because that's the
+/// upstream archive naming from k2-fsa/sherpa-onnx. This is purely a filename
+/// concern and does not mean we depend on the pyannote Python library.
 fn flatten_single_subdir(dir: &Path) -> Result<(), DownloadError> {
     let entries: Vec<_> = std::fs::read_dir(dir)
         .map_err(DownloadError::Io)?
@@ -499,20 +653,53 @@ fn flatten_single_subdir(dir: &Path) -> Result<(), DownloadError> {
 }
 
 /// Returns `true` if any `.onnx` file exists anywhere under `dir`.
-fn has_onnx_files(dir: &Path) -> bool {
+fn has_onnx_with_prefix(dir: &Path, prefix: &str) -> bool {
+    let prefix_lc = prefix.to_ascii_lowercase();
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                if has_onnx_files(&p) {
-                    return true;
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|v| v.to_str()) {
+                    let lower_name = name.to_ascii_lowercase();
+                    if lower_name.starts_with(&prefix_lc) && lower_name.ends_with(".onnx") {
+                        return true;
+                    }
                 }
-            } else if p.extension().and_then(|e| e.to_str()) == Some("onnx") {
-                return true;
             }
         }
     }
     false
+}
+
+fn has_parakeet_required_files(dir: &Path) -> bool {
+    has_onnx_with_prefix(dir, "encoder") && has_onnx_with_prefix(dir, "decoder")
+}
+
+fn has_required_file(dir: &Path, file_name: &str) -> bool {
+    dir.join(file_name).exists()
+}
+
+fn cleanup_dir_if_exists(dir: &Path) -> Result<(), DownloadError> {
+    if dir.exists() {
+        std::fs::remove_dir_all(dir).map_err(DownloadError::Io)?;
+    }
+    Ok(())
+}
+
+fn list_model_files(dir: &Path) -> Vec<String> {
+    let mut found_files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|v| v.to_str()) {
+                    found_files.push(name.to_string());
+                }
+            }
+        }
+    }
+    found_files.sort();
+    found_files
 }
 
 /// Size of a single file in MiB.

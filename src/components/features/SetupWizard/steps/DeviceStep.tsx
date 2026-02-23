@@ -14,6 +14,8 @@ function getDeviceIcon(deviceType: string): React.ReactNode {
   switch (deviceType) {
     case "cuda":
       return <Zap className="h-5 w-5" aria-hidden="true" />;
+    case "vulkan":
+      return <Zap className="h-5 w-5" aria-hidden="true" />;
     case "mps":
       return <Monitor className="h-5 w-5" aria-hidden="true" />;
     case "cpu":
@@ -28,12 +30,14 @@ function getDeviceIcon(deviceType: string): React.ReactNode {
 function getPerformanceLabel(deviceType: string): string {
   switch (deviceType) {
     case "cuda":
-      return "⚡ Fastest";
+      return "Fastest";
+    case "vulkan":
+      return "Fast";
     case "mps":
-      return "🚀 Fast";
+      return "Fast";
     case "cpu":
     default:
-      return "🐢 Slow";
+      return "Slow";
   }
 }
 
@@ -44,6 +48,8 @@ function getDeviceTypeName(deviceType: string): string {
   switch (deviceType) {
     case "cuda":
       return "NVIDIA GPU (CUDA)";
+    case "vulkan":
+      return "AMD/Intel GPU (Vulkan)";
     case "mps":
       return "Apple Silicon (MPS)";
     case "cpu":
@@ -177,7 +183,7 @@ export function DeviceStep() {
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
           <p className="text-sm text-muted-foreground">
             <span className="font-medium text-foreground">Device priority:</span>{" "}
-            CUDA (NVIDIA GPU) → MPS (Apple Silicon) → CPU
+            CUDA (NVIDIA GPU) → MPS (Apple Silicon) → Vulkan (AMD/Intel GPU) → CPU
           </p>
           <p className="text-xs text-muted-foreground mt-1">
             Recommended device is selected automatically for maximum performance.

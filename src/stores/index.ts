@@ -86,6 +86,7 @@ interface TasksState {
   cancelTask: (taskId: string) => Promise<void>;
   setSpeakerSegments: (taskId: string, speakerSegments: TranscriptionSegment[], speakerTurns: SpeakerTurn[]) => void;
   updateSpeakerNameMap: (taskId: string, speakerNameMap: Record<string, string>) => void;
+  updateTaskFileName: (taskId: string, fileName: string) => void;
 }
 
 const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" | "archiveSettings" | "selectedTaskId"> = {
@@ -285,6 +286,17 @@ export const useTasks = create<TasksState>()(
           tasks: state.tasks.map((task) => (
             task.id === taskId
               ? { ...task, speakerNameMap }
+              : task
+          )),
+        }));
+      },
+
+      updateTaskFileName: (taskId, fileName) => {
+        logger.transcriptionInfo("Task filename updated", { taskId, fileName });
+        set((state) => ({
+          tasks: state.tasks.map((task) => (
+            task.id === taskId
+              ? { ...task, fileName }
               : task
           )),
         }));
@@ -616,6 +628,13 @@ export const useTasks = create<TasksState>()(
         // Validate diarization configuration
         const validatedOptions = { ...options };
 
+        const { useModelsStore } = await import("./modelsStore");
+        if (useModelsStore.getState().isModelPendingDeletion(validatedOptions.model)) {
+          throw new Error(
+            `Model "${validatedOptions.model}" is scheduled for deletion and cannot be used for new transcriptions. Select another model first.`,
+          );
+        }
+
         if (validatedOptions.enableDiarization) {
           // If diarization is enabled but provider is "none" or invalid, we need to handle it
           if (!validatedOptions.diarizationProvider || validatedOptions.diarizationProvider === "none") {
@@ -625,7 +644,7 @@ export const useTasks = create<TasksState>()(
               diarizationProvider: validatedOptions.diarizationProvider
             });
             throw new Error(
-              "Diarization is enabled but no provider is selected. Please install a diarization model (pyannote or sherpa-onnx) first."
+              "Diarization is enabled but no provider is selected. Please install the Sherpa-ONNX diarization model first."
             );
           }
         }
@@ -659,6 +678,21 @@ export const useTasks = create<TasksState>()(
         const task = get().tasks.find((t) => t.id === taskId);
         if (!task) {
           logger.transcriptionError("Task not found for retry", { taskId });
+          return;
+        }
+
+        const { useModelsStore } = await import("./modelsStore");
+        if (useModelsStore.getState().isModelPendingDeletion(task.options.model)) {
+          logger.transcriptionWarn("Retry blocked: model scheduled for deletion", {
+            taskId,
+            modelName: task.options.model,
+          });
+          get().updateTaskStatus(
+            taskId,
+            "failed",
+            undefined,
+            `Model "${task.options.model}" is scheduled for deletion and cannot be retried. Select another model.`,
+          );
           return;
         }
 

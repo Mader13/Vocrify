@@ -115,14 +115,7 @@ def sample_models() -> Dict[str, Dict[str, Any]]:
             "size_mb": 500,
             "repo_id": "guillaumekln/faster-whisper-small",
         },
-        "pyannote-diarization": {
-            "name": "pyannote/speaker-diarization-3.1",
-            "type": "diarization",
-            "size_mb": 400,
-            "repo_id": "pyannote/speaker-diarization-3.1",
-            "requires_token": True,
-        },
-        "sherpa-onnx": {
+        "sherpa-onnx-diarization": {
             "name": "sherpa-onnx-diarization",
             "type": "diarization",
             "size_mb": 100,

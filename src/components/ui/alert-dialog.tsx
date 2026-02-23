@@ -91,30 +91,26 @@ AlertDialogDescription.displayName = "AlertDialogDescription";
 const AlertDialogAction = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ className, ...props }, ref) => {
-  return (
-    <Button
-      ref={ref}
-      className={cn(className)}
-      {...props}
-    />
-  );
-});
+>(({ className, ...props }, ref) => (
+  <Button
+    ref={ref}
+    className={cn(className)}
+    {...props}
+  />
+));
 AlertDialogAction.displayName = "AlertDialogAction";
 
 const AlertDialogCancel = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ className, ...props }, ref) => {
-  return (
-    <Button
-      ref={ref}
-      variant="outline"
-      className={cn(className)}
-      {...props}
-    />
-  );
-});
+>(({ className, ...props }, ref) => (
+  <Button
+    ref={ref}
+    variant="outline"
+    className={cn(className)}
+    {...props}
+  />
+));
 AlertDialogCancel.displayName = "AlertDialogCancel";
 
 export {

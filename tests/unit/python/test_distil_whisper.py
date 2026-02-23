@@ -558,7 +558,7 @@ class TestDistilWhisperEdgeCases:
     def test_diarization_provider_default(self):
         """Test default diarization provider."""
         model = DistilWhisperModel()
-        assert model.diarization_provider == "pyannote"
+        assert model.diarization_provider == "sherpa-onnx"
 
     def test_diarization_provider_sherpa(self):
         """Test sherpa-onnx diarization provider."""

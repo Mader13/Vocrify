@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
@@ -40,8 +41,26 @@ interface DialogProps extends React.HTMLAttributes<HTMLDivElement>,
   onOpenChange: (open: boolean) => void;
 }
 
+const createPortalRoot = () => {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  let portalElement = document.getElementById("dialog-portal");
+
+  if (!portalElement) {
+    portalElement = document.createElement("div");
+    portalElement.id = "dialog-portal";
+    document.body.appendChild(portalElement);
+  }
+
+  return portalElement;
+};
+
 const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
   ({ className, open, onOpenChange, children, onClick, ...props }, ref) => {
+    const portalRoot = React.useMemo(() => createPortalRoot(), []);
+
     if (!open) return null;
 
     const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -51,15 +70,15 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
       }
     };
 
-    return (
+    const dialog = (
       <div
         ref={ref}
         className={cn(dialogVariants(), className)}
         onClick={handleBackdropClick}
         {...props}
       >
-        <div 
-          className="absolute inset-0 z-0 bg-black/50" 
+        <div
+          className="absolute inset-0 z-0 bg-black/50"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
               onOpenChange(false);
@@ -69,7 +88,13 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
         {children}
       </div>
     );
-  }
+
+    if (portalRoot) {
+      return createPortal(dialog, portalRoot);
+    }
+
+    return dialog;
+  },
 );
 Dialog.displayName = "Dialog";
 

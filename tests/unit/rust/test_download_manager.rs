@@ -527,12 +527,12 @@ mod tests {
 
         // Test diarization models
         let diarization_models = vec![
-            "pyannote/speaker-diarization-3.1",
             "sherpa-onnx-diarization",
+            "sherpa-onnx-segmentation",
         ];
 
         for model in diarization_models {
-            let is_diarization = model.contains("pyannote") || model.contains("diarization");
+            let is_diarization = model.contains("diarization") || model.starts_with("sherpa-onnx-");
             assert!(is_diarization, "Model {} should be detected as diarization", model);
         }
     }

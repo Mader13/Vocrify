@@ -126,9 +126,20 @@ export function FFmpegStep() {
               <summary className="cursor-pointer text-sm text-primary hover:underline">
                 Manual installation instructions
               </summary>
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 space-y-4">
+                {/* Windows - Winget (recommended) */}
                 <div className="space-y-2">
-                  <p className="font-medium text-foreground">Windows:</p>
+                  <p className="font-medium text-foreground">
+                    Windows (recommended - winget):
+                  </p>
+                  <div className="bg-muted rounded-md p-3 font-mono text-xs">
+                    <code>winget install -e --id Gyan.FFmpeg</code>
+                  </div>
+                </div>
+
+                {/* Windows - Manual */}
+                <div className="space-y-2">
+                  <p className="font-medium text-foreground">Windows (manual):</p>
                   <ol className="list-decimal list-inside space-y-1 ml-2">
                     <li>
                       Download from{" "}
@@ -142,9 +153,16 @@ export function FFmpegStep() {
                         <ExternalLink className="h-3 w-3" />
                       </a>
                     </li>
-                    <li>Extract to a folder (e.g. `C:\\ffmpeg`).</li>
-                    <li>Add `C:\\ffmpeg\\bin` to `PATH`.</li>
+                    <li>Extract to a folder (e.g. `C:\ffmpeg`).</li>
+                    <li>Add `C:\ffmpeg\bin` to `PATH`.</li>
                   </ol>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="font-medium text-foreground">Windows (Chocolatey):</p>
+                  <div className="bg-muted rounded-md p-3 font-mono text-xs">
+                    <code>choco install ffmpeg</code>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

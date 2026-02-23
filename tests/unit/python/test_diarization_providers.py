@@ -1,7 +1,7 @@
 """
 Unit tests for diarization providers.
 
-Tests both pyannote and sherpa-onnx diarization implementations.
+Tests sherpa-onnx diarization implementation.
 """
 
 import pytest
@@ -15,73 +15,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "ai-engine"))
 
 
-class TestPyannoteDiarization:
-    """Test PyAnnote diarization provider."""
-
-    def test_pyannote_requires_token(self):
-        """Test that pyannote raises clear error without token."""
-        from models.whisper import WhisperModel
-
-        model = WhisperModel(
-            device="cpu",
-            model_size="base",
-            diarization_provider="pyannote",
-            num_speakers=-1,
-        )
-
-        # Ensure HF_TOKEN is not set
-        os.environ.pop("HF_TOKEN", None)
-        os.environ.pop("HUGGINGFACE_ACCESS_TOKEN", None)
-
-        # Mock audio file
-        audio_path = "test_audio.wav"
-
-        # Mock transcribe to return segments
-        with patch.object(model, "transcribe", return_value=[
-            {"start": 0.0, "end": 2.5, "text": "Hello"}
-        ]):
-            # Attempt diarization without token
-            with pytest.raises(Exception) as exc_info:
-                model.diarize([{"start": 0.0, "end": 2.5, "text": "Hello"}], audio_path)
-
-            # Verify error message is clear
-            assert "token" in str(exc_info.value).lower() or "huggingface" in str(exc_info.value).lower()
-
-    def test_pyannote_with_token(self):
-        """Test that pyannote works with valid token."""
-        from models.whisper import WhisperModel
-
-        # Set fake token
-        os.environ["HF_TOKEN"] = "test_token_12345"
-
-        model = WhisperModel(
-            device="cpu",
-            model_size="base",
-            diarization_provider="pyannote",
-            num_speakers=-1,
-        )
-
-        # Mock the diarization pipeline
-        mock_pipeline = MagicMock()
-        mock_pipeline.return_value = MagicMock()
-
-        segments = [
-            {"start": 0.0, "end": 2.5, "text": "Hello speaker one"},
-            {"start": 2.5, "end": 5.0, "text": "Hello speaker two"},
-        ]
-
-        # Test that diarization is attempted (will fail without actual models, but that's ok)
-        # We're just testing the flow here
-        assert model.diarization_provider == "pyannote"
-
-        # Cleanup
-        os.environ.pop("HF_TOKEN", None)
-
-
 class TestSherpaOnnxDiarization:
     """Test Sherpa-ONNX diarization provider."""
 
-    def test Sherpa_onnx_does_not_require_token(self):
+    def test_sherpa_onnx_does_not_require_token(self):
         """Test that sherpa-onnx works without HF token."""
         from models.sherpa_diarization import SherpaOnnxDiarization
 
@@ -130,24 +67,6 @@ class TestSherpaOnnxDiarization:
 class TestDiarizationIntegration:
     """Test diarization integration with Whisper model."""
 
-    def test_whisper_with_pyannote_provider(self):
-        """Test Whisper model initialization with pyannote provider."""
-        from models.whisper import WhisperModel
-
-        os.environ["HF_TOKEN"] = "test_token"
-
-        model = WhisperModel(
-            device="cpu",
-            model_size="base",
-            diarization_provider="pyannote",
-            num_speakers=2,
-        )
-
-        assert model.diarization_provider == "pyannote"
-        assert model.num_speakers == 2
-
-        os.environ.pop("HF_TOKEN", None)
-
     def test_whisper_with_sherpa_provider(self):
         """Test Whisper model initialization with sherpa-onnx provider."""
         from models.whisper import WhisperModel
@@ -176,12 +95,26 @@ class TestDiarizationIntegration:
         # Should not raise any errors
         assert model is not None
 
+    def test_whisper_with_sherpa_num_speakers(self):
+        """Test Whisper model initialization with sherpa-onnx provider and num_speakers."""
+        from models.whisper import WhisperModel
+
+        model = WhisperModel(
+            device="cpu",
+            model_size="base",
+            diarization_provider="sherpa-onnx",
+            num_speakers=2,
+        )
+
+        assert model.diarization_provider == "sherpa-onnx"
+        assert model.num_speakers == 2
+
 
 class TestModelFactory:
     """Test model factory with diarization parameters."""
 
-    def test_factory_creates_whisper_with_diarization(self):
-        """Test that ModelFactory passes diarization params to Whisper."""
+    def test_factory_creates_whisper_with_sherpa_diarization(self):
+        """Test that ModelFactory passes sherpa-onnx diarization params to Whisper."""
         from factory import ModelFactory
 
         # Mock WhisperModel to avoid actual initialization
@@ -192,7 +125,7 @@ class TestModelFactory:
             ModelFactory.create(
                 model_name="whisper-base",
                 device="cpu",
-                diarization_provider="pyannote",
+                diarization_provider="sherpa-onnx",
                 num_speakers=3,
             )
 
@@ -201,7 +134,7 @@ class TestModelFactory:
             call_kwargs = MockWhisper.call_args[1]
 
             assert call_kwargs["device"] == "cpu"
-            assert call_kwargs["diarization_provider"] == "pyannote"
+            assert call_kwargs["diarization_provider"] == "sherpa-onnx"
             assert call_kwargs["num_speakers"] == 3
 
 
@@ -215,7 +148,7 @@ class TestDiarizationOutput:
         model = WhisperModel(
             device="cpu",
             model_size="base",
-            diarization_provider="pyannote",
+            diarization_provider="sherpa-onnx",
             num_speakers=2,
         )
 
@@ -226,7 +159,7 @@ class TestDiarizationOutput:
         ]
 
         # Mock diarization to add speaker labels
-        with patch.object(model, "_run_pyannote_diarization", return_value=[
+        with patch.object(model, "_run_sherpa_diarization", return_value=[
             (0.0, 2.5, 0),
             (2.5, 5.0, 1),
         ]):
@@ -252,7 +185,7 @@ class TestDiarizationOutput:
         ]
 
         # Mock diarization
-        with patch.object(model, "_run_pyannote_diarization", return_value=[
+        with patch.object(model, "_run_sherpa_diarization", return_value=[
             (0.0, 2.5, 2),  # Speaker ID 2
         ]):
             result = model.diarize(segments, "test.wav")

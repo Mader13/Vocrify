@@ -15,7 +15,7 @@ import {
 import { sanitizeSegments } from "@/lib/segment-utils";
 import { getAssetUrl, readFileAsBase64 } from "@/services/tauri";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
-import { usePlaybackSync } from "@/hooks/usePlaybackSync";
+import { usePlaybackController } from "@/hooks/usePlaybackController";
 
 /**
  * Convert base64 string to Blob
@@ -167,53 +167,123 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [isWaveformHovered, setIsWaveformHovered] = React.useState(false);
   const [hoverPreviewTime, setHoverPreviewTime] = React.useState<number | null>(null);
-  const [currentTime, setCurrentTime] = React.useState(0);
-  const [duration, setDuration] = React.useState(0);
   const [waveformWidth, setWaveformWidth] = React.useState(0);
   const [overlayWidth, setOverlayWidth] = React.useState(0);
-  const [isPlaying, setIsPlaying] = React.useState(false);
-  const [volume, setVolume] = React.useState(1);
-  const [playbackRate, setPlaybackRate] = React.useState(1);
   const [videoAspectRatio, setVideoAspectRatio] = React.useState(DEFAULT_VIDEO_ASPECT_RATIO);
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Playback sync with store
+  // Check if video element should be shown (needed for controller)
+  // Show video if: not archived OR archived with keep_all mode (has video file)
+  const showVideoElement = React.useMemo(() => {
+    if (!task.archived) {
+      return !!task.filePath && task.filePath.length > 0;
+    }
+    // For archived tasks, show video only if keep_all mode (filePath contains archived video)
+    return task.archiveMode === "keep_all" && !!task.filePath && task.filePath.length > 0;
+  }, [task.filePath, task.archived, task.archiveMode]);
+
+  // Playback controller - Single Source of Truth for playback
+  // Replaces usePlaybackSync to prevent bidirectional seek loops
   const {
-    handlePlay: syncHandlePlay,
-    handlePause: syncHandlePause,
-    handleTimeUpdate: syncHandleTimeUpdate,
-    handleDurationChange: syncHandleDurationChange,
-  } = usePlaybackSync({
+    currentTime: controllerCurrentTime,
+    duration: controllerDuration,
+    isPlaying: controllerIsPlaying,
+    volume: controllerVolume,
+    playbackRate: controllerPlaybackRate,
+    togglePlayPause: controllerTogglePlayPause,
+    setVolume: controllerSetVolume,
+    setPlaybackRate: controllerSetPlaybackRate,
+    seekTo: controllerSeekTo,
+  } = usePlaybackController({
     taskId: task.id,
     fileName: task.fileName,
     videoRef: internalVideoRef,
     wavesurferRef: wavesurferRef,
     isWaveformReady,
+    hasVideoElement: showVideoElement,
   });
+
+  // Local state derived from controller for UI rendering
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [duration, setDuration] = React.useState(0);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [volume, setVolume] = React.useState(1);
+  const [playbackRate, setPlaybackRate] = React.useState(1);
+
+  // Update local state from controller
+  React.useEffect(() => {
+    setCurrentTime(controllerCurrentTime);
+  }, [controllerCurrentTime]);
+
+  React.useEffect(() => {
+    setDuration(controllerDuration);
+  }, [controllerDuration]);
+
+  React.useEffect(() => {
+    setIsPlaying(controllerIsPlaying);
+  }, [controllerIsPlaying]);
+
+  React.useEffect(() => {
+    setVolume(controllerVolume);
+  }, [controllerVolume]);
+
+  React.useEffect(() => {
+    setPlaybackRate(controllerPlaybackRate);
+  }, [controllerPlaybackRate]);
 
   // Lazy initialization flag - only load waveform when component is visible
   const [shouldInitializeWaveform, setShouldInitializeWaveform] = React.useState(false);
+  const shouldInitializeWaveformRef = useRef(shouldInitializeWaveform);
+  useEffect(() => {
+    shouldInitializeWaveformRef.current = shouldInitializeWaveform;
+  }, [shouldInitializeWaveform]);
+
+  // Safe requestIdleCallback fallback for environments where it's not available
+  const safeRequestIdleCallback = (callback: () => void): number => {
+    if (typeof requestIdleCallback !== 'undefined') {
+      return requestIdleCallback(callback);
+    }
+    // Fallback to setTimeout for environments without requestIdleCallback
+    return window.setTimeout(callback, 100);
+  };
+
+  const safeCancelIdleCallback = (id: number): void => {
+    if (typeof cancelIdleCallback !== 'undefined') {
+      cancelIdleCallback(id);
+    } else {
+      window.clearTimeout(id);
+    }
+  };
 
   // Use Intersection Observer to defer waveform loading until visible
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
+    let idleCallbackId: number | null = null;
+
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
-          // Defer initialization using requestIdleCallback for better performance
-          const initId = requestIdleCallback(() => {
-            setShouldInitializeWaveform(true);
-          });
-          return () => cancelIdleCallback(initId);
+        if (!entries[0].isIntersecting || shouldInitializeWaveformRef.current || idleCallbackId !== null) {
+          return;
         }
+
+        idleCallbackId = safeRequestIdleCallback(() => {
+          shouldInitializeWaveformRef.current = true;
+          setShouldInitializeWaveform(true);
+          idleCallbackId = null;
+        });
       },
       { threshold: 0.1 }
     );
 
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (idleCallbackId !== null) {
+        safeCancelIdleCallback(idleCallbackId);
+      }
+    };
   }, []);
 
   // Expose video element via ref
@@ -242,16 +312,6 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     console.log("[VideoPlayer DEBUG] assetUrl generated:", { filePath: mediaPath, url });
     return url;
   }, [mediaPath]);
-
-  // Check if video element should be shown
-  // Show video if: not archived OR archived with keep_all mode (has video file)
-  const showVideoElement = React.useMemo(() => {
-    if (!task.archived) {
-      return !!task.filePath && task.filePath.length > 0;
-    }
-    // For archived tasks, show video only if keep_all mode (filePath contains archived video)
-    return task.archiveMode === "keep_all" && !!task.filePath && task.filePath.length > 0;
-  }, [task.filePath, task.archived, task.archiveMode]);
 
   useEffect(() => {
     if (!showVideoElement) {
@@ -337,6 +397,11 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
             drag: false,
             resize: false,
           });
+          const allRegions = regions.getRegions();
+          const latestRegion = allRegions[allRegions.length - 1];
+          if (latestRegion?.element) {
+            latestRegion.element.style.pointerEvents = "none";
+          }
         } catch (e) {
           console.error("[VideoPlayer] Error adding segment region:", e);
         }
@@ -428,6 +493,9 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
             drag: false,
             resize: false,
           });
+          if (region.element) {
+            region.element.style.pointerEvents = "none";
+          }
           addedRegions.push(region);
           regionCount++;
         } catch (e) {
@@ -517,6 +585,7 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       barRadius: 2,
       minPxPerSec: 0.5,   // Limit detail level for performance
       backend: 'WebAudio', // Use WebAudio for better performance
+      dragToSeek: { debounceTime: 0 },
       // Mute WaveSurfer when a <video> element exists: WaveSurfer is used only for
       // waveform visualization; audio comes exclusively from the <video> element.
       // Without this, both play simultaneously causing duplicate audio.
@@ -667,16 +736,16 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
           // Set duration for audio-only tasks (when no video element)
           const videoEl = internalVideoRef.current;
-          if (!videoEl) {
+          if (!videoEl && ws) {
             const wsDuration = ws.getDuration();
             if (Number.isFinite(wsDuration) && wsDuration > 0) {
               setDuration(wsDuration);
-              syncHandleDurationChange(wsDuration);
             }
           }
 
           // Sync waveform cursor with current video position once waveform is ready
-          if (videoEl) {
+          // Only on initial load - this won't cause loops since it's not in a recurring event
+          if (videoEl && ws) {
             const duration = videoEl.duration;
             if (Number.isFinite(duration) && duration > 0) {
               const ratio = videoEl.currentTime / duration;
@@ -698,37 +767,34 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
           console.log("[VideoPlayer DEBUG] WaveSurfer loading:", percent + "%");
         });
 
-        // Event: Region click - seek video
-        if (regionsRef.current) {
-          regionsRef.current.on("region-clicked", (region: any) => {
-            const videoEl = internalVideoRef.current;
-            if (videoEl) {
-              videoEl.currentTime = region.start;
-              if (videoEl.paused) {
-                videoEl.play();
-              }
-            }
-          });
-        }
+        // REMOVED: syncSeekPosition function - no longer needed
+        // REMOVED: ws.on("seeking", ...) - this caused bidirectional loop!
+        // The "seeking" event fires on ALL seeks (including programmatic ws.seekTo), 
+        // which created: video timeupdate -> ws.seekTo -> ws.seeking -> video.currentTime -> loop
+        
+        const handleWaveformUserSeek = (ratio: number) => {
+          const dur = ws?.getDuration?.() ?? 0;
+          if (dur <= 0) return;
 
-        // Event: Waveform click - seek video
-        ws.on("interaction", (position: number) => {
-          const videoEl = internalVideoRef.current;
-          if (videoEl) {
-            videoEl.currentTime = position;
-          }
-          // Also sync time to store - for audio-only tasks or when seeking while paused
-          // Use position directly since ws gives us the time position directly
-          setCurrentTime(position);
-          onTimeUpdate?.(position);
-          syncHandleTimeUpdate(position);
-        });
+          const clampedRatio = Math.max(0, Math.min(1, ratio));
+          const nextTime = clampedRatio * dur;
 
-        // Event: Time update from WaveSurfer (more accurate than video for cursor)
+          controllerSeekTo(nextTime, "waveform");
+          setCurrentTime(nextTime);
+          onTimeUpdate?.(nextTime);
+        };
+
+        // User seeks via waveform interactions
+        ws.on("interaction", handleWaveformUserSeek);
+        ws.on("drag", handleWaveformUserSeek);
+
+        // Event: Time update from WaveSurfer (for audio-only tasks)
         ws.on("timeupdate", (time: number) => {
-          setCurrentTime(time);
-          onTimeUpdate?.(time);
-          syncHandleTimeUpdate(time);
+          // Only use WS time for audio-only tasks
+          if (!showVideoElement) {
+            setCurrentTime(time);
+            onTimeUpdate?.(time);
+          }
         });
       } catch (error) {
         console.error("[VideoPlayer DEBUG] Failed to create WaveSurfer:", error);
@@ -738,7 +804,13 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
     initWaveSurfer();
 
-    // Event: Video time update - sync waveform
+    // FIX #4: Safe waveform cursor sync - use flag to prevent loops
+    // The issue was using ws.on("seeking") which fires on ALL seeks (including programmatic)
+    // Instead, we sync only from timeupdate (playback progress) with a flag to detect self-seeks
+    const isSelfSeekRef = { current: false };
+
+    // Event: Video time update - update UI state and sync waveform cursor
+    // Only sync waveform during playback (not during seek) to prevent loops
     const handleTimeUpdate = () => {
       const videoEl = internalVideoRef.current;
       if (!videoEl) return;
@@ -747,27 +819,39 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       const hasDuration = Number.isFinite(videoDuration) && videoDuration > 0;
       if (hasDuration) {
         setDuration(videoDuration);
-        syncHandleDurationChange(videoDuration);
       }
 
       setCurrentTime(videoEl.currentTime);
       onTimeUpdate?.(videoEl.currentTime);
-      syncHandleTimeUpdate(videoEl.currentTime);
+      
+      // Safe sync: only update waveform cursor during normal playback, not during seeks
+      // Use isSelfSeekRef flag to detect programmatic seeks
+      if (!isSelfSeekRef.current && ws && hasDuration) {
+        const ratio = videoEl.currentTime / videoDuration;
+        if (Number.isFinite(ratio)) {
+          ws.seekTo(ratio);
+        }
+      }
+    };
 
-      // Skip waveform seeking until WaveSurfer is ready.
-      if (!ws || !isWaveformReadyRef.current || !hasDuration) return;
-
-      const ratio = videoEl.currentTime / videoDuration;
-      // Skip if ratio is not finite (defensive check)
-      if (!Number.isFinite(ratio)) return;
-
-      ws.seekTo(ratio);
+    // Also handle seeked events - they fire after user seeks
+    // Mark as self-seek to prevent waveform sync during the seek
+    const handleSeekStart = () => {
+      isSelfSeekRef.current = true;
+    };
+    
+    const handleSeeked = () => {
+      // Reset the flag after a short delay to allow the seek to complete
+      setTimeout(() => {
+        isSelfSeekRef.current = false;
+      }, 50);
+      handleTimeUpdate();
     };
 
     if (video) {
       video.addEventListener("timeupdate", handleTimeUpdate);
-      // Also listen for seeked events - they fire after user seeks (even when paused)
-      video.addEventListener("seeked", handleTimeUpdate);
+      video.addEventListener("seeked", handleSeeked);
+      video.addEventListener("seeking", handleSeekStart);
     }
 
     // Cleanup
@@ -776,11 +860,33 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
       isWaveformReadyRef.current = false;
       if (video) {
         video.removeEventListener("timeupdate", handleTimeUpdate);
-        video.removeEventListener("seeked", handleTimeUpdate);
+        video.removeEventListener("seeked", handleSeeked);
+        video.removeEventListener("seeking", handleSeekStart);
       }
       ws?.destroy();
     };
-  }, [generateRegions, onTimeUpdate, mediaPath, shouldInitializeWaveform]);
+  }, [generateRegions, onTimeUpdate, mediaPath, shouldInitializeWaveform, showVideoElement, controllerSeekTo]);
+
+  useEffect(() => {
+    const videoEl = internalVideoRef.current;
+    if (!videoEl) return;
+
+    const handleDurationUpdate = () => {
+      const nextDuration = videoEl.duration;
+      if (!Number.isFinite(nextDuration) || nextDuration <= 0) return;
+
+      setDuration(nextDuration);
+    };
+
+    videoEl.addEventListener("loadedmetadata", handleDurationUpdate);
+    videoEl.addEventListener("durationchange", handleDurationUpdate);
+    handleDurationUpdate();
+
+    return () => {
+      videoEl.removeEventListener("loadedmetadata", handleDurationUpdate);
+      videoEl.removeEventListener("durationchange", handleDurationUpdate);
+    };
+  }, [assetUrl, showVideoElement]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -835,14 +941,13 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     const videoElement = internalVideoRef.current;
 
     // For audio-only tasks, use WaveSurfer events
+    // Note: Controller handles play/pause state, these listeners just update local state
     if (!videoElement && ws) {
       const handlePlay = () => {
         setIsPlaying(true);
-        syncHandlePlay();
       };
       const handlePause = () => {
         setIsPlaying(false);
-        syncHandlePause();
       };
 
       ws.on("play", handlePlay);
@@ -859,13 +964,12 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
 
     if (!videoElement) return;
 
+    // For video tasks - controller handles state, we just sync local state
     const handlePlay = () => {
       setIsPlaying(true);
-      syncHandlePlay();
     };
     const handlePause = () => {
       setIsPlaying(false);
-      syncHandlePause();
     };
 
     videoElement.addEventListener("play", handlePlay);
@@ -895,46 +999,18 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     videoElement.playbackRate = playbackRate;
   }, [playbackRate]);
 
-  // Playback control handlers
+  // Playback control handlers - use controller for authoritative actions
   const handleTogglePlayPause = useCallback(() => {
-    const videoElement = internalVideoRef.current;
-    const ws = wavesurferRef.current;
-
-    // For audio-only (archived) tasks, use WaveSurfer directly
-    if (!videoElement && ws) {
-      const wasPlaying = ws.isPlaying();
-      if (wasPlaying) {
-        ws.pause();
-      } else {
-        ws.play();
-      }
-      setIsPlaying(!wasPlaying);
-      return;
-    }
-
-    if (!videoElement) return;
-
-    // Update state immediately based on current paused state
-    // paused = true means NOT playing, so isPlaying = !paused
-    const wasPaused = videoElement.paused;
-    if (wasPaused) {
-      videoElement.play().catch((err) => {
-        console.error("[VideoPlayer] Play failed:", err);
-        setIsPlaying(false);
-      });
-    } else {
-      videoElement.pause();
-    }
-    setIsPlaying(!wasPaused);
-  }, []);
+    controllerTogglePlayPause();
+  }, [controllerTogglePlayPause]);
 
   const handleVolumeChange = useCallback((newVolume: number) => {
-    setVolume(newVolume);
-  }, []);
+    controllerSetVolume(newVolume);
+  }, [controllerSetVolume]);
 
   const handlePlaybackRateChange = useCallback((newRate: number) => {
-    setPlaybackRate(newRate);
-  }, []);
+    controllerSetPlaybackRate(newRate);
+  }, [controllerSetPlaybackRate]);
 
   const cursorRatio = duration > 0 ? Math.min(Math.max(currentTime / duration, 0), 1) : 0;
   const cursorPosition = waveformWidth * cursorRatio;

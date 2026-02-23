@@ -139,27 +139,21 @@ class TestHuggingFaceDownload:
     @patch('huggingface_hub.snapshot_download')
     @patch('main.validate_cache_dir')
     @patch('main.validate_model_name')
-    def test_huggingface_download_with_token(self, mock_validate_name, mock_validate_cache, mock_snapshot, tmp_path):
-        """Test HuggingFace download with authentication token."""
-        mock_validate_name.return_value = "pyannote/speaker-diarization"
+    def test_huggingface_download_with_sherpa_model(self, mock_validate_name, mock_validate_cache, mock_snapshot, tmp_path):
+        """Test download of sherpa-onnx diarization model."""
+        mock_validate_name.return_value = "sherpa-onnx-diarization"
         mock_validate_cache.return_value = True
         mock_snapshot.return_value = "/fake/path"
 
-        # Create temporary token file
-        token_file = tmp_path / "token.txt"
-        token_file.write_text("fake_token_12345")
-
-        with patch('main.get_model_size_mb', return_value=500):
+        with patch('main.get_model_size_mb', return_value=100):
             download_model(
-                model_name="pyannote/speaker-diarization",
+                model_name="sherpa-onnx-diarization",
                 cache_dir="/fake/cache",
                 model_type="diarization",
-                token_file=str(token_file)
             )
 
-        # Verify login was called
+        # Verify snapshot_download was called
         mock_snapshot.assert_called_once()
-        # Note: actual token handling happens inside snapshot_download
 
     @patch('huggingface_hub.snapshot_download')
     @patch('main.validate_cache_dir')
@@ -541,7 +535,7 @@ class TestValidation:
             "whisper-small",
             "whisper-medium",
             "whisper-large-v3",
-            "pyannote-speaker-diarization-v3",  # No dots - only letters, numbers, underscore, hyphen
+            "sherpa-onnx-speaker-diarization-v3",  # No dots - only letters, numbers, underscore, hyphen
         ]
 
         for name in valid_names:

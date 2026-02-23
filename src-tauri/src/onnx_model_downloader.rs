@@ -188,21 +188,39 @@ pub fn is_onnx_model_downloaded(model_type: OnnxModelType, models_dir: &Path) ->
 
 /// Check if Parakeet model is valid (has required files)
 pub fn is_parakeet_model_valid(models_dir: &Path) -> bool {
-    let parakeet_dir = models_dir.join("parakeet-v0.3");
-    if !parakeet_dir.is_dir() {
-        return false;
-    }
-    // Check for essential model files - parakeet needs encoder.onnx and decoder.onnx
-    let required_files = ["encoder.onnx", "decoder.onnx"];
-    for filename in &required_files {
-        let path = parakeet_dir.join(filename);
-        if !path.exists() {
-            eprintln!("[WARN] Incomplete Parakeet model (missing {}), removing...", filename);
-            let _ = std::fs::remove_dir_all(&parakeet_dir);
-            return false;
+    // Check multiple possible Parakeet model directories
+    let parakeet_dirs = ["parakeet-v0.3", "parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v3-int8"];
+
+    for dir_name in &parakeet_dirs {
+        let parakeet_dir = models_dir.join(dir_name);
+        if !parakeet_dir.is_dir() {
+            continue;
+        }
+
+        // Check for essential model files - multiple naming conventions
+        let has_encoder = parakeet_dir.join("encoder.onnx").exists()
+            || parakeet_dir.join("encoder-model.onnx").exists()
+            || parakeet_dir.join("encoder-model.int8.onnx").exists()
+            || parakeet_dir.join("encoder-int8.onnx").exists();
+        let has_decoder = parakeet_dir.join("decoder.onnx").exists()
+            || parakeet_dir.join("decoder_joint.onnx").exists()
+            || parakeet_dir.join("decoder_joint-model.onnx").exists()
+            || parakeet_dir.join("decoder_joint-model.int8.onnx").exists();
+
+        if has_encoder && has_decoder {
+            return true;
         }
     }
-    true
+
+    // No valid Parakeet model found - check if we should clean up incomplete dir
+    for dir_name in &parakeet_dirs {
+        let parakeet_dir = models_dir.join(dir_name);
+        if parakeet_dir.is_dir() {
+            eprintln!("[WARN] Incomplete Parakeet model in {:?}, removing...", parakeet_dir);
+            let _ = std::fs::remove_dir_all(&parakeet_dir);
+        }
+    }
+    false
 }
 
 /// Check if SenseVoice model is valid (has required files)

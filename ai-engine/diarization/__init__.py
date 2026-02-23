@@ -1,7 +1,7 @@
 """
 Speaker diarization module.
 
-Provides multiple diarization backends: Sherpa-ONNX and PyAnnote.
+Provides Sherpa-ONNX diarization backend.
 """
 
 from typing import Optional
@@ -17,14 +17,6 @@ except ImportError:
     SHERPA_AVAILABLE = False
     SherpaDiarizer = None
 
-try:
-    from .pyannote_diarizer import PyAnnoteDiarizer
-
-    PYANNOTE_AVAILABLE = True
-except ImportError:
-    PYANNOTE_AVAILABLE = False
-    PyAnnoteDiarizer = None
-
 
 def get_diarizer(
     provider: str, device: str = "cpu", **kwargs
@@ -33,7 +25,7 @@ def get_diarizer(
     Factory function to get a diarization provider.
 
     Args:
-        provider: Provider name ('sherpa', 'pyannote', 'none')
+        provider: Provider name ('sherpa', 'sherpa-onnx', or 'none')
         device: Device to run on ('cpu' or 'cuda')
         **kwargs: Additional provider-specific arguments
 
@@ -66,13 +58,6 @@ def get_diarizer(
             )
         return SherpaDiarizer(device=device, **kwargs)
 
-    elif provider == "pyannote":
-        if not PYANNOTE_AVAILABLE:
-            raise ValueError(
-                "PyAnnote diarization not available. Install pyannote.audio."
-            )
-        return PyAnnoteDiarizer(device=device, **kwargs)
-
     else:
         raise ValueError(f"Unknown diarization provider: {provider}")
 
@@ -80,8 +65,6 @@ def get_diarizer(
 __all__ = [
     "BaseDiarizer",
     "SherpaDiarizer",
-    "PyAnnoteDiarizer",
     "get_diarizer",
     "SHERPA_AVAILABLE",
-    "PYANNOTE_AVAILABLE",
 ]

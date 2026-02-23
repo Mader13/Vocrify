@@ -53,7 +53,7 @@ class DiarizationMixin:
         Initialize a diarization provider.
 
         Args:
-            provider: Diarization provider ('sherpa', 'pyannote', 'none')
+            provider: Diarization provider ('sherpa', 'sherpa-onnx', or 'none')
             device: Device to run on ('cpu' or 'cuda')
         """
         if provider == "none" or not provider:
@@ -134,7 +134,7 @@ class BaseModel(ABC, DiarizationMixin):
 
         Args:
             device: Device to run inference on ('cpu' or 'cuda')
-            diarization_provider: Diarization provider ('sherpa', 'pyannote', 'none')
+            diarization_provider: Diarization provider ('sherpa', 'sherpa-onnx', or 'none')
             download_root: Directory for model downloads (for diarization models)
         """
         super().__init__()

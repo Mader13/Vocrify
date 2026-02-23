@@ -51,6 +51,8 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
     [isDropEnabled, currentView, validateModelSelection, onFilesDropped],
   );
 
+  // Tauri native - only source for handling actual file drops
+  // Document-level handlers removed - they duplicate Tauri native and cause triple processing
   useEffect(() => {
     if (!isDropEnabled) return;
 
@@ -101,52 +103,6 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
     };
   }, [isDropEnabled, processFiles, setDraggingGlobal]);
 
-  useEffect(() => {
-    if (!isDropEnabled) return;
-
-    const handleDocumentDragOver = (e: DragEvent) => {
-      e.preventDefault();
-      logger.uploadDebug("[Drag] Document dragover");
-      if (e.dataTransfer?.types.includes('Files')) {
-        setDraggingGlobal(true);
-      }
-    };
-
-    const handleDocumentDragLeave = (e: DragEvent) => {
-      if (e.relatedTarget === null) {
-        logger.uploadDebug("[Drag] Document dragleave (leaving window)");
-        setDraggingGlobal(false);
-      }
-    };
-
-    const handleDocumentDrop = (e: DragEvent) => {
-      e.preventDefault();
-      logger.uploadDebug("[Drag] Document drop");
-      setDraggingGlobal(false);
-
-      const droppedFiles: SelectedFile[] = Array.from(e.dataTransfer?.files || []).map((file) => ({
-        path: (file as { path?: string }).path || file.name,
-        name: file.name,
-        size: file.size,
-      }));
-
-      logger.uploadDebug("[Drag] Dropped files count:", { count: droppedFiles.length });
-      processFiles(droppedFiles, "document");
-    };
-
-    logger.uploadDebug("[Drag] Adding global document drag handlers");
-    document.addEventListener('dragover', handleDocumentDragOver);
-    document.addEventListener('dragleave', handleDocumentDragLeave);
-    document.addEventListener('drop', handleDocumentDrop);
-
-    return () => {
-      logger.uploadDebug("[Drag] Removing global document drag handlers");
-      document.removeEventListener('dragover', handleDocumentDragOver);
-      document.removeEventListener('dragleave', handleDocumentDragLeave);
-      document.removeEventListener('drop', handleDocumentDrop);
-    };
-  }, [isDropEnabled, setDraggingGlobal, processFiles]);
-
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -195,32 +151,16 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
     }
   }, [setDraggingGlobal]);
 
+  // React handler for visual feedback only - actual file processing via Tauri native
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    logger.uploadDebug("[Drag] Drop triggered");
+    logger.uploadDebug("[Drag] React Drop triggered (visual reset only)");
     setDraggingGlobal(false);
-
-    if (!isDropEnabled) {
-      logger.uploadDebug("[Drag] Drop ignored - drop is disabled for current view", { currentView });
-      return;
-    }
-
-    logger.uploadDebug("[Drag] DataTransfer", {
-      types: e.dataTransfer.types,
-      itemsCount: e.dataTransfer.items.length,
-      filesCount: e.dataTransfer.files.length,
-    });
-
-    const droppedFiles: SelectedFile[] = Array.from(e.dataTransfer.files).map((file) => ({
-      path: (file as { path?: string }).path || file.name,
-      name: file.name,
-      size: file.size,
-    }));
-
-    processFiles(droppedFiles, "document");
-  }, [isDropEnabled, currentView, setDraggingGlobal, processFiles]);
+    // Note: Actual file processing happens in Tauri native handler
+    // This prevents duplicate processing when both handlers fire
+  }, [setDraggingGlobal]);
 
   return {
     isDraggingGlobal,

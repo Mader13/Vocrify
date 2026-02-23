@@ -1,4 +1,4 @@
-export type DiarizationProvider = "none" | "pyannote" | "sherpa-onnx";
+export type DiarizationProvider = "none" | "sherpa-onnx";
 
 export type EnginePreference = "auto" | "rust" | "python";
 
@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const ENGINE_PREFERENCES: Record<EnginePreference, { name: string; description: string }> = {
   auto: {
     name: "Auto (Recommended)",
-    description: "Rust transcribe-rs with automatic fallback to Python",
+    description: "Rust transcribe-rs with Sherpa-ONNX diarization",
   },
   rust: {
     name: "Rust Only",
@@ -48,7 +48,7 @@ export const ENGINE_PREFERENCES: Record<EnginePreference, { name: string; descri
   },
   python: {
     name: "Python Only",
-    description: "Python engine only (for debugging)",
+    description: "Deprecated — kept for compatibility",
   },
 };
 
@@ -57,11 +57,6 @@ export const DIARIZATION_PROVIDERS: Record<DiarizationProvider, { name: string; 
     name: "Disabled",
     description: "No speaker diarization",
     requirements: "None",
-  },
-  pyannote: {
-    name: "PyAnnote",
-    description: "High accuracy speaker diarization",
-    requirements: "HuggingFace token, 6-8GB VRAM or 16GB RAM",
   },
   "sherpa-onnx": {
     name: "Sherpa-ONNX",

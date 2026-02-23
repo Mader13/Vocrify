@@ -122,6 +122,7 @@ function TaskItem({ task, compact, onHoverStart, onHoverEnd }: TaskItemProps) {
   const cancelTask = useTasks((s) => s.cancelTask);
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
+  const setCurrentView = useUIStore((s) => s.setCurrentView);
 
   const config = statusConfig[task.status];
   const StatusIcon = config.icon;
@@ -130,13 +131,18 @@ function TaskItem({ task, compact, onHoverStart, onHoverEnd }: TaskItemProps) {
   const itemRef = useRef<HTMLDivElement>(null);
   const [showTooltip, setShowTooltip] = useState(false);
 
+  const handleSelectTask = () => {
+    setSelectedTask(task.id);
+    setCurrentView("transcription");
+  };
+
   if (compact) {
     return (
       <>
         <div
           ref={itemRef}
           className="group cursor-pointer rounded-lg p-2 transition-all hover:bg-muted relative"
-          onClick={() => setSelectedTask(task.id)}
+          onClick={handleSelectTask}
           onMouseEnter={() => {
             setShowTooltip(true);
             onHoverStart?.();
@@ -207,7 +213,7 @@ function TaskItem({ task, compact, onHoverStart, onHoverEnd }: TaskItemProps) {
         "w-full rounded-lg border-2 bg-card text-card-foreground shadow-sm cursor-pointer transition-all hover:shadow-md overflow-hidden relative",
         config.borderColor
       )}
-      onClick={() => setSelectedTask(task.id)}
+      onClick={handleSelectTask}
       title={config.label}
     >
       {isSelected && (

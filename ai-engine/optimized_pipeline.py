@@ -116,7 +116,7 @@ class OptimizedTranscriptionPipeline:
                 model_name,
                 device,
                 options.get('download_root'),
-                options.get('diarization_provider', 'pyannote'),
+                options.get('diarization_provider', 'sherpa-onnx'),
                 options.get('num_speakers', -1),
             )
 
@@ -168,7 +168,7 @@ class OptimizedTranscriptionPipeline:
                 model_name,
                 device,
                 options.get('download_root'),
-                options.get('diarization_provider', 'pyannote'),
+                options.get('diarization_provider', 'sherpa-onnx'),
                 options.get('num_speakers', -1),
             )
 

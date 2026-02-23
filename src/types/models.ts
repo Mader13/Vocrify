@@ -6,8 +6,6 @@ export type AIModel =
   | "whisper-large-v3"
   | "parakeet"
   | "parakeet-tdt-0.6b-v3"
-  | "parakeet-tdt-1.1b"
-  | "pyannote-diarization"
   | "sherpa-onnx-diarization";
 
 export type ModelType = "whisper" | "parakeet" | "diarization";
@@ -103,72 +101,18 @@ export const MODEL_NAMES: Record<AIModel, string> = {
   "whisper-large-v3": "Whisper Large V3 (best quality)",
   parakeet: "Parakeet (NVIDIA)",
   "parakeet-tdt-0.6b-v3": "Parakeet 0.6B (multilingual)",
-  "parakeet-tdt-1.1b": "Parakeet 1.1B (English only)",
-  "pyannote-diarization": "PyAnnote Diarization",
   "sherpa-onnx-diarization": "Sherpa-ONNX Diarization (segmentation and embedding)",
 };
 
 export const MODEL_CONFIGS: Record<AIModel, ModelConfig> = {
-  "whisper-tiny": {
-    type: "whisper",
-    speedCategory: "fast",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 3.0,
-  },
-  "whisper-base": {
-    type: "whisper",
-    speedCategory: "fast",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 2.5,
-  },
-  "whisper-small": {
-    type: "whisper",
-    speedCategory: "medium",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 1.8,
-  },
-  "whisper-medium": {
-    type: "whisper",
-    speedCategory: "slow",
-    supportsStreaming: true,
-    typicalRealtimeFactor: 1.2,
-  },
-  "whisper-large-v3": {
-    type: "whisper",
-    speedCategory: "slow",
-    supportsStreaming: true,
-    typicalRealtimeFactor: 0.9,
-  },
-  parakeet: {
-    type: "parakeet",
-    speedCategory: "fast",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 4.0,
-  },
-  "parakeet-tdt-0.6b-v3": {
-    type: "parakeet",
-    speedCategory: "fast",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 4.2,
-  },
-  "parakeet-tdt-1.1b": {
-    type: "parakeet",
-    speedCategory: "medium",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 2.2,
-  },
-  "pyannote-diarization": {
-    type: "whisper", // diarization model, using whisper as placeholder
-    speedCategory: "fast",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 1.0,
-  },
-  "sherpa-onnx-diarization": {
-    type: "whisper", // diarization model, using whisper as placeholder
-    speedCategory: "fast",
-    supportsStreaming: false,
-    typicalRealtimeFactor: 1.0,
-  },
+  "whisper-tiny": { type: "whisper", speedCategory: "fast", supportsStreaming: false, typicalRealtimeFactor: 3.0 },
+  "whisper-base": { type: "whisper", speedCategory: "fast", supportsStreaming: false, typicalRealtimeFactor: 2.5 },
+  "whisper-small": { type: "whisper", speedCategory: "medium", supportsStreaming: false, typicalRealtimeFactor: 1.8 },
+  "whisper-medium": { type: "whisper", speedCategory: "slow", supportsStreaming: true, typicalRealtimeFactor: 1.2 },
+  "whisper-large-v3": { type: "whisper", speedCategory: "slow", supportsStreaming: true, typicalRealtimeFactor: 0.9 },
+  parakeet: { type: "parakeet", speedCategory: "fast", supportsStreaming: false, typicalRealtimeFactor: 4.0 },
+  "parakeet-tdt-0.6b-v3": { type: "parakeet", speedCategory: "fast", supportsStreaming: false, typicalRealtimeFactor: 4.2 },
+  "sherpa-onnx-diarization": { type: "whisper", speedCategory: "fast", supportsStreaming: false, typicalRealtimeFactor: 1.0 },
 };
 
 export const AVAILABLE_MODELS: AvailableModel[] = [
@@ -177,9 +121,7 @@ export const AVAILABLE_MODELS: AvailableModel[] = [
   { name: "whisper-small", sizeMb: 466, modelType: "whisper", description: "Good accuracy, medium speed", installed: false },
   { name: "whisper-medium", sizeMb: 1505, modelType: "whisper", description: "High accuracy", installed: false },
   { name: "whisper-large-v3", sizeMb: 2960, modelType: "whisper", description: "Maximum accuracy, slow", installed: false },
-  { name: "parakeet-tdt-0.6b-v3", sizeMb: 640, modelType: "parakeet", description: "Multilingual including Russian", installed: false },
-  { name: "parakeet-tdt-1.1b", sizeMb: 2490, modelType: "parakeet", description: "English, high accuracy", installed: false },
-  { name: "pyannote-diarization", sizeMb: 463, modelType: "diarization", description: "PyAnnote diarization model", installed: false },
+  { name: "parakeet-tdt-0.6b-v3", sizeMb: 456, modelType: "parakeet", description: "Multilingual including Russian", installed: false },
   { name: "sherpa-onnx-diarization", sizeMb: 45, modelType: "diarization", description: "Sherpa-ONNX diarization model", installed: false },
 ];
 
@@ -189,10 +131,7 @@ export const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "whisper-small": "Whisper Small (466MB)",
   "whisper-medium": "Whisper Medium (1.5GB)",
   "whisper-large-v3": "Whisper Large V3 (3GB)",
-  "parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B (640MB)",
-  "parakeet-tdt-1.1b": "Parakeet TDT 1.1B (2.5GB)",
-  "pyannote-segmentation-3.0": "PyAnnote Segmentation 3.0 (68MB)",
-  "pyannote-embedding-3.0": "PyAnnote Embedding 3.0 (395MB)",
+  "parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B (456MB)",
   "sherpa-onnx-segmentation": "Sherpa Segmentation (7MB)",
   "sherpa-onnx-embedding": "Sherpa Embedding (38MB)",
 };
@@ -203,14 +142,6 @@ export const MODEL_ICONS: Record<ModelType, string> = {
   diarization: "🎤",
 };
 
-export function isPyannoteModel(modelName: string): boolean {
-  return modelName.toLowerCase().includes("pyannote");
-}
-
 export function isSherpaModel(modelName: string): boolean {
   return modelName.toLowerCase().includes("sherpa-onnx");
-}
-
-export function requiresHuggingFaceToken(provider: string): boolean {
-  return provider === "pyannote";
 }

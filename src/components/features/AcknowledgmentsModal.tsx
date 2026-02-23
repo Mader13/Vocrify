@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ExternalLink, Heart, Code, Cpu, Mic, Users, Globe, Layers, X } from "lucide-react";
+import { ExternalLink, Heart, Code, Cpu, Mic, Users, X } from "lucide-react";
 
 interface AcknowledgmentsModalProps {
   open: boolean;
@@ -49,13 +49,6 @@ const acknowledgments: AcknowledgmentItem[] = [
 
   // Speaker Diarization
   {
-    name: "pyannote.audio",
-    description: "Neural speaker diarization toolkit (who spoke when) by Hervé Bredin",
-    url: "https://github.com/pyannote/pyannote-audio",
-    icon: <Users className="h-5 w-5" />,
-    category: "diarization",
-  },
-  {
     name: "sherpa-onnx",
     description: "ONNX exports for speech recognition by K2 FSA",
     url: "https://github.com/k2-fsa/sherpa-onnx",
@@ -63,21 +56,6 @@ const acknowledgments: AcknowledgmentItem[] = [
     category: "diarization",
   },
 
-  // ML Framework & Models
-  {
-    name: "PyTorch",
-    description: "Deep learning framework powering all neural networks",
-    url: "https://github.com/pytorch/pytorch",
-    icon: <Layers className="h-5 w-5" />,
-    category: "framework",
-  },
-  {
-    name: "Hugging Face Transformers",
-    description: "Model hub and transformers library for Distil-Whisper and more",
-    url: "https://github.com/huggingface/transformers",
-    icon: <Globe className="h-5 w-5" />,
-    category: "framework",
-  },
   {
     name: "ONNX Runtime",
     description: "Cross-platform inference engine for ONNX models",

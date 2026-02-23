@@ -25,12 +25,19 @@ const getTargetPosition = (position: MiniPlayerPosition, viewportWidth: number, 
 const DRAG_THRESHOLD = 8; // Minimum pixels to move before considering it a drag
 
 function MiniPlayerInner() {
-  const store = usePlaybackStore();
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
   const setCurrentView = useUIStore((s) => s.setCurrentView);
   const currentView = useUIStore((s) => s.currentView);
   // Hide MiniPlayer when the user is already viewing the playing task's page
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
+  const playingTaskId = usePlaybackStore((s) => s.playingTaskId);
+  const playingTaskFileName = usePlaybackStore((s) => s.playingTaskFileName);
+  const isPlaying = usePlaybackStore((s) => s.isPlaying);
+  const duration = usePlaybackStore((s) => s.duration);
+  const currentTime = usePlaybackStore((s) => s.currentTime);
+  const miniPlayerPosition = usePlaybackStore((s) => s.miniPlayerPosition);
+  const stopPlayback = usePlaybackStore((s) => s.stop);
+  const setPosition = usePlaybackStore((s) => s.setPosition);
   const elementRef = useRef<HTMLDivElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -42,38 +49,36 @@ function MiniPlayerInner() {
   const isDraggingRef = useRef(false);
 
   const handleClose = useCallback(() => {
-    if (store.playingTaskId) {
+    if (playingTaskId) {
       window.dispatchEvent(new CustomEvent('miniplayer-pause', {
-        detail: { taskId: store.playingTaskId }
+        detail: { taskId: playingTaskId }
       }));
     }
-    store.stop();
-  }, [store]);
+    stopPlayback();
+  }, [playingTaskId, stopPlayback]);
 
   const handleTogglePlayPause = useCallback(() => {
-    if (!store.playingTaskId) return;
+    if (!playingTaskId) return;
 
-    if (store.isPlaying) {
+    if (isPlaying) {
       // Pause
       window.dispatchEvent(new CustomEvent('miniplayer-pause', {
-        detail: { taskId: store.playingTaskId }
+        detail: { taskId: playingTaskId }
       }));
-      store.setPlaying(store.playingTaskId, store.playingTaskFileName, false);
     } else {
       // Play
       window.dispatchEvent(new CustomEvent('miniplayer-play', {
-        detail: { taskId: store.playingTaskId }
+        detail: { taskId: playingTaskId }
       }));
-      store.setPlaying(store.playingTaskId, store.playingTaskFileName, true);
     }
-  }, [store]);
+  }, [isPlaying, playingTaskId]);
 
   const handleGoToTask = useCallback(() => {
-    if (store.playingTaskId) {
-      setSelectedTask(store.playingTaskId);
+    if (playingTaskId) {
+      setSelectedTask(playingTaskId);
       setCurrentView('transcription');
     }
-  }, [store.playingTaskId, setSelectedTask, setCurrentView]);
+  }, [playingTaskId, setSelectedTask, setCurrentView]);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     // Only prevent default for left mouse button
@@ -123,7 +128,7 @@ function MiniPlayerInner() {
 
       const screenWidth = window.innerWidth;
       const screenHeight = window.innerHeight;
-      const targetPos = getTargetPosition(store.miniPlayerPosition, screenWidth, screenHeight, elementHeight);
+      const targetPos = getTargetPosition(miniPlayerPosition, screenWidth, screenHeight, elementHeight);
 
       elementRef.current.style.left = `${targetPos.x}px`;
       elementRef.current.style.top = `${targetPos.y}px`;
@@ -145,7 +150,7 @@ function MiniPlayerInner() {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [store.miniPlayerPosition, isSnapping]);
+  }, [miniPlayerPosition, isSnapping]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -205,7 +210,7 @@ function MiniPlayerInner() {
         // Calculate target position using actual element dimensions
         const targetPos = getTargetPosition(newPosition, screenWidth, screenHeight, elementHeight);
 
-        store.setPosition(newPosition);
+        setPosition(newPosition);
 
         // Animate to target position using only top/left
         elementRef.current.style.transition = `all ${snapDuration}ms cubic-bezier(0.22, 1, 0.36, 1)`;
@@ -240,24 +245,24 @@ function MiniPlayerInner() {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [store]);
+  }, [setPosition]);
 
-  const progress = store.duration > 0 ? (store.currentTime / store.duration) * 100 : 0;
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   // Calculate initial position for first render (must be before conditional return)
   const initialPosition = useMemo(() => {
     // Default to bottom-left with estimated height for first render
     const estimatedHeight = 80;
-    return getTargetPosition(store.miniPlayerPosition, window.innerWidth, window.innerHeight, estimatedHeight);
-  }, [store.miniPlayerPosition]);
+    return getTargetPosition(miniPlayerPosition, window.innerWidth, window.innerHeight, estimatedHeight);
+  }, [miniPlayerPosition]);
 
-  const isViewingPlayingTask = currentView === 'transcription' && selectedTaskId === store.playingTaskId;
+  const isViewingPlayingTask = currentView === 'transcription' && selectedTaskId === playingTaskId;
 
   // Don't render if there's no task loaded (but show even when paused)
   // Also hide when the user is currently viewing the playing task's page —
   // the VideoPlayer controls are already visible, showing MiniPlayer simultaneously
   // creates a second play button that can trigger audio duplication.
-  if (!store.playingTaskId || isViewingPlayingTask) {
+  if (!playingTaskId || isViewingPlayingTask) {
     return null;
   }
 
@@ -299,7 +304,7 @@ function MiniPlayerInner() {
           'transition-colors shrink-0'
         )}
       >
-        {store.isPlaying ? (
+        {isPlaying ? (
           <Pause className="h-4 w-4" />
         ) : (
           <Play className="h-4 w-4 ml-0.5" />
@@ -314,10 +319,10 @@ function MiniPlayerInner() {
       >
         <div className="flex items-center gap-2 mb-1">
           <FileAudio className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <p className="text-sm font-medium truncate">
-            {store.playingTaskFileName || 'Unknown'}
-          </p>
-        </div>
+            <p className="text-sm font-medium truncate">
+              {playingTaskFileName || 'Unknown'}
+            </p>
+          </div>
 
         {/* Progress bar */}
         <div className="h-1 bg-muted rounded-full overflow-hidden">
@@ -328,11 +333,11 @@ function MiniPlayerInner() {
         </div>
 
         {/* Time display */}
-        <div className="flex justify-between mt-1 text-xs text-muted-foreground">
-          <span>{formatTime(store.currentTime)}</span>
-          <span>{formatTime(store.duration)}</span>
+          <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration)}</span>
+          </div>
         </div>
-      </div>
 
       {/* Close button */}
       <button

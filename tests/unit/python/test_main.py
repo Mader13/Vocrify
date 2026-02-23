@@ -168,7 +168,7 @@ class TestPathSecurity:
             "whisper-tiny",
             "whisper-base",
             "whisper-large-v3",
-            "pyannote-diarization",
+            "sherpa-onnx-diarization",
             "sherpa-onnx-segmentation"
         ]
         for name in valid_names:
@@ -457,7 +457,7 @@ class TestArgumentParsing:
             '--device', 'cuda',
             '--language', 'en',
             '--diarization',
-            '--diarization-provider', 'pyannote',
+            '--diarization-provider', 'sherpa-onnx',
             '--num-speakers', '2'
         ]):
             args = parse_args()
@@ -465,7 +465,7 @@ class TestArgumentParsing:
             assert args.device == 'cuda'
             assert args.language == 'en'
             assert args.diarization is True
-            assert args.diarization_provider == 'pyannote'
+            assert args.diarization_provider == 'sherpa-onnx'
             assert args.num_speakers == 2
 
     def test_parse_args_download_mode(self):
@@ -500,8 +500,8 @@ class TestArgumentParsing:
     ("whisper-small", True),
     ("whisper-medium", True),
     ("whisper-large-v3", True),
-    ("pyannote-diarization", True),
     ("sherpa-onnx-diarization", True),
+    ("sherpa-onnx-segmentation", True),
     ("whisper tiny", False),  # Space not allowed
     ("whisper/tiny", False),  # Slash not allowed
     ("../../../etc/passwd", False),  # Path traversal

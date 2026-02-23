@@ -1,10 +1,10 @@
 /// Unit tests for diarization functionality in Rust backend.
 ///
 /// Tests:
-/// - HuggingFace token retrieval from store
-/// - Token passing to Python subprocess
+/// - Diarization provider validation
 /// - Diarization command-line arguments
 /// - Environment variable setting
+/// - Model detection
 
 #[cfg(test)]
 mod tests {
@@ -13,11 +13,11 @@ mod tests {
     #[test]
     fn test_diarization_provider_values() {
         // Test that diarization provider strings are correct
-        let providers = vec!["none", "pyannote", "sherpa-onnx"];
+        let providers = vec!["none", "sherpa-onnx"];
 
         for provider in providers {
             match provider {
-                "none" | "pyannote" | "sherpa-onnx" => (),
+                "none" | "sherpa-onnx" => (),
                 _ => panic!("Invalid diarization provider: {}", provider),
             }
         }
@@ -57,7 +57,7 @@ mod tests {
     fn test_diarization_command_args() {
         // Test that diarization arguments are formatted correctly
         let enable_diarization = true;
-        let diarization_provider = Some("pyannote");
+        let diarization_provider = Some("sherpa-onnx");
         let num_speakers: i32 = 2;
 
         if enable_diarization {
@@ -65,7 +65,7 @@ mod tests {
 
             if let Some(provider) = diarization_provider {
                 match provider {
-                    "pyannote" | "sherpa-onnx" => {
+                    "sherpa-onnx" => {
                         assert!(num_speakers == -1 || num_speakers >= 1);
                     }
                     "none" => panic!("Provider 'none' should not be used with diarization enabled"),
@@ -107,8 +107,6 @@ mod tests {
             ("whisper-base", "whisper"),
             ("whisper-large-v3", "whisper"),
             ("parakeet-tdt-0.6b-v3", "parakeet"),
-            ("pyannote-diarization", "diarization"),
-            ("pyannote-segmentation-3.0", "diarization"),
             ("sherpa-onnx-diarization", "diarization"),
             ("sherpa-onnx-segmentation", "diarization"),
         ];
@@ -120,8 +118,6 @@ mod tests {
                 "parakeet"
             } else if model_name.starts_with("sherpa-onnx-")
                 || model_name == "sherpa-onnx-diarization"
-                || model_name.starts_with("pyannote-")
-                || model_name == "pyannote-diarization"
             {
                 "diarization"
             } else {

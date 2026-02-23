@@ -916,6 +916,40 @@ impl PythonInstaller {
 
         let done_message = format!("PyTorch installed ({})", effective_backend);
         self.emit_progress(InstallStage::InstallingPytorch, 80.0, &done_message);
+
+        // Install required download dependencies (requests, tenacity, huggingface_hub)
+        // These are needed for model downloads even when using Rust transcribe-rs
+        // because Python backend is still used for diarization and model management.
+        self.install_download_dependencies(&self.get_python_exe()).await?;
+
+        Ok(())
+    }
+
+    /// Install dependencies required for model downloads (requests, tenacity, huggingface_hub).
+    /// These are always needed even if transcription is handled by Rust.
+    async fn install_download_dependencies(&self, python_exe: &Path) -> Result<(), String> {
+        self.emit_progress(InstallStage::InstallingPytorch, 82.0, "Installing download dependencies...");
+
+        let packages = ["requests==2.31.0", "tenacity==8.5.0", "huggingface_hub==0.23.4"];
+
+        for package in packages {
+            let output = create_hidden_command(python_exe)
+                .arg("-m")
+                .arg("pip")
+                .arg("install")
+                .arg(package)
+                .arg("--no-warn-script-location")
+                .output()
+                .await
+                .map_err(|e| format!("Failed to install {}: {}", package, e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("[PYTHON INSTALLER] {} install warning: {}", package, stderr);
+            }
+        }
+
+        self.emit_progress(InstallStage::InstallingPytorch, 85.0, "Download dependencies ready");
         Ok(())
     }
 

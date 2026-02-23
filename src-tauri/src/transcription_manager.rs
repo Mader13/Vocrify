@@ -370,7 +370,7 @@ impl TranscriptionManager {
             duration, elapsed.as_secs_f64(), realtime_factor);
 
         // Convert segments (0.2.2 uses f32 for timings, no language field on result)
-        let segments: Vec<TranscriptionSegment> = segments_0_2_2.into_iter()
+        let raw_segments: Vec<TranscriptionSegment> = segments_0_2_2.into_iter()
             .map(|s| TranscriptionSegment {
                 start: s.start as f64,
                 end: s.end as f64,
@@ -379,6 +379,13 @@ impl TranscriptionManager {
                 confidence: 1.0,
             })
             .collect();
+
+        // Этап 3: Post-filter hallucinations (Zero-Desync safe — no timestamp modification)
+        let segments = Self::filter_hallucinations(&raw_segments);
+        if segments.len() < raw_segments.len() {
+            eprintln!("[VAD] Filtered {} hallucination segment(s) out of {}",
+                raw_segments.len() - segments.len(), raw_segments.len());
+        }
 
         // Use language from options or default to "en"
         let language = options.language.as_ref().cloned().unwrap_or_else(|| "en".to_string());
@@ -636,47 +643,26 @@ impl TranscriptionManager {
         &self,
         audio_path: &Path,
         options: &TranscriptionOptions,
-        hf_token: Option<&str>,
+        _hf_token: Option<&str>,
     ) -> Result<(Vec<SpeakerTurn>, Vec<TranscriptionSegment>), TranscriptionError> {
-        use crate::python_bridge::DiarizationProvider;
-
-        eprintln!("[DIARIZATION DEBUG] options.enable_diarization = {}", options.enable_diarization);
-        eprintln!("[DIARIZATION DEBUG] options.diarization_provider = {:?}", options.diarization_provider);
-        eprintln!("[DIARIZATION DEBUG] options.num_speakers = {}", options.num_speakers);
-        eprintln!("[DIARIZATION DEBUG] python_bridge is Some = {}", self.python_bridge.is_some());
-
-        let provider = options.diarization_provider.as_ref()
-            .and_then(|p| match p.as_str() {
-                "pyannote" => Some(DiarizationProvider::PyAnnote),
-                "sherpa-onnx" => Some(DiarizationProvider::SherpaOnnx),
-                _ => None,
-            })
-            .unwrap_or(DiarizationProvider::SherpaOnnx);
+        eprintln!("[DIARIZATION] enable={} provider={:?} num_speakers={} bridge_ready={}",
+            options.enable_diarization,
+            options.diarization_provider,
+            options.num_speakers,
+            self.python_bridge.is_some());
 
         let python_bridge = self.python_bridge.as_ref()
             .ok_or(TranscriptionError::Transcription("Python bridge not initialized".to_string()))?;
 
-        eprintln!("[DIARIZATION DEBUG] Using provider: {:?}", provider);
+        // Sherpa-ONNX is the only supported diarization provider.
+        eprintln!("[DIARIZATION] Using sherpa-onnx");
+        let speaker_segments = python_bridge
+            .diarize_sherpa(audio_path, Some(options.num_speakers))
+            .await
+            .map_err(|e| TranscriptionError::Transcription(format!("Diarization failed: {}", e)))?;
 
-        let speaker_segments = match provider {
-            DiarizationProvider::PyAnnote => {
-                python_bridge.diarize_pyannote(
-                    audio_path,
-                    hf_token,
-                    Some(options.num_speakers),
-                ).await.map_err(|e| TranscriptionError::Transcription(format!("Diarization failed: {}", e)))?
-            }
-            DiarizationProvider::SherpaOnnx => {
-                python_bridge.diarize_sherpa(
-                    audio_path,
-                    Some(options.num_speakers),
-                ).await.map_err(|e| TranscriptionError::Transcription(format!("Diarization failed: {}", e)))?
-            }
-        };
+        eprintln!("[DIARIZATION] Received {} segments from Python", speaker_segments.len());
 
-        eprintln!("[DIARIZATION DEBUG] Received {} speaker segments from Python", speaker_segments.len());
-
-        // Convert to SpeakerTurn format
         let speaker_turns: Vec<SpeakerTurn> = speaker_segments.iter()
             .map(|s| SpeakerTurn {
                 start: s.start,
@@ -685,7 +671,6 @@ impl TranscriptionManager {
             })
             .collect();
 
-        // Also return as TranscriptionSegment format for easier merging
         let diarization_segments: Vec<TranscriptionSegment> = speaker_segments.into_iter()
             .map(|s| TranscriptionSegment {
                 start: s.start,
@@ -697,6 +682,99 @@ impl TranscriptionManager {
             .collect();
 
         Ok((speaker_turns, diarization_segments))
+    }
+
+    /// Этап 3: Post-filter Whisper hallucinations.
+    ///
+    /// Whisper is prone to "hallucinating" during long silences — generating
+    /// repetitive phrases like "Спасибо за просмотр", "Thank you for watching",
+    /// "Subscribe", etc.  Since `transcribe-rs` (whisper-rs 0.13) does not expose
+    /// `no_speech_thold` or `entropy_thold`, we apply safe heuristic post-filtering.
+    ///
+    /// **Zero-Desync guarantee**: this function only *removes* segments; it never
+    /// alters timestamps, so transcription–diarization alignment is preserved.
+    fn filter_hallucinations(segments: &[TranscriptionSegment]) -> Vec<TranscriptionSegment> {
+        /// Max segment duration (seconds) before we check for low word density.
+        const MAX_SPARSE_DURATION: f64 = 12.0;
+        /// Minimum words-per-second for a long segment to be kept.
+        const MIN_WORDS_PER_SEC: f64 = 0.3;
+
+        // Common hallucination phrases (lowercased, trimmed).
+        // These are the most frequent artifacts observed across
+        // Russian, English, and multi-lingual Whisper models.
+        let hallucination_phrases: &[&str] = &[
+            // Russian
+            "спасибо за просмотр",
+            "подписывайтесь на канал",
+            "ставьте лайки",
+            "до свидания",
+            "продолжение следует",
+            // English
+            "thank you for watching",
+            "thanks for watching",
+            "please subscribe",
+            "like and subscribe",
+            "see you next time",
+            "see you in the next video",
+            // Generic (single-character / empty)
+            ".",
+            ",",
+            "…",
+            "",
+        ];
+
+        segments
+            .iter()
+            .filter(|seg| {
+                let text = seg.text.trim();
+
+                // 1. Remove empty / whitespace-only segments
+                if text.is_empty() {
+                    return false;
+                }
+
+                let lower = text.to_lowercase();
+
+                // 2. Remove known hallucination phrases
+                if hallucination_phrases.iter().any(|p| lower == *p) {
+                    eprintln!("[VAD] Dropping hallucination: \"{}\" [{:.2}s-{:.2}s]",
+                        text, seg.start, seg.end);
+                    return false;
+                }
+
+                // 3. Remove long-duration / low-word-density segments.
+                //    A segment spanning >12s with fewer than 0.3 words/sec
+                //    is almost certainly a hallucination loop on silence.
+                let duration = seg.end - seg.start;
+                if duration > MAX_SPARSE_DURATION {
+                    let word_count = text.split_whitespace().count() as f64;
+                    let wps = word_count / duration;
+                    if wps < MIN_WORDS_PER_SEC {
+                        eprintln!(
+                            "[VAD] Dropping sparse segment ({:.1} wps, {:.1}s): \"{}\" [{:.2}s-{:.2}s]",
+                            wps, duration, text, seg.start, seg.end
+                        );
+                        return false;
+                    }
+                }
+
+                // 4. Remove segments where the same short word is repeated many times
+                //    (e.g. "ааа ааа ааа ааа ааа" or "hello hello hello hello").
+                let words: Vec<&str> = text.split_whitespace().collect();
+                if words.len() >= 4 {
+                    let first = words[0].to_lowercase();
+                    let all_same = words.iter().all(|w| w.to_lowercase() == first);
+                    if all_same {
+                        eprintln!("[VAD] Dropping repetitive segment: \"{}\" [{:.2}s-{:.2}s]",
+                            text, seg.start, seg.end);
+                        return false;
+                    }
+                }
+
+                true
+            })
+            .cloned()
+            .collect()
     }
 
     /// Merge transcription segments with speaker diarization
@@ -803,5 +881,110 @@ mod tests {
         assert!(!options.translate);
         assert!(!options.enable_diarization);
         assert_eq!(options.num_speakers, 2);
+    }
+
+    #[test]
+    fn test_filter_hallucinations_removes_known_phrases() {
+        let segments = vec![
+            TranscriptionSegment {
+                start: 0.0, end: 5.0,
+                text: "Hello world".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+            TranscriptionSegment {
+                start: 5.0, end: 8.0,
+                text: "Спасибо за просмотр".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+            TranscriptionSegment {
+                start: 8.0, end: 12.0,
+                text: "Thank you for watching".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+        ];
+        let filtered = TranscriptionManager::filter_hallucinations(&segments);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].text, "Hello world");
+    }
+
+    #[test]
+    fn test_filter_hallucinations_removes_sparse_segments() {
+        let segments = vec![
+            TranscriptionSegment {
+                start: 0.0, end: 5.0,
+                text: "Normal speech with adequate density".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+            TranscriptionSegment {
+                // 20s duration with only 2 words = 0.1 wps < 0.3 threshold
+                start: 10.0, end: 30.0,
+                text: "Um hmm".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+        ];
+        let filtered = TranscriptionManager::filter_hallucinations(&segments);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].text, "Normal speech with adequate density");
+    }
+
+    #[test]
+    fn test_filter_hallucinations_removes_repetitive() {
+        let segments = vec![
+            TranscriptionSegment {
+                start: 0.0, end: 3.0,
+                text: "hello hello hello hello".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+            TranscriptionSegment {
+                start: 3.0, end: 6.0,
+                text: "this is real speech".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+        ];
+        let filtered = TranscriptionManager::filter_hallucinations(&segments);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].text, "this is real speech");
+    }
+
+    #[test]
+    fn test_filter_hallucinations_keeps_valid_segments() {
+        let segments = vec![
+            TranscriptionSegment {
+                start: 0.0, end: 5.0,
+                text: "This is a normal transcription segment".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+            TranscriptionSegment {
+                start: 5.0, end: 10.0,
+                text: "Another segment with enough content".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+        ];
+        let filtered = TranscriptionManager::filter_hallucinations(&segments);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_hallucinations_removes_empty() {
+        let segments = vec![
+            TranscriptionSegment {
+                start: 0.0, end: 1.0,
+                text: "  ".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+            TranscriptionSegment {
+                start: 1.0, end: 2.0,
+                text: ".".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+            TranscriptionSegment {
+                start: 2.0, end: 5.0,
+                text: "Real words here".to_string(),
+                speaker: None, confidence: 1.0,
+            },
+        ];
+        let filtered = TranscriptionManager::filter_hallucinations(&segments);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].text, "Real words here");
     }
 }

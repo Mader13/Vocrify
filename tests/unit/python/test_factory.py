@@ -445,14 +445,14 @@ class TestFactoryParameterPassing:
 
     @patch('models.whisper.WhisperModel')
     def test_default_diarization_provider(self, mock_whisper):
-        """Test default diarization_provider is pyannote."""
+        """Test default diarization_provider is sherpa-onnx."""
         mock_instance = Mock()
         mock_whisper.return_value = mock_instance
 
         ModelFactory.create("whisper-base", device="cpu")
 
         call_kwargs = mock_whisper.call_args[1]
-        assert call_kwargs["diarization_provider"] == "pyannote"
+        assert call_kwargs["diarization_provider"] == "sherpa-onnx"
 
     @patch('models.whisper.WhisperModel')
     def test_passes_num_speakers(self, mock_whisper):

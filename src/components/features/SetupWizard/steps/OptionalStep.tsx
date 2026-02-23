@@ -1,17 +1,36 @@
 /* eslint-disable react-refresh/only-export-components */
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Key, ExternalLink, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useSetupStore } from "@/stores/setupStore";
+import { useTasks } from "@/stores";
 
 /**
  * Step 4: Optional settings.
  */
 export function OptionalStep() {
+  const savedToken = useTasks((state) => state.settings.huggingFaceToken);
+  const setHuggingFaceToken = useTasks((state) => state.setHuggingFaceToken);
+
   const [showToken, setShowToken] = useState(false);
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(savedToken ?? "");
+
+  useEffect(() => {
+    setToken(savedToken ?? "");
+  }, [savedToken]);
+
+  const persistToken = useCallback(() => {
+    const normalizedToken = token.trim();
+    const currentToken = (savedToken ?? "").trim();
+
+    if (normalizedToken === currentToken) {
+      return;
+    }
+
+    void setHuggingFaceToken(normalizedToken.length > 0 ? normalizedToken : null);
+  }, [savedToken, setHuggingFaceToken, token]);
 
   return (
     <div className="space-y-6">
@@ -45,6 +64,7 @@ export function OptionalStep() {
               type={showToken ? "text" : "password"}
               value={token}
               onChange={(e) => setToken(e.target.value)}
+              onBlur={persistToken}
               placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxx"
               className={cn(
                 "w-full rounded-md border border-input bg-background px-3 py-2 pr-10",

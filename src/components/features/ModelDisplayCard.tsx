@@ -161,7 +161,7 @@ export function DiarizationModelDisplay({
       value={providerName}
       description={providerInfo?.description}
       size={size}
-      gradient={provider === "pyannote" ? "purple" : provider === "sherpa-onnx" ? "emerald" : "blue"}
+      gradient={provider === "sherpa-onnx" ? "emerald" : "blue"}
     />
   );
 }

@@ -330,7 +330,11 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
       if (result.success) {
         logger.info("FFmpeg downloaded successfully, verifying...");
         await get().checkFFmpeg();
-        set({ isChecking: false });
+        const isInstalled = Boolean(get().ffmpegCheck?.installed && get().ffmpegCheck?.status === "ok");
+        set({
+          isChecking: false,
+          ffmpegInstallStatus: isInstalled ? "completed" : "failed",
+        });
       } else {
         set({
           ffmpegCheck: failedFFmpegCheck(result.error || "Download failed"),

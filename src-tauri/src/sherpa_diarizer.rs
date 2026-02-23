@@ -31,14 +31,12 @@ pub enum DiarizationError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DiarizationProvider {
-    Pyannote,
     SherpaOnnx,
 }
 
 impl DiarizationProvider {
     pub fn display_name(&self) -> &'static str {
         match self {
-            DiarizationProvider::Pyannote => "PyAnnote",
             DiarizationProvider::SherpaOnnx => "Sherpa-ONNX",
         }
     }
@@ -105,16 +103,6 @@ impl SherpaDiarizer {
                     eprintln!("[WARN] Embedding path exists: {}", emb_path.exists());
                 }
             }
-            DiarizationProvider::Pyannote => {
-                let seg_path = models_dir.join("pyannote-segmentation-3.0");
-                let emb_path = models_dir.join("pyannote-embedding-3.0");
-
-                if !seg_path.exists() || !emb_path.exists() {
-                    eprintln!("[WARN] PyAnnote diarization models not found");
-                    eprintln!("[WARN] Segmentation path exists: {}", seg_path.exists());
-                    eprintln!("[WARN] Embedding path exists: {}", emb_path.exists());
-                }
-            }
         }
 
         Ok(Self {
@@ -146,11 +134,6 @@ impl SherpaDiarizer {
             DiarizationProvider::SherpaOnnx => {
                 let seg_path = self.models_dir.join("sherpa-onnx-segmentation");
                 let emb_path = self.models_dir.join("sherpa-onnx-embedding");
-                seg_path.exists() && emb_path.exists()
-            }
-            DiarizationProvider::Pyannote => {
-                let seg_path = self.models_dir.join("pyannote-segmentation-3.0");
-                let emb_path = self.models_dir.join("pyannote-embedding-3.0");
                 seg_path.exists() && emb_path.exists()
             }
         }
@@ -215,7 +198,6 @@ mod tests {
 
     #[test]
     fn test_diarization_provider_display() {
-        assert_eq!(DiarizationProvider::Pyannote.display_name(), "PyAnnote");
         assert_eq!(DiarizationProvider::SherpaOnnx.display_name(), "Sherpa-ONNX");
     }
 

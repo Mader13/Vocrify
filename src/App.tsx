@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Upload, AlertCircle, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout";
-import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer, VideoPlayer } from "@/components/features";
+import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer, VideoPlayer, PlayerErrorBoundary } from "@/components/features";
 import { getTaskStatusById, useTasks, useUIStore, useSetupStore, usePlaybackStore } from "@/stores";
 import {
   subscribeToTranscriptionRuntime,
@@ -19,6 +19,7 @@ import type { DiarizationProvider, AIModel, DeviceType, Language } from "@/types
 import type { FileWithSettings } from "@/components/features/DiarizationOptionsModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useModelValidation, useDropZone } from "@/hooks";
+import { hasBlockingTasksForModel } from "@/stores/utils/model-deletion";
 import "./index.css";
 
 interface SelectedFile {
@@ -70,11 +71,13 @@ function BackgroundPlayer() {
         overflow: "hidden",
       }}
     >
-      <VideoPlayer
-        task={task}
-        colorMode="segments"
-        isVideoVisible
-      />
+      <PlayerErrorBoundary>
+        <VideoPlayer
+          task={task}
+          colorMode="segments"
+          isVideoVisible
+        />
+      </PlayerErrorBoundary>
     </div>
   );
 }
@@ -104,7 +107,7 @@ function MainApplication() {
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
 
   const { validateModelSelection, modelError, setModelError, selectedModel } = useModelValidation();
-  const { availableModels, loadModels } = useModelsStore();
+  const { availableModels, loadModels, pendingModelDeletions, reconcilePendingModelDeletions } = useModelsStore();
   const {
     defaultDevice,
     defaultLanguage,
@@ -127,6 +130,26 @@ function MainApplication() {
     currentView,
     onFilesDropped: handleFilesDropped,
   });
+
+  const mainContent = useMemo(() => {
+    if (selectedTaskId) {
+      return <TranscriptionView />;
+    }
+
+    if (currentView === "archive") {
+      return <ArchiveView />;
+    }
+
+    if (currentView === "models") {
+      return <ModelsManagement />;
+    }
+
+    if (currentView === "settings") {
+      return null;
+    }
+
+    return <TranscriptionView />;
+  }, [currentView, selectedTaskId]);
 
   useEffect(() => {
     if (currentView === "archive" || currentView === "models" || currentView === "settings") {
@@ -208,6 +231,20 @@ function MainApplication() {
   }, [updateTaskStatus]);
 
   useEffect(() => {
+    const pendingModels = Object.keys(pendingModelDeletions);
+    if (pendingModels.length === 0) {
+      return;
+    }
+
+    const hasReadyDeletion = pendingModels.some((modelName) => !hasBlockingTasksForModel(tasks, modelName));
+    if (!hasReadyDeletion) {
+      return;
+    }
+
+    void reconcilePendingModelDeletions();
+  }, [tasks, pendingModelDeletions, reconcilePendingModelDeletions]);
+
+  useEffect(() => {
     const processedTasks = new Set<string>();
     const startTaskIds = new Set(getQueuedTaskIdsToStart(tasks, maxConcurrentTasks));
 
@@ -215,6 +252,20 @@ function MainApplication() {
     tasks.forEach((task) => {
       logger.transcriptionDebug("Task status", { taskId: task.id, status: task.status });
       if (task.status === "queued" && startTaskIds.has(task.id) && !processedTasks.has(task.id) && task.filePath) {
+        if (useModelsStore.getState().isModelPendingDeletion(task.options.model)) {
+          logger.transcriptionWarn("Skipping queued task: model scheduled for deletion", {
+            taskId: task.id,
+            modelName: task.options.model,
+          });
+          updateTaskStatus(
+            task.id,
+            "failed",
+            undefined,
+            `Model "${task.options.model}" is scheduled for deletion and cannot start new transcription tasks.`,
+          );
+          return;
+        }
+
         logger.transcriptionInfo("Starting task", { taskId: task.id, fileName: task.filePath });
         processedTasks.add(task.id);
         updateTaskStatus(task.id, "processing");
@@ -239,13 +290,6 @@ function MainApplication() {
   const availableDiarizationProviders = useMemo((): DiarizationProvider[] => {
     const providers: DiarizationProvider[] = [];
 
-    const pyannoteInstalled = availableModels.some(
-      (m) => m.name === "pyannote-diarization" && m.installed
-    );
-    if (pyannoteInstalled) {
-      providers.push("pyannote");
-    }
-
     const sherpaInstalled = availableModels.some(
       (m) => m.name === "sherpa-onnx-diarization" && m.installed
     );
@@ -264,7 +308,7 @@ function MainApplication() {
       if (!diarizationProvider || diarizationProvider === "none") {
         return {
           valid: false,
-          error: "Diarization requires a diarization model to be installed. Please install pyannote or sherpa-onnx model first."
+          error: "Diarization requires the Sherpa-ONNX diarization model to be installed."
         };
       }
     }
@@ -341,43 +385,33 @@ function MainApplication() {
       <MiniPlayer />
       <BackgroundPlayer />
 
-      {currentView === "transcription" || currentView === "archive" ? (
-        <main
-          ref={mainRef}
-          className={cn(
-            "flex flex-1 overflow-hidden flex-col lg:flex-row relative",
-            isDraggingGlobal && "cursor-copy"
-          )}
-          {...dragHandlers}
-        >
-          {isDraggingGlobal && (
-            <div className="absolute inset-0 bg-primary/10 z-50 flex items-center justify-center pointer-events-none">
-              <div className="bg-background/90 backdrop-blur-sm rounded-2xl border-2 border-dashed border-primary p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-                <div className="flex flex-col items-center gap-4">
-                  <div className="rounded-full bg-primary/10 p-4">
-                    <Upload className="h-12 w-12 text-primary" />
-                  </div>
-                  <p className="text-lg font-medium text-primary">Drop files to add to queue</p>
+      <main
+        ref={mainRef}
+        className={cn(
+          "relative flex flex-1 flex-col overflow-hidden lg:flex-row",
+          isDraggingGlobal && "cursor-copy"
+        )}
+        {...dragHandlers}
+      >
+        {isDraggingGlobal && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 pointer-events-none">
+            <div className="bg-background/90 backdrop-blur-sm rounded-2xl border-2 border-dashed border-primary p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+              <div className="flex flex-col items-center gap-4">
+                <div className="rounded-full bg-primary/10 p-4">
+                  <Upload className="h-12 w-12 text-primary" />
                 </div>
+                <p className="text-lg font-medium text-primary">Drop files to add to queue</p>
               </div>
             </div>
-          )}
-
-          <Sidebar onFilesSelected={handleFilesFromDialog} />
-
-          <div className="flex-1 p-4 overflow-hidden min-h-0">
-            {selectedTaskId ? <TranscriptionView /> : (currentView === "archive" ? <ArchiveView /> : <TranscriptionView />)}
           </div>
-        </main>
-      ) : currentView === "models" ? (
-        <main className="flex-1 overflow-hidden">
-          <ModelsManagement />
-        </main>
-      ) : (
-        <main className="flex-1 overflow-hidden">
-          {/* Settings view - SettingsPanel renders as modal */}
-        </main>
-      )}
+        )}
+
+        <Sidebar onFilesSelected={handleFilesFromDialog} />
+
+        <div className="min-h-0 flex-1 overflow-hidden p-4">
+          {mainContent}
+        </div>
+      </main>
 
       <SettingsPanel />
 

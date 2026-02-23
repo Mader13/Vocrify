@@ -35,8 +35,6 @@ def list_models(cache_dir: str, logger) -> None:
         return
 
     skip_individual_components = {
-        "pyannote-segmentation-3.0",
-        "pyannote-embedding-3.0",
         "sherpa-onnx-segmentation",
         "sherpa-onnx-embedding",
     }
@@ -51,15 +49,7 @@ def list_models(cache_dir: str, logger) -> None:
             logger.debug(f"Skipping individual diarization component: {model_name}")
             continue
 
-        if model_name == "pyannote-diarization":
-            seg_path = os.path.join(model_path, "pyannote-segmentation-3.0")
-            emb_path = os.path.join(model_path, "pyannote-embedding-3.0")
-            if not os.path.exists(seg_path) or not os.path.exists(emb_path):
-                logger.debug(
-                    "Skipping incomplete pyannote-diarization (missing subdirectories)"
-                )
-                continue
-        elif model_name == "sherpa-onnx-diarization":
+
             seg_path = os.path.join(model_path, "sherpa-onnx-segmentation")
             emb_path = os.path.join(model_path, "sherpa-onnx-embedding")
             if not os.path.exists(seg_path) or not os.path.exists(emb_path):
@@ -79,10 +69,7 @@ def list_models(cache_dir: str, logger) -> None:
             model_type = "diarization"
         elif model_name == "sherpa-onnx-diarization":
             model_type = "diarization"
-        elif model_name.startswith("pyannote-"):
-            model_type = "diarization"
-        elif model_name == "pyannote-diarization":
-            model_type = "diarization"
+
         else:
             continue
 
@@ -157,12 +144,7 @@ def validate_models(cache_dir: str, logger, model_name: Optional[str] = None) ->
             path = registry.diarization_cache / "sherpa-onnx" if available else None
             size_mb = get_model_size_mb(str(path)) if path else None
             add_result(model_name, available, "sherpa-onnx", path, size_mb)
-        elif model_name == "pyannote-diarization" or model_name.startswith("pyannote"):
-            pyannote_paths = registry.get_pyannote_diarization_paths()
-            available = all(p[0] is not None for p in pyannote_paths.values())
-            path = registry.diarization_cache / "pyannote" if available else None
-            size_mb = get_model_size_mb(str(path)) if path else None
-            add_result(model_name, available, "pyannote", path, size_mb)
+
         else:
             add_result(model_name, False, "unknown", None, None)
     else:
@@ -193,11 +175,7 @@ def validate_models(cache_dir: str, logger, model_name: Optional[str] = None) ->
         size_mb = get_model_size_mb(str(path)) if path else None
         add_result("sherpa-onnx-diarization", available, "sherpa-onnx", path, size_mb)
 
-        pyannote_paths = registry.get_pyannote_diarization_paths()
-        available = all(p[0] is not None for p in pyannote_paths.values())
-        path = registry.diarization_cache / "pyannote" if available else None
-        size_mb = get_model_size_mb(str(path)) if path else None
-        add_result("pyannote-diarization", available, "pyannote", path, size_mb)
+
 
     emit_validation_results(results, cache_dir)
 

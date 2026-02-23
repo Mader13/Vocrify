@@ -95,6 +95,24 @@ function getTimelineStages(enableDiarization: boolean): readonly TimelineStage[]
   return enableDiarization ? STAGE_ORDER_WITH_DIARIZATION : STAGE_ORDER_BASE;
 }
 
+function normalizeStage(stage: string | undefined, status: TranscriptionTask["status"]): StageKey {
+  const sourceStage = stage ?? (status === "completed" ? "finalizing" : "transcribing");
+
+  if (sourceStage === "downloading") {
+    return "loading";
+  }
+
+  if (sourceStage === "diarization") {
+    return "diarizing";
+  }
+
+  if (sourceStage in stageConfig) {
+    return sourceStage as StageKey;
+  }
+
+  return "transcribing";
+}
+
 interface StageRailProps {
   stages: readonly TimelineStage[];
   currentIndex: number;
@@ -171,15 +189,15 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
 }
 
 export const ProcessingView = React.memo(function ProcessingView({ task }: ProcessingViewProps) {
-  const stage = task.stage ?? (task.status === "completed" ? "finalizing" : "transcribing");
-  const normalizedStage: StageKey = stage === "downloading" ? "loading" : stage;
+  const normalizedStage = normalizeStage(task.stage as string | undefined, task.status);
   const config = stageConfig[normalizedStage] ?? stageConfig.transcribing;
   const Icon = config.icon;
   const streamingSegments = task.streamingSegments ?? [];
 
   const stages = getTimelineStages(task.options.enableDiarization);
   const fallbackIndex = stages.indexOf("transcribing");
-  const currentIndex = Math.max(stages.indexOf(normalizedStage as TimelineStage), fallbackIndex);
+  const stageIndex = stages.indexOf(normalizedStage as TimelineStage);
+  const currentIndex = stageIndex >= 0 ? stageIndex : fallbackIndex;
   const currentStep = currentIndex + 1;
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);

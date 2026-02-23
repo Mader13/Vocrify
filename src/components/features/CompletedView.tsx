@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ChevronDown,
   ChevronUp,
   Clock3,
@@ -7,15 +8,27 @@ import {
   Languages,
   Pencil,
   Search,
+  Trash2,
   UserRound,
   X,
 } from "lucide-react";
 
 import { ArchiveButton } from "@/components/features/ArchiveButton";
 import { ExportMenu } from "@/components/features/ExportMenu";
+import { PlayerErrorBoundary } from "@/components/features/PlayerErrorBoundary";
 import { SpeakerNamesModal } from "@/components/features/SpeakerNamesModal";
 import { TranscriptionSegments } from "@/components/features/TranscriptionSegments";
 import { VideoPlayer } from "@/components/features/VideoPlayer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { applySpeakerNameMapToResult, collectSpeakerLabels } from "@/lib/speaker-names";
 import { sanitizeSegments } from "@/lib/segment-utils";
@@ -64,6 +77,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const viewMode = useUIStore((s) => s.completedViewModeByTask[task.id] ?? "balanced");
   const setCompletedViewModeForTask = useUIStore((s) => s.setCompletedViewModeForTask);
   const updateSpeakerNameMap = useTasks((s) => s.updateSpeakerNameMap);
+  const updateTaskFileName = useTasks((s) => s.updateTaskFileName);
+  const removeTask = useTasks((s) => s.removeTask);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -76,6 +91,9 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const [highlightedSearchIndex, setHighlightedSearchIndex] = useState<number>(-1);
   const [layoutMode, setLayoutMode] = useState<CompletedViewLayoutMode>("stacked");
   const [isSpeakerNamesOpen, setIsSpeakerNamesOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(task.fileName);
 
   const mappedResult = useMemo(() => {
     if (!task.result) {
@@ -303,12 +321,48 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     setHighlightedSearchIndex(-1);
   }, [task?.id]);
 
+  useEffect(() => {
+    setTitleDraft(task.fileName);
+    setIsEditingTitle(false);
+  }, [task.fileName, task.id]);
+
   const actionButtonClass =
     "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 px-2.5 text-xs font-medium text-foreground transition-colors motion-safe:duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:px-3";
   const effectiveViewMode = viewMode;
   const showMediaColumn = layoutMode === "stacked" || (layoutMode === "split" && effectiveViewMode === "balanced");
   const showCollapsedMediaBar = layoutMode === "split" && effectiveViewMode === "transcript-focus";
   const collapsedMediaLabel = `${formatTime(currentTime)} / ${durationLabel}`;
+
+  const handleConfirmDelete = useCallback(() => {
+    removeTask(task.id);
+    setIsDeleteDialogOpen(false);
+  }, [removeTask, task.id]);
+
+  const handleSaveTitle = useCallback(() => {
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) {
+      setTitleDraft(task.fileName);
+      setIsEditingTitle(false);
+      return;
+    }
+
+    if (nextTitle !== task.fileName) {
+      updateTaskFileName(task.id, nextTitle);
+    }
+
+    setIsEditingTitle(false);
+  }, [task.fileName, task.id, titleDraft, updateTaskFileName]);
+
+  const handleCancelTitleEdit = useCallback(() => {
+    setTitleDraft(task.fileName);
+    setIsEditingTitle(false);
+  }, [task.fileName]);
+
+  const handleTitleInputChange = useCallback((value: string) => {
+    setTitleDraft(value);
+  }, []);
+
+  const showSpeakerCount = task.options.enableDiarization && (hasSpeakerData || speakerCount > 0);
 
   return (
     <div
@@ -322,13 +376,55 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
         <CardHeader className="border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <CardTitle className="line-clamp-2 break-all text-[15px] font-semibold leading-tight sm:text-lg">
-                  {task.fileName}
-                </CardTitle>
+              <div data-testid="title-block" className="min-w-0 flex-1 sm:pr-2">
+                {isEditingTitle ? (
+                  <div
+                    data-testid="title-editor"
+                    className="relative flex w-full max-w-none items-start origin-left transition-[opacity,transform] motion-safe:duration-200 motion-safe:ease-out"
+                  >
+                    <input
+                      type="text"
+                      value={titleDraft}
+                      onChange={(event) => handleTitleInputChange(event.target.value)}
+                      onBlur={handleSaveTitle}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          handleSaveTitle();
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          handleCancelTitleEdit();
+                        }
+                      }}
+                      className={cn(
+                        "h-auto min-h-[1.75rem] w-full border-0 border-b border-border/60 bg-transparent px-0 py-0 text-[15px] font-semibold leading-tight tracking-tight text-foreground",
+                        "rounded-none align-top transition-[border-color,color,box-shadow] motion-safe:duration-200",
+                        "focus:border-foreground focus:outline-none focus:ring-0 sm:text-lg",
+                      )}
+                      aria-label="Transcription title"
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <div className="group flex w-full items-start gap-1.5">
+                    <CardTitle className="line-clamp-2 break-all text-[15px] font-semibold leading-tight sm:text-lg">
+                      {task.fileName}
+                    </CardTitle>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingTitle(true)}
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-80 transition-[opacity,color,background-color,transform] motion-safe:duration-200 motion-safe:ease-out motion-safe:hover:scale-105 hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      title="Edit transcription title"
+                      aria-label="Edit transcription title"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+              <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:shrink-0">
                 {hasSpeakerData && (
                   <button
                     type="button"
@@ -342,6 +438,18 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                 )}
                 <ExportMenu task={task} />
                 <ArchiveButton task={task} />
+                <button
+                  type="button"
+                  onClick={() => setIsDeleteDialogOpen(true)}
+                  className={cn(
+                    actionButtonClass,
+                    "border-destructive/40 text-destructive hover:bg-destructive/10",
+                  )}
+                  title="Delete transcription"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Delete</span>
+                </button>
               </div>
             </div>
 
@@ -349,36 +457,34 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                 <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   <MetaPill icon={Clock3} label="Duration" value={durationLabel} />
                   <MetaPill icon={FileText} label="Segments" value={String(displaySegments.length)} />
-                  <MetaPill icon={UserRound} label="Speakers" value={String(speakerCount)} />
+                  {showSpeakerCount && (
+                    <MetaPill icon={UserRound} label="Speakers" value={String(speakerCount)} />
+                  )}
                   <MetaPill icon={Languages} label="Language" value={languageLabel} />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
-                    {(["segments", "speakers"] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setDisplayMode(mode)}
-                        disabled={mode === "speakers" && !hasSpeakerData}
-                        className={cn(
-                          "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
-                          displayMode === mode
-                            ? "bg-foreground text-card-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
-                            : "text-muted-foreground hover:text-foreground",
-                          mode === "speakers" && !hasSpeakerData && "cursor-not-allowed opacity-45",
-                        )}
-                        aria-pressed={displayMode === mode}
-                        title={
-                          mode === "speakers" && !hasSpeakerData
-                            ? "No speaker data available"
-                            : `Show ${waveformModeLabels[mode]} waveform`
-                        }
-                      >
-                        {waveformModeLabels[mode]}
-                      </button>
-                    ))}
-                  </div>
+                  {hasSpeakerData && (
+                    <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
+                      {(["segments", "speakers"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setDisplayMode(mode)}
+                          className={cn(
+                            "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
+                            displayMode === mode
+                              ? "bg-foreground text-card-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                          aria-pressed={displayMode === mode}
+                          title={`Show ${waveformModeLabels[mode]} waveform`}
+                        >
+                          {waveformModeLabels[mode]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
                     {(["balanced", "transcript-focus"] as const).map((mode) => (
@@ -425,14 +531,16 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
               </CardTitle>
             </CardHeader>
             <CardContent className="p-2.5 sm:p-4 lg:p-5">
-              <VideoPlayer
-                ref={videoRef}
-                task={task}
-                colorMode={waveformMode}
-                onTimeUpdate={handlePlayerTimeUpdate}
-                isVideoVisible
-                className="w-full"
-              />
+              <PlayerErrorBoundary>
+                <VideoPlayer
+                  ref={videoRef}
+                  task={task}
+                  colorMode={waveformMode}
+                  onTimeUpdate={handlePlayerTimeUpdate}
+                  isVideoVisible
+                  className="w-full"
+                />
+              </PlayerErrorBoundary>
             </CardContent>
           </Card>
 
@@ -554,14 +662,16 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                   </div>
                 </div>
                 <div className="rounded-lg border border-border/60 bg-card/80">
-                  <VideoPlayer
-                    ref={videoRef}
-                    task={task}
-                    colorMode={waveformMode}
-                    onTimeUpdate={handlePlayerTimeUpdate}
-                    isVideoVisible={false}
-                    className="w-full gap-0"
-                  />
+                  <PlayerErrorBoundary>
+                    <VideoPlayer
+                      ref={videoRef}
+                      task={task}
+                      colorMode={waveformMode}
+                      onTimeUpdate={handlePlayerTimeUpdate}
+                      isVideoVisible={false}
+                      className="w-full gap-0"
+                    />
+                  </PlayerErrorBoundary>
                 </div>
               </CardContent>
             </Card>
@@ -674,6 +784,31 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
           updateSpeakerNameMap(task.id, speakerNameMap);
         }}
       />
+
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete Transcription?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this transcription? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setIsDeleteDialogOpen(false)}>
+                Cancel
+              </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 });

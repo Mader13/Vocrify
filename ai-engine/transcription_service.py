@@ -63,12 +63,9 @@ def handle_transcribe_command(
     if enable_diarization and diarization_provider == "none":
         transcription_logger.error("Diarization enabled but provider is 'none'")
         emit_error(
-            "Diarization is enabled but diarization_provider is set to 'none'. Please specify 'pyannote' or 'sherpa-onnx'"
+            "Diarization is enabled but diarization_provider is set to 'none'. Please specify 'sherpa-onnx'"
         )
         return
-
-    if huggingface_token:
-        os.environ["HF_TOKEN"] = huggingface_token
 
     language = command.get("language", "auto")
     try:
