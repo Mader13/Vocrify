@@ -372,13 +372,18 @@ impl ModelDownloader {
                 "[ModelDownloader] Sherpa segmentation → {}",
                 SHERPA_REGISTRY.segmentation_url
             );
-            self.stream_to_file(
-                SHERPA_REGISTRY.segmentation_url,
-                &seg_archive,
-                SHERPA_REGISTRY.model_name,
-                cancel,
-            )
-                .await?;
+            if let Err(err) = self
+                .stream_to_file(
+                    SHERPA_REGISTRY.segmentation_url,
+                    &seg_archive,
+                    SHERPA_REGISTRY.model_name,
+                    cancel,
+                )
+                .await
+            {
+                let _ = std::fs::remove_dir_all(&seg_tmp_extract);
+                return Err(err);
+            }
 
             eprintln!(
                 "[ModelDownloader] Extracting segmentation archive to {:?}",
@@ -652,7 +657,7 @@ fn flatten_single_subdir(dir: &Path) -> Result<(), DownloadError> {
     Ok(())
 }
 
-/// Returns `true` if any `.onnx` file exists anywhere under `dir`.
+/// Returns `true` if an `.onnx` file with `prefix` exists in `dir`.
 fn has_onnx_with_prefix(dir: &Path, prefix: &str) -> bool {
     let prefix_lc = prefix.to_ascii_lowercase();
     if let Ok(entries) = std::fs::read_dir(dir) {

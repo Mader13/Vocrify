@@ -146,6 +146,7 @@ fn get_max_concurrent_tasks(device: &str, model_size: &str) -> usize {
 }
 
 /// HIGH-7: Securely pass HuggingFace token via temp file instead of env var
+#[allow(dead_code)]
 fn pass_token_securely(token: &str) -> Result<PathBuf, AppError> {
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -862,6 +863,7 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
 /// Ensure minimal Python packages required for model downloads are available.
 /// This is especially important for embeddable Python installs where
 /// requirements.txt may not have been installed yet.
+#[allow(dead_code)]
 async fn ensure_python_download_dependencies(python_exe: &Path) -> Result<(), AppError> {
     let check_output = create_hidden_command(python_exe)
         .arg("-c")
@@ -2190,8 +2192,8 @@ async fn spawn_model_download(
     model_name: String,
     model_type: String,
     cache_dir: PathBuf,
-    token_file: Option<PathBuf>,
-    child_arc: Arc<Mutex<Option<tokio::process::Child>>>,
+    _token_file: Option<PathBuf>,
+    _child_arc: Arc<Mutex<Option<tokio::process::Child>>>,
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let downloader = model_downloader::ModelDownloader::new(app, cache_dir);
@@ -3226,67 +3228,65 @@ async fn transcribe_rust(
 
     let decode_start = std::time::Instant::now();
 
-    // Check if file needs conversion to WAV for Rust transcription
-    // Symphonia supports: wav, flac, mp3, m4a/aac, ogg, alac
-    // FFmpeg conversion needed for: mp4, mov, mkv, avi, webm (video containers)
-    let needs_conversion = {
-        let ext = std::path::Path::new(&validated_path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .unwrap_or_default();
-        // Video containers need conversion to extract audio
-        matches!(ext.as_str(), "mp4" | "mov" | "mkv" | "avi" | "webm")
-    };
+    // Always convert/preprocess audio to apply highpass and dynaudnorm filters
+    let needs_conversion = true;
 
     let audio_path = if needs_conversion {
-        // Convert to WAV using Rust audio module (with FFmpeg fallback)
-        eprintln!("[INFO] Converting {} to WAV for Rust transcription", validated_path.display());
+        eprintln!("[INFO] Preprocessing {} to WAV for transcription", validated_path.display());
 
         // Create temp WAV file
         let temp_dir = std::env::temp_dir();
         let wav_path = temp_dir.join(format!("transcribe_video_{}.wav", task_id));
 
-        // Try Rust audio conversion first
-        match crate::audio::converter::convert_to_wav(&validated_path, &wav_path) {
-            Ok(_) => {
-                eprintln!("[INFO] Rust audio conversion complete: {}", wav_path.display());
-                wav_path
-            }
-            Err(e) => {
-                eprintln!("[WARN] Rust audio conversion failed: {}, trying FFmpeg", e);
-                
-                // Fallback to FFmpeg
-                let ffmpeg_path = match ffmpeg_manager::get_ffmpeg_path(&app).await {
-                    Ok(p) => p,
-                    Err(e) => {
-                        return Err(format!(
-                            "FFmpeg not available for conversion: {}. Please install FFmpeg or convert the file to WAV manually.",
-                            e
-                        ));
-                    }
-                };
-
-                let output = std::process::Command::new(&ffmpeg_path)
-                    .args([
-                        "-y",  // Overwrite output
-                        "-i", validated_path.to_str().unwrap(),
-                        "-vn", // No video
-                        "-acodec", "pcm_s16le", // PCM codec
-                        "-ar", "16000", // 16kHz sample rate
-                        "-ac", "1", // Mono
-                        wav_path.to_str().unwrap(),
-                    ])
-                    .output()
-                    .map_err(|e| format!("Failed to run FFmpeg: {}", e))?;
-
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("FFmpeg conversion failed: {}", stderr));
+        // Point 2: Try FFmpeg first to apply audio preprocessing filters
+        let ffmpeg_success = if let Ok(ffmpeg_path) = ffmpeg_manager::get_ffmpeg_path(&app).await {
+            let output = std::process::Command::new(&ffmpeg_path)
+                .args([
+                    "-y",  // Overwrite output
+                    "-i", validated_path.to_str().unwrap(),
+                    "-vn", // No video
+                    "-acodec", "pcm_s16le", // PCM codec
+                    "-ar", "16000", // 16kHz sample rate
+                    "-ac", "1", // Mono
+                    // Audio Preprocessing for better transcription quality
+                    "-af", "highpass=f=200,lowpass=f=3000,dynaudnorm",
+                    wav_path.to_str().unwrap(),
+                ])
+                .output();
+            
+            match output {
+                Ok(out) if out.status.success() => {
+                    eprintln!("[INFO] FFmpeg preprocessing complete: {}", wav_path.display());
+                    true
                 }
+                Ok(out) => {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    eprintln!("[WARN] FFmpeg conversion failed (status {}): {}", out.status, stderr);
+                    false
+                }
+                Err(e) => {
+                    eprintln!("[WARN] Failed to execute FFmpeg: {}", e);
+                    false
+                }
+            }
+        } else {
+            eprintln!("[WARN] FFmpeg not found, skipping audio preprocessing filters");
+            false
+        };
 
-                eprintln!("[INFO] FFmpeg conversion complete: {}", wav_path.display());
-                wav_path
+        if ffmpeg_success {
+            wav_path
+        } else {
+            // Fallback to Rust audio conversion (no advanced filters)
+            eprintln!("[INFO] Falling back to Rust audio conversion");
+            match crate::audio::converter::convert_to_wav(&validated_path, &wav_path) {
+                Ok(_) => {
+                    eprintln!("[INFO] Rust audio conversion complete: {}", wav_path.display());
+                    wav_path
+                }
+                Err(e) => {
+                    return Err(format!("Both FFmpeg and Rust audio conversion failed: {}", e));
+                }
             }
         }
     } else {

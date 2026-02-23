@@ -369,7 +369,6 @@ impl TranscriptionManager {
         eprintln!("[INFO] Transcription complete: {:.2}s audio in {:.2}s (RTF: {:.2}x)",
             duration, elapsed.as_secs_f64(), realtime_factor);
 
-        // Convert segments (0.2.2 uses f32 for timings, no language field on result)
         let raw_segments: Vec<TranscriptionSegment> = segments_0_2_2.into_iter()
             .map(|s| TranscriptionSegment {
                 start: s.start as f64,
@@ -436,8 +435,7 @@ impl TranscriptionManager {
         eprintln!("[INFO] Transcription complete: {:.2}s audio in {:.2}s (RTF: {:.2}x)",
             duration, elapsed.as_secs_f64(), realtime_factor);
 
-        // Convert result - Parakeet returns segments (0.2.2 uses f32 for timings)
-        let segments: Vec<TranscriptionSegment> = segments_0_2_2.into_iter()
+        let raw_segments: Vec<TranscriptionSegment> = segments_0_2_2.into_iter()
             .map(|s| TranscriptionSegment {
                 start: s.start as f64,
                 end: s.end as f64,
@@ -446,6 +444,13 @@ impl TranscriptionManager {
                 confidence: 1.0,
             })
             .collect();
+
+        // Этап 3: Post-filter hallucinations
+        let segments = Self::filter_hallucinations(&raw_segments);
+        if segments.len() < raw_segments.len() {
+            eprintln!("[VAD] Filtered {} hallucination segment(s) out of {}",
+                raw_segments.len() - segments.len(), raw_segments.len());
+        }
 
         Ok(TranscriptionResult {
             segments,
@@ -501,7 +506,7 @@ impl TranscriptionManager {
             duration, elapsed.as_secs_f64(), realtime_factor);
 
         // Convert segments (0.2.2 uses f32 for timings)
-        let segments: Vec<TranscriptionSegment> = segments_0_2_2.into_iter()
+        let raw_segments: Vec<TranscriptionSegment> = segments_0_2_2.into_iter()
             .map(|s| TranscriptionSegment {
                 start: s.start as f64,
                 end: s.end as f64,
@@ -510,6 +515,13 @@ impl TranscriptionManager {
                 confidence: 1.0,
             })
             .collect();
+
+        // Этап 3: Post-filter hallucinations
+        let segments = Self::filter_hallucinations(&raw_segments);
+        if segments.len() < raw_segments.len() {
+            eprintln!("[VAD] Filtered {} hallucination segment(s) out of {}",
+                raw_segments.len() - segments.len(), raw_segments.len());
+        }
 
         Ok(TranscriptionResult {
             segments,
