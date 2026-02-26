@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "transcribe-video-ai"
+version = "0.1.0"
+description = "AI Engine for Transcribe Video - Whisper/Parakeet transcription with diarization"
+readme = "README.md"
+requires-python = ">=3.8,<3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "Transcribe Video Team"}
+]
+keywords = ["transcription", "whisper", "speech-to-text", "diarization"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+# Installation notes:
+# For GPU support (CUDA 12.1), use:
+#   pip install -e . --extra-index-url https://download.pytorch.org/whl/cu121
+# For CPU-only, use:
+#   pip install -e .
+
+dependencies = [
+    "faster-whisper==1.2.1",
+    "torch==2.5.1",
+    "pyannote.audio==3.3.2",
+    "numpy==1.26.4",
+    "torchaudio==2.5.1",
+    "torchvision==0.20.1",
+    "ffmpeg-python==0.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "black>=22.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+transcribe-ai = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "factory", "base"]

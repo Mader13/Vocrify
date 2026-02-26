@@ -1,0 +1,10 @@
+^E:\DEV\TRANSCRIBE-VIDEO\SRC-TAURI\TARGET-CHECK-2\DEBUG\BUILD\WHISPER-RS-SYS-4206ADE6DEA61025\OUT\BUILD\CMAKEFILES\9DE0D1B7F19855041D986F45E83892AC\INSTALL_FORCE.RULE
+setlocal
+cd .
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

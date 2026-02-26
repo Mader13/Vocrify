@@ -1,0 +1,11 @@
+E:\Dev\transcribe-video\src-tauri\target-check-2\debug\deps\serde_untagged-b00faff42d0dcf39.d: C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\lib.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\any.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\error.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\int.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\map.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\seed.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\seq.rs
+
+E:\Dev\transcribe-video\src-tauri\target-check-2\debug\deps\libserde_untagged-b00faff42d0dcf39.rmeta: C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\lib.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\any.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\error.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\int.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\map.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\seed.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\seq.rs
+
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\lib.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\any.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\error.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\int.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\map.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\seed.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-untagged-0.1.9\src\seq.rs:

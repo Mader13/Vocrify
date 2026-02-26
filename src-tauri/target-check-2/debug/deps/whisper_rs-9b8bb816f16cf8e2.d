@@ -1,0 +1,15 @@
+E:\Dev\transcribe-video\src-tauri\target-check-2\debug\deps\whisper_rs-9b8bb816f16cf8e2.d: C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\lib.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\error.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\standalone.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\utilities.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_ctx.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_ctx_wrapper.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_grammar.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_params.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_state.rs
+
+E:\Dev\transcribe-video\src-tauri\target-check-2\debug\deps\libwhisper_rs-9b8bb816f16cf8e2.rmeta: C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\lib.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\error.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\standalone.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\utilities.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_ctx.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_ctx_wrapper.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_grammar.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_params.rs C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_state.rs
+
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\lib.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\error.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\standalone.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\utilities.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_ctx.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_ctx_wrapper.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_grammar.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_params.rs:
+C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\whisper-rs-0.13.2\src\whisper_state.rs:
+
+# env-dep:WHISPER_CPP_VERSION=1.7.1

@@ -1,0 +1,10 @@
+prefix=E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out
+exec_prefix=${prefix}
+libdir=E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/lib
+includedir=${prefix}/include
+
+Name: whisper
+Description: Port of OpenAI's Whisper model in C/C++
+Version: 1.7.1
+Libs: -L${libdir} -lwhisper
+Cflags: -I${includedir}

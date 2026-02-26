@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\9de0d1b7f19855041d986f45e83892ac\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{7C99A9CF-427A-3B7C-BC84-327DB9079392}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

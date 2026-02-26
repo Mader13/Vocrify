@@ -1,0 +1,534 @@
+cargo:rerun-if-changed=wrapper.h
+cargo:rerun-if-env-changed=TARGET
+cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64-pc-windows-msvc
+cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_msvc
+cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS
+cargo:rerun-if-changed=wrapper.h
+cargo:rerun-if-changed=./whisper.cpp\include/whisper.h
+cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdbool.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stddef.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\vcruntime.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\sal.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\concurrencysal.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\vadefs.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdint.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\vcruntime.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stdio.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt_wstdio.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt_stdio_config.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stddef.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdint.h
+cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdbool.h
+cargo:rerun-if-changed=./whisper.cpp\ggml/include/ggml.h
+cargo:rerun-if-env-changed=VULKAN_SDK
+cargo:rustc-link-lib=vulkan-1
+cargo:rustc-link-search=E:\Programs\Vulkan SDK\Lib
+CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc = None
+CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = None
+HOST_CMAKE_TOOLCHAIN_FILE = None
+CMAKE_TOOLCHAIN_FILE = None
+CMAKE_GENERATOR_x86_64-pc-windows-msvc = None
+CMAKE_GENERATOR_x86_64_pc_windows_msvc = None
+HOST_CMAKE_GENERATOR = None
+CMAKE_GENERATOR = None
+CMAKE_PREFIX_PATH_x86_64-pc-windows-msvc = None
+CMAKE_PREFIX_PATH_x86_64_pc_windows_msvc = None
+HOST_CMAKE_PREFIX_PATH = None
+CMAKE_PREFIX_PATH = None
+CMAKE_x86_64-pc-windows-msvc = None
+CMAKE_x86_64_pc_windows_msvc = None
+HOST_CMAKE = None
+CMAKE = None
+Running with debug output on.
+-- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.26200.
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+-- The C compiler identification is MSVC 19.50.35723.0
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake
+-- The CXX compiler identification is MSVC 19.50.35723.0
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake
+-- Detecting C compiler ABI info
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+-- Detecting C compiler ABI info - done
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+-- Check for working C compiler: C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe - skipped
+   Called from: [2]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+-- Detecting C compile features
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+-- Detecting C compile features - done
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+-- Detecting CXX compiler ABI info
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+-- Detecting CXX compiler ABI info - done
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+-- Check for working CXX compiler: C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe - skipped
+   Called from: [2]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+-- Detecting CXX compile features
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+-- Detecting CXX compile features - done
+   Called from: [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+-- Found Git: C:/Program Files/Git/cmd/git.exe (found version "2.51.1.windows.1")
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/cmake/git-vars.cmake
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindGit.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+                [4]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceCompiles.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceCompiles.cmake
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+                [4]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceCompiles.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceCompiles.cmake
+-- Looking for pthread_create in pthreads
+   Called from: [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+-- Looking for pthread_create in pthreads - not found
+   Called from: [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+-- Looking for pthread_create in pthread
+   Called from: [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+-- Looking for pthread_create in pthread - not found
+   Called from: [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+-- Found Threads: TRUE
+   Called from: [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
+-- Found Vulkan: E:/Programs/Vulkan SDK/Lib/vulkan-1.lib (found version "1.4.341") found components: glslc glslangValidator
+   Called from: [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [3]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindVulkan.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
+-- Vulkan found
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+-- Warning: ccache not found - consider installing it for faster compilation or disable this warning with GGML_CCACHE=OFF
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+-- CMAKE_SYSTEM_PROCESSOR: AMD64
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+-- CMAKE_GENERATOR_PLATFORM: x64
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+-- x86 detected
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+-- Performing Test HAS_AVX_1
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_AVX_1 - Success
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_AVX2_1
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_AVX2_1 - Success
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_FMA_1
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_FMA_1 - Success
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_AVX512_1
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_AVX512_1 - Failed
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_AVX512_2
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Performing Test HAS_AVX512_2 - Failed
+   Called from: [5]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+                [4]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [3]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/cmake/FindSIMD.cmake
+                [2]	C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                [1]	C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+-- Configuring done (25.4s)
+-- Generating E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+-- Generating E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/CMakeLists.txt
+-- Generating E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+-- Generating E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/vulkan-shaders
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/vulkan-shaders/CMakeLists.txt
+-- Generating E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/src
+   Called from: [1]	E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/src/CMakeLists.txt
+-- Generating done (0.1s)
+-- Build files have been written to: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build
+Change Dir: 'E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build'
+
+Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" INSTALL.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VisualStudioVersion=18.0 /m:1 /v:n
+MSBuild version 18.0.5+e22287bf1 for .NET Framework
+Build started 2/25/2026 7:49:03 PM.
+
+Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.vcxproj" on node 1 (default targets).
+Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.vcxproj" (1) is building "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ZERO_CHECK.vcxproj" (2) on node 1 (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release\ZERO_CHECK\".
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+  Creating directory "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+CustomBuild:
+  1>Checking Build System
+FinalizeBuildStatus:
+  Deleting file "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+  Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\ZERO_CHECK.lastbuildstate".
+Done Building Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ZERO_CHECK.vcxproj" (default targets).
+Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.vcxproj" (1) is building "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.vcxproj" (3) on node 1 (default targets).
+Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.vcxproj" (3) is building "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.vcxproj" (4) on node 1 (default targets).
+Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.vcxproj" (4) is building "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.vcxproj" (5) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+  Creating directory "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\bin\Release\".
+  Creating directory "vulkan-shaders-gen.dir\Release\vulkan-s.8977EC51.tlog\".
+InitializeBuildStatus:
+  Creating "vulkan-shaders-gen.dir\Release\vulkan-s.8977EC51.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "vulkan-shaders-gen.dir\Release\vulkan-s.8977EC51.tlog\unsuccessfulbuild".
+CustomBuild:
+  Building Custom Rule E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/vulkan-shaders/CMakeLists.txt
+ClCompile:
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\CL.exe /c /nologo /W0 /WX- /diagnostics:column /O2 /Ob2 /D _MBCS /D WHISPER_DEBUG /D NDEBUG /D GGML_SCHED_MAX_COPIES=4 /D "CMAKE_INTDIR=\"Release\"" /MD /Fo"vulkan-shaders-gen.dir\Release\\" /Fd"vulkan-shaders-gen.dir\Release\vc145.pdb" /external:W0 /TP /errorReport:queue  -Brepro "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\vulkan-shaders\vulkan-shaders-gen.cpp"
+  vulkan-shaders-gen.cpp
+C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\ppltasks.h(1580,21): warning C4530: Использован обработчик исключений C++, но семантика уничтожения объектов не включена. Задайте параметр /EHsc [E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.vcxproj]
+  (compiling source file '../../../../whisper.cpp/ggml/src/vulkan-shaders/vulkan-shaders-gen.cpp')
+  
+MakeDirsForLink:
+  Creating directory "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\Release\".
+Link:
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\link.exe /OUT:"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\bin\Release\vulkan-shaders-gen.exe" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:"E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/bin/Release/vulkan-shaders-gen.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/vulkan-shaders/Release/vulkan-shaders-gen.lib" /MACHINE:X64  /machine:x64 "vulkan-shaders-gen.dir\Release\vulkan-shaders-gen.obj"
+  vulkan-shaders-gen.vcxproj -> E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\bin\Release\vulkan-shaders-gen.exe
+FinalizeBuildStatus:
+  Deleting file "vulkan-shaders-gen.dir\Release\vulkan-s.8977EC51.tlog\unsuccessfulbuild".
+  Touching "vulkan-shaders-gen.dir\Release\vulkan-s.8977EC51.tlog\vulkan-shaders-gen.lastbuildstate".
+Done Building Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.vcxproj" (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+  Creating directory "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\Release\".
+  Creating directory "ggml.dir\Release\ggml.tlog\".
+InitializeBuildStatus:
+  Creating "ggml.dir\Release\ggml.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "ggml.dir\Release\ggml.tlog\unsuccessfulbuild".
+CustomBuild:
+  Generate vulkan shaders
+  ggml_vulkan: Generating and compiling shaders to SPIR-V
+  Building Custom Rule E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/CMakeLists.txt
+ClCompile:
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\CL.exe /c /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\..\include" /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\." /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src" /nologo /W0 /WX- /diagnostics:column /O2 /Ob2 /D _MBCS /D WHISPER_DEBUG /D NDEBUG /D GGML_USE_VULKAN /D GGML_SCHED_MAX_COPIES=4 /D _XOPEN_SOURCE=600 /D _CRT_SECURE_NO_WARNINGS /D "CMAKE_INTDIR=\"Release\"" /MD /arch:AVX2 /std:c11 /Fo"ggml.dir\Release\\" /Fd"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\Release\ggml.pdb" /external:W0 /TC /errorReport:queue  /external:I "E:/Programs/Vulkan SDK/include" -Brepro "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\ggml.c" "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\ggml-alloc.c" "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\ggml-quants.c" "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\ggml-aarch64.c"
+  ggml.c
+  ggml-alloc.c
+  ggml-quants.c
+  ggml-aarch64.c
+  Создание кода...
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\CL.exe /c /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\..\include" /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\." /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src" /nologo /W0 /WX- /diagnostics:column /O2 /Ob2 /D _MBCS /D WHISPER_DEBUG /D NDEBUG /D GGML_USE_VULKAN /D GGML_SCHED_MAX_COPIES=4 /D _XOPEN_SOURCE=600 /D _CRT_SECURE_NO_WARNINGS /D "CMAKE_INTDIR=\"Release\"" /MD /arch:AVX2 /Fo"ggml.dir\Release\\" /Fd"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\Release\ggml.pdb" /external:W0 /TP /errorReport:queue  /external:I "E:/Programs/Vulkan SDK/include" -Brepro "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\ggml-backend.cpp" "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\ggml-vulkan.cpp" "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml-vulkan-shaders.cpp"
+  ggml-backend.cpp
+  ggml-vulkan.cpp
+C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\ppltasks.h(1580,21): warning C4530: Использован обработчик исключений C++, но семантика уничтожения объектов не включена. Задайте параметр /EHsc [E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.vcxproj]
+  (compiling source file '../../../whisper.cpp/ggml/src/ggml-vulkan.cpp')
+  
+  ggml-vulkan-shaders.cpp
+  Создание кода...
+Lib:
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\Lib.exe /OUT:"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\Release\ggml.lib" /NOLOGO /MACHINE:X64  /machine:x64 ggml.dir\Release\ggml.obj
+  "ggml.dir\Release\ggml-alloc.obj"
+  "ggml.dir\Release\ggml-backend.obj"
+  "ggml.dir\Release\ggml-quants.obj"
+  "ggml.dir\Release\ggml-vulkan.obj"
+  "ggml.dir\Release\ggml-vulkan-shaders.obj"
+  "ggml.dir\Release\ggml-aarch64.obj"
+  ggml.vcxproj -> E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\Release\ggml.lib
+FinalizeBuildStatus:
+  Deleting file "ggml.dir\Release\ggml.tlog\unsuccessfulbuild".
+  Touching "ggml.dir\Release\ggml.tlog\ggml.lastbuildstate".
+Done Building Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.vcxproj" (default targets).
+Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.vcxproj" (3) is building "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.vcxproj" (6) on node 1 (default targets).
+PrepareForBuild:
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+  Creating directory "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\Release\".
+  Creating directory "whisper.dir\Release\whisper.tlog\".
+InitializeBuildStatus:
+  Creating "whisper.dir\Release\whisper.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "whisper.dir\Release\whisper.tlog\unsuccessfulbuild".
+CustomBuild:
+  Building Custom Rule E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/src/CMakeLists.txt
+ClCompile:
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\CL.exe /c /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\src\." /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\src\..\include" /I"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\ggml\src\..\include" /nologo /W0 /WX- /diagnostics:column /O2 /Ob2 /D _MBCS /D WHISPER_DEBUG /D NDEBUG /D _CRT_SECURE_NO_WARNINGS /D GGML_USE_VULKAN /D "CMAKE_INTDIR=\"Release\"" /MD /Fo"whisper.dir\Release\\" /Fd"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\Release\whisper.pdb" /external:W0 /TP /errorReport:queue  -Brepro "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\src\whisper.cpp"
+  whisper.cpp
+C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\__msvc_ostream.hpp(781,9): warning C4530: Использован обработчик исключений C++, но семантика уничтожения объектов не включена. Задайте параметр /EHsc [E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.vcxproj]
+  (compiling source file '../../whisper.cpp/src/whisper.cpp')
+      C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\__msvc_ostream.hpp(781,9):
+      контекст создания экземпляра шаблона (сначала самый старый)
+          E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\whisper.cpp\src\whisper.cpp(3203,17):
+          выполняется компиляция ссылки на экземпляр шаблон функции "std::basic_ostream<char,std::char_traits<char>> &std::operator <<<std::char_traits<char>>(std::basic_ostream<char,std::char_traits<char>> &,const char *)"
+  
+Lib:
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\Lib.exe /OUT:"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\Release\whisper.lib" /NOLOGO /MACHINE:X64  /machine:x64 whisper.dir\Release\whisper.obj
+  whisper.vcxproj -> E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\Release\whisper.lib
+FinalizeBuildStatus:
+  Deleting file "whisper.dir\Release\whisper.tlog\unsuccessfulbuild".
+  Touching "whisper.dir\Release\whisper.tlog\whisper.lastbuildstate".
+Done Building Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.vcxproj" (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release\ALL_BUILD\".
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+  Creating directory "x64\Release\ALL_BUILD\ALL_BUILD.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release\ALL_BUILD\ALL_BUILD.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release\ALL_BUILD\ALL_BUILD.tlog\unsuccessfulbuild".
+CustomBuild:
+  Building Custom Rule E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/CMakeLists.txt
+FinalizeBuildStatus:
+  Deleting file "x64\Release\ALL_BUILD\ALL_BUILD.tlog\unsuccessfulbuild".
+  Touching "x64\Release\ALL_BUILD\ALL_BUILD.tlog\ALL_BUILD.lastbuildstate".
+Done Building Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.vcxproj" (default targets).
+PrepareForBuild:
+  Creating directory "x64\Release\INSTALL\".
+  Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+  Creating directory "x64\Release\INSTALL\INSTALL.tlog\".
+InitializeBuildStatus:
+  Creating "x64\Release\INSTALL\INSTALL.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+  Touching "x64\Release\INSTALL\INSTALL.tlog\unsuccessfulbuild".
+CustomBuild:
+  1>
+PostBuildEvent:
+  setlocal
+  "C:\Program Files\CMake\bin\cmake.exe" -DBUILD_TYPE=Release -P cmake_install.cmake
+  if %errorlevel% neq 0 goto :cmEnd
+  :cmEnd
+  endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+  :cmErrorLevel
+  exit /b %1
+  :cmDone
+  if %errorlevel% neq 0 goto :VCEnd
+  :VCEnd
+  -- Install configuration: "Release"
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/lib/whisper.lib
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/whisper.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/lib/cmake/whisper/whisper-config.cmake
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/lib/cmake/whisper/whisper-version.cmake
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/lib/pkgconfig/whisper.pc
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/bin/vulkan-shaders-gen.exe
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/lib/ggml.lib
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-alloc.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-backend.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-blas.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-cann.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-cuda.h
+  -- Up-to-date: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-kompute.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-metal.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-rpc.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-sycl.h
+  -- Installing: E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/include/ggml-vulkan.h
+FinalizeBuildStatus:
+  Deleting file "x64\Release\INSTALL\INSTALL.tlog\unsuccessfulbuild".
+  Touching "x64\Release\INSTALL\INSTALL.tlog\INSTALL.lastbuildstate".
+Done Building Project "E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.vcxproj" (default targets).
+
+Build succeeded.
+
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.vcxproj" (default target) (1) ->
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.vcxproj" (default target) (3) ->
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.vcxproj" (default target) (4) ->
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.vcxproj" (default target) (5) ->
+(ClCompile target) -> 
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\ppltasks.h(1580,21): warning C4530: Использован обработчик исключений C++, но семантика уничтожения объектов не включена. Задайте параметр /EHsc [E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.vcxproj]
+
+
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.vcxproj" (default target) (1) ->
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.vcxproj" (default target) (3) ->
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.vcxproj" (default target) (4) ->
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\ppltasks.h(1580,21): warning C4530: Использован обработчик исключений C++, но семантика уничтожения объектов не включена. Задайте параметр /EHsc [E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.vcxproj]
+
+
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.vcxproj" (default target) (1) ->
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.vcxproj" (default target) (3) ->
+"E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.vcxproj" (default target) (6) ->
+  C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\__msvc_ostream.hpp(781,9): warning C4530: Использован обработчик исключений C++, но семантика уничтожения объектов не включена. Задайте параметр /EHsc [E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.vcxproj]
+
+    3 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:01:00.49
+
+cargo:root=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ALL_BUILD.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\bin
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\bin\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\1894380066ffc76dbf2df74fdafeed3b
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdC
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdC\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdC\Debug\CompilerIdC.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdC\tmp
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdCXX
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdCXX\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdCXX\Debug\CompilerIdCXX.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\CompilerIdCXX\tmp
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\VCTargetsPath
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\VCTargetsPath\x64
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\VCTargetsPath\x64\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\VCTargetsPath\x64\Debug\VCTargetsPath.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\x64
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\4.2.3\x64\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\717f0f9204e401c4708f2bf546cd5f7c
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\84025aa44e20fa17ecd0caf105293e23
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\8450a0fa653eec5495c27c15de110d99
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\9de0d1b7f19855041d986f45e83892ac
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\aebba1886a44083fe93908cf3b24e7f8
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\CMakeScratch
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\CMakeFiles\pkgRedirects
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\ALL_BUILD.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\ALL_BUILD.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\ALL_BUILD.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\ALL_BUILD.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\ALL_BUILD.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\CMakeFiles
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\INSTALL.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\INSTALL.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\INSTALL.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\INSTALL.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\INSTALL.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\CMakeFiles
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.dir\Release\ggml.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\ggml.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\INSTALL.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\INSTALL.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\INSTALL.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\INSTALL.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\INSTALL.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\CMakeFiles
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\INSTALL.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\INSTALL.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\INSTALL.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\INSTALL.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\INSTALL.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.dir\Release\vulkan-s.8977EC51.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders\vulkan-shaders-gen.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ggml\src\vulkan-shaders.spv
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\INSTALL.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\CMakeFiles
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\INSTALL.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\INSTALL.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\INSTALL.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\INSTALL.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\INSTALL.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.dir\Release\whisper.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\src\whisper.dir\RelWithDebInfo
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64\Release\ALL_BUILD
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64\Release\ALL_BUILD\ALL_BUILD.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64\Release\INSTALL
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64\Release\INSTALL\INSTALL.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64\Release\ZERO_CHECK
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\x64\Release\ZERO_CHECK\ZERO_CHECK.tlog
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ZERO_CHECK.dir
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ZERO_CHECK.dir\Debug
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ZERO_CHECK.dir\MinSizeRel
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ZERO_CHECK.dir\Release
+cargo:rustc-link-search=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out\build\ZERO_CHECK.dir\RelWithDebInfo
+cargo:rustc-link-search=native=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\whisper-rs-sys-4206ade6dea61025\out
+cargo:rustc-link-lib=static=whisper
+cargo:rustc-link-lib=static=ggml
+cargo:WHISPER_CPP_VERSION=1.7.1

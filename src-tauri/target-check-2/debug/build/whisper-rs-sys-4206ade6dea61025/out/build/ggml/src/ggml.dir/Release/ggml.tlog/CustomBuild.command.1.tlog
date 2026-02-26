@@ -1,0 +1,20 @@
+^E:\DEV\TRANSCRIBE-VIDEO\SRC-TAURI\TARGET-CHECK-2\DEBUG\BUILD\WHISPER-RS-SYS-4206ADE6DEA61025\OUT\BUILD\CMAKEFILES\1894380066FFC76DBF2DF74FDAFEED3B\GGML-VULKAN-SHADERS.HPP.RULE
+setlocal
+..\..\bin\Release\vulkan-shaders-gen.exe --glslc "E:/Programs/Vulkan SDK/Bin/glslc.exe" --input-dir E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp/ggml/src/vulkan-shaders --output-dir E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/vulkan-shaders.spv --target-hpp E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/ggml-vulkan-shaders.hpp --target-cpp E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/ggml-vulkan-shaders.cpp --no-clean
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^E:\DEV\TRANSCRIBE-VIDEO\SRC-TAURI\TARGET-CHECK-2\DEBUG\BUILD\WHISPER-RS-SYS-4206ADE6DEA61025\OUT\WHISPER.CPP\GGML\SRC\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SE:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/whisper.cpp -BE:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build --check-stamp-file E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

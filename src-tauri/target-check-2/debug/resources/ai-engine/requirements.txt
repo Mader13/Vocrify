@@ -1,0 +1,62 @@
+# Transcribe Video - AI Engine Dependencies
+# Phase 4: Python is ONLY a Sherpa-ONNX diarization microservice.
+# All transcription (Whisper, Parakeet, Moonshine) is handled by Rust transcribe-rs.
+#
+# Install with: pip install -r requirements.txt
+#
+# Compatible with Python 3.9 - 3.12
+# Python 3.13+ may have limited sherpa-onnx support
+
+# ============================================================================
+# SPEAKER DIARIZATION (Multi-speaker identification)
+# ============================================================================
+# Sherpa-ONNX: offline, no token required, CPU-only, cross-platform
+sherpa-onnx==1.12.23
+onnxruntime==1.18.0
+
+# ============================================================================
+# AUDIO PROCESSING
+# ============================================================================
+# Audio I/O for loading and resampling diarization input
+soundfile==0.12.1
+pydub>=0.25.1
+
+# FFmpeg Python bindings (requires ffmpeg system binary)
+ffmpeg-python==0.2.0
+
+# ============================================================================
+# SCIENTIFIC COMPUTING
+# ============================================================================
+numpy==1.26.4
+scipy==1.12.0
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+# HTTP requests for model downloads (sherpa-onnx model files from GitHub releases)
+requests==2.31.0
+
+# Retry/backoff for resilient downloads
+tenacity==8.5.0
+
+# Progress bars for downloads
+tqdm==4.66.4
+
+# JSON schema validation
+jsonschema==4.22.0
+
+# Extended typing and platform utilities
+typing-extensions==4.11.0
+packaging==24.0
+psutil==6.1.0
+
+# ============================================================================
+# VERSION COMPATIBILITY NOTES
+# ============================================================================
+# - Python 3.9-3.12: All packages compatible
+# - torch/pyannote: REMOVED - transcription is handled by Rust transcribe-rs
+# - faster-whisper: REMOVED - Rust uses GGML models via transcribe-rs
+# - nemo_toolkit: REMOVED - Parakeet handled by Rust transcribe-rs engine
+# - HuggingFace hub: REMOVED - no gated repos needed (sherpa-onnx downloads from GitHub)
+#
+# Last updated: 2026-02-23

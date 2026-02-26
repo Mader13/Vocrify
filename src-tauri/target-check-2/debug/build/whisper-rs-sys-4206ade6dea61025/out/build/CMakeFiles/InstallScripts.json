@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/cmake_install.cmake",
+		"E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/cmake_install.cmake",
+		"E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/cmake_install.cmake",
+		"E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/ggml/src/vulkan-shaders/cmake_install.cmake",
+		"E:/Dev/transcribe-video/src-tauri/target-check-2/debug/build/whisper-rs-sys-4206ade6dea61025/out/build/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
