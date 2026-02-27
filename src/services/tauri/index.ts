@@ -6,3 +6,4 @@ export * from "./device-commands";
 export * from "./dialog-commands";
 export * from "./events";
 export * from "./setup-commands";
+export * from "./app-commands";

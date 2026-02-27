@@ -7,8 +7,17 @@ import { useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask } from "@/types";
 
 vi.mock("@/components/features/VideoPlayer", () => ({
-  VideoPlayer: React.forwardRef(function MockVideoPlayer() {
-    return <div data-testid="video-player" />;
+  VideoPlayer: React.forwardRef(function MockVideoPlayer(
+    props: { isVideoVisible?: boolean; showControls?: boolean },
+    _ref,
+  ) {
+    return (
+      <div
+        data-testid="video-player"
+        data-is-video-visible={String(Boolean(props.isVideoVisible))}
+        data-show-controls={String(Boolean(props.showControls))}
+      />
+    );
   }),
 }));
 
@@ -30,6 +39,7 @@ vi.mock("@/components/features/SpeakerNamesModal", () => ({
 
 vi.mock("@/components/features/completed-view-layout", () => ({
   getCompletedViewLayoutMode: () => "stacked",
+  getCompletedViewSplitThreshold: () => 1024,
 }));
 
 function createTask(overrides: Partial<TranscriptionTask> = {}): TranscriptionTask {
@@ -63,7 +73,7 @@ function createTask(overrides: Partial<TranscriptionTask> = {}): TranscriptionTa
 
 function resetUiStore() {
   useUIStore.setState({
-    displayMode: "segments",
+    displayMode: "clean",
     isSidebarCollapsed: false,
     completedViewModeByTask: {},
   });
@@ -84,7 +94,7 @@ describe("CompletedView", () => {
 
     render(<CompletedView task={task} />);
 
-    expect(screen.queryByTitle("Show Segments waveform")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Show waveform Clean")).not.toBeInTheDocument();
     expect(screen.queryByTitle("No speaker data available")).not.toBeInTheDocument();
   });
 
@@ -101,8 +111,25 @@ describe("CompletedView", () => {
 
     render(<CompletedView task={task} />);
 
-    expect(screen.getByTitle("Show Segments waveform")).toBeInTheDocument();
-    expect(screen.getByTitle("Show Speakers waveform")).toBeInTheDocument();
+    expect(screen.getByTitle("Show waveform Clean")).toBeInTheDocument();
+    expect(screen.getByTitle("Show waveform Speakers")).toBeInTheDocument();
+  });
+
+  it("shows waveform and controls in transcript focus mode", () => {
+    const task = createTask();
+
+    useUIStore.setState({
+      completedViewModeByTask: {
+        [task.id]: "transcript-focus",
+      },
+    });
+
+    render(<CompletedView task={task} />);
+
+    const player = screen.getByTestId("video-player");
+    expect(player).toBeInTheDocument();
+    expect(player).toHaveAttribute("data-is-video-visible", "false");
+    expect(player).toHaveAttribute("data-show-controls", "true");
   });
 
   it("allows inline editing for transcription title", () => {

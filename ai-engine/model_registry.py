@@ -10,6 +10,14 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 from dataclasses import dataclass
 
+from model_config import (
+    WHISPER_REPOS,
+    DISTIL_WHISPER_REPOS,
+    PARAKEET_MODELS,
+    SHERPA_DIARIZATION_URLS,
+    GGML_FILENAMES,
+)
+
 
 @dataclass
 class ModelInfo:
@@ -35,35 +43,12 @@ class ModelRegistry:
           ├── sherpa-onnx/
     """
 
-    # Model repository IDs
-    # IMPORTANT: Use GGML models for Rust whisper.cpp engine
-    # These are compatible with the Rust implementation
-    WHISPER_REPOS = {
-        "tiny": "ggerganov/whisper.cpp",
-        "base": "ggerganov/whisper.cpp",
-        "small": "ggerganov/whisper.cpp",
-        "medium": "ggerganov/whisper.cpp",
-        "large-v2": "ggerganov/whisper.cpp",
-        "large-v3": "ggerganov/whisper.cpp",
-    }
-
-    DISTIL_WHISPER_REPOS = {
-        "small": "Systran/faster-distil-whisper-small.en",
-        "small.en": "Systran/faster-distil-whisper-small.en",
-        "medium-en": "distil-whisper/distil-medium.en",
-        "large-v2": "distil-whisper/distil-large-v2",
-        "large-v3": "distil-whisper/distil-large-v3",
-    }
-
-    PARAKEET_MODELS = {
-        "0.6b": "nvidia/parakeet-tdt-0.6b-v3",
-    }
-
-
-    SHERPA_DIARIZATION_URLS = {
-        "segmentation": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
-        "embedding": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx.tar.bz2",
-    }
+    # Model config imported from model_config.py (canonical source of truth)
+    # Class-level aliases for backward compatibility
+    WHISPER_REPOS = WHISPER_REPOS
+    DISTIL_WHISPER_REPOS = DISTIL_WHISPER_REPOS
+    PARAKEET_MODELS = PARAKEET_MODELS
+    SHERPA_DIARIZATION_URLS = SHERPA_DIARIZATION_URLS
 
     def __init__(self, cache_dir: str = "./models_cache"):
         """
@@ -99,16 +84,7 @@ class ModelRegistry:
             raise ValueError(f"Unknown Whisper model size: {model_size}")
 
         # Method 1: Check for GGML .bin file directly (for Rust whisper.cpp)
-        ggml_filename = {
-            "tiny": "ggml-tiny.bin",
-            "base": "ggml-base.bin",
-            "small": "ggml-small.bin",
-            "medium": "ggml-medium.bin",
-            "large": "ggml-large-v1.bin",
-            "large-v1": "ggml-large-v1.bin",
-            "large-v2": "ggml-large-v2.bin",
-            "large-v3": "ggml-large-v3.bin",
-        }.get(model_size)
+        ggml_filename = GGML_FILENAMES.get(model_size)
 
         if ggml_filename:
             # Check in models_cache root (direct download location)
@@ -330,16 +306,7 @@ class ModelRegistry:
             # Whisper GGML models are downloaded as .bin files to {cache_dir}/
             # First check for GGML .bin file (primary location for Rust whisper.cpp)
             size = model_name.replace("whisper-", "")
-            ggml_filename = {
-                "tiny": "ggml-tiny.bin",
-                "base": "ggml-base.bin",
-                "small": "ggml-small.bin",
-                "medium": "ggml-medium.bin",
-                "large": "ggml-large-v1.bin",
-                "large-v1": "ggml-large-v1.bin",
-                "large-v2": "ggml-large-v2.bin",
-                "large-v3": "ggml-large-v3.bin",
-            }.get(size)
+            ggml_filename = GGML_FILENAMES.get(size)
 
             if ggml_filename:
                 ggml_path = self.cache_dir / ggml_filename

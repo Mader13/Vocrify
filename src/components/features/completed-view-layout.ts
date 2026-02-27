@@ -23,6 +23,12 @@ interface CompletedViewLayoutOptions {
   sidebarCollapsed?: boolean;
 }
 
+export function getCompletedViewSplitThreshold(options?: CompletedViewLayoutOptions): number {
+  return options?.sidebarCollapsed
+    ? SPLIT_LAYOUT_MIN_WIDTH
+    : SPLIT_LAYOUT_MIN_WIDTH + SPLIT_LAYOUT_SIDEBAR_EXPANDED_OFFSET;
+}
+
 export function getCompletedViewLayoutMode(
   containerWidth: number,
   options?: CompletedViewLayoutOptions,
@@ -31,9 +37,7 @@ export function getCompletedViewLayoutMode(
     return "stacked";
   }
 
-  const splitThreshold = options?.sidebarCollapsed
-    ? SPLIT_LAYOUT_MIN_WIDTH
-    : SPLIT_LAYOUT_MIN_WIDTH + SPLIT_LAYOUT_SIDEBAR_EXPANDED_OFFSET;
+  const splitThreshold = getCompletedViewSplitThreshold(options);
 
   return containerWidth >= splitThreshold ? "split" : "stacked";
 }

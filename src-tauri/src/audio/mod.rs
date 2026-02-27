@@ -9,13 +9,14 @@
 //! - Extract audio segments
 //! - Get audio metadata (duration, sample rate, channels)
 
-pub mod loader;
 pub mod converter;
+pub mod loader;
 pub mod utils;
+pub mod vad;
 
+pub use converter::{save_wav, to_whisper_format};
 pub use loader::AudioBuffer;
-pub use converter::{to_whisper_format, save_wav};
-pub use utils::{get_duration, slice_audio, merge_intervals};
+pub use utils::{get_duration, merge_intervals, slice_audio};
 
 use anyhow::Result;
 use std::path::Path;

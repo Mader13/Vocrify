@@ -3,16 +3,18 @@
 //! Converts audio to Whisper-compatible format (16kHz mono WAV)
 //! and saves audio buffers to WAV files.
 
-use anyhow::{Result, Context};
-use std::path::Path;
+use anyhow::{Context, Result};
 use hound::{WavSpec, WavWriter};
+use std::path::Path;
 
 use super::loader::AudioBuffer;
 
 /// Convert audio to Whisper format (16kHz mono)
 pub fn to_whisper_format(audio: AudioBuffer) -> Result<AudioBuffer> {
-    eprintln!("[AUDIO] Converting to Whisper format: sr={}, channels={}", 
-        audio.sample_rate, audio.channels);
+    eprintln!(
+        "[AUDIO] Converting to Whisper format: sr={}, channels={}",
+        audio.sample_rate, audio.channels
+    );
 
     // Convert to mono if stereo/multi-channel
     let mono = if audio.channels > 1 {
@@ -30,8 +32,10 @@ pub fn to_whisper_format(audio: AudioBuffer) -> Result<AudioBuffer> {
         mono
     };
 
-    eprintln!("[AUDIO] Whisper format ready: {} samples, sr=16000, channels=1", 
-        resampled.samples.len());
+    eprintln!(
+        "[AUDIO] Whisper format ready: {} samples, sr=16000, channels=1",
+        resampled.samples.len()
+    );
 
     Ok(resampled)
 }
@@ -54,19 +58,21 @@ pub fn save_wav(audio: &AudioBuffer, path: &Path) -> Result<()> {
         sample_format: hound::SampleFormat::Int,
     };
 
-    let mut writer = WavWriter::create(path, spec)
-        .context(format!("Failed to create WAV file: {:?}", path))?;
+    let mut writer =
+        WavWriter::create(path, spec).context(format!("Failed to create WAV file: {:?}", path))?;
 
     // Write samples (convert f32 [-1.0, 1.0] to i16)
     for &sample in &audio.samples {
         // Clamp to [-1.0, 1.0] and convert to i16
         let clamped = sample.clamp(-1.0, 1.0);
         let int_sample = (clamped * i16::MAX as f32) as i16;
-        writer.write_sample(int_sample)
+        writer
+            .write_sample(int_sample)
             .context(format!("Failed to write sample to WAV file: {:?}", path))?;
     }
 
-    writer.finalize()
+    writer
+        .finalize()
         .context(format!("Failed to finalize WAV file: {:?}", path))?;
 
     eprintln!("[AUDIO] Saved {} samples to WAV", audio.samples.len());
@@ -76,7 +82,10 @@ pub fn save_wav(audio: &AudioBuffer, path: &Path) -> Result<()> {
 
 /// Convert audio file to WAV format (16kHz mono)
 pub fn convert_to_wav(input_path: &Path, output_path: &Path) -> Result<AudioBuffer> {
-    eprintln!("[AUDIO] Converting {:?} to WAV at {:?}", input_path, output_path);
+    eprintln!(
+        "[AUDIO] Converting {:?} to WAV at {:?}",
+        input_path, output_path
+    );
 
     // Load audio
     let audio = super::loader::load(input_path)?;

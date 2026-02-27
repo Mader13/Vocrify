@@ -1,5 +1,5 @@
 /**
- * Core Tasks Store — internal module.
+ * Core Tasks Store - internal module.
  *
  * All Zustand store definitions live here so that higher-level modules
  * (settingsStore, archiveStore, tasksStore) can import without circular deps.
@@ -762,7 +762,7 @@ export function useArchivedTasks(): TranscriptionTask[] {
   return useMemo(() => getArchivedTasks(tasks), [tasks]);
 }
 
-/** @deprecated Use `useTasks` directly — this alias exists for backward compat */
+/** @deprecated Use `useTasks` directly - this alias exists for backward compat */
 export const useSettingsStore = useTasks;
 
 // ============================================================================
@@ -783,8 +783,8 @@ interface UIState {
   isSidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebar: () => void;
-  displayMode: "segments" | "speakers";
-  setDisplayMode: (mode: "segments" | "speakers") => void;
+  displayMode: "clean" | "speakers";
+  setDisplayMode: (mode: "clean" | "speakers") => void;
   completedViewModeByTask: Record<string, "balanced" | "transcript-focus">;
   getCompletedViewModeForTask: (taskId: string) => "balanced" | "transcript-focus";
   setCompletedViewModeForTask: (taskId: string, mode: "balanced" | "transcript-focus") => void;
@@ -804,7 +804,7 @@ const useUIState = create<UIState>((set, get) => ({
   isSidebarCollapsed: false,
   setSidebarCollapsed: (collapsed) => set({ isSidebarCollapsed: collapsed }),
   toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
-  displayMode: "segments",
+  displayMode: "clean",
   setDisplayMode: (mode) => set({ displayMode: mode }),
   completedViewModeByTask: {},
   getCompletedViewModeForTask: (taskId) => get().completedViewModeByTask[taskId] ?? "balanced",

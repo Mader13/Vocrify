@@ -6,10 +6,10 @@
 //! This module calls the Python ai-engine solely for:
 //! - Sherpa-ONNX speaker diarization
 
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use thiserror::Error;
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::python_installer::create_hidden_command;
@@ -46,18 +46,30 @@ pub struct SpeakerSegment {
 
 /// Python bridge for Sherpa-ONNX diarization
 pub struct PythonBridge {
-    python_path: PathBuf,
-    engine_path: PathBuf,
-    cache_dir: PathBuf,
+    pub python_path: PathBuf,
+    pub engine_path: PathBuf,
+    /// Directory containing AI models (passed as `--cache-dir` to Python)
+    pub models_dir: PathBuf,
+    /// Directory for temporary audio WAV files used during diarization
+    pub cache_dir: PathBuf,
 }
 
 impl PythonBridge {
-    /// Create a new PythonBridge
-    pub fn new(python_path: &Path, engine_path: &Path, cache_dir: &Path) -> Self {
+    /// Create a new PythonBridge.
+    ///
+    /// - `models_dir`: where AI models are stored - passed as `--cache-dir` to Python
+    /// - `audio_cache_dir`: where temporary WAV files are written during diarization
+    pub fn new(
+        python_path: &Path,
+        engine_path: &Path,
+        models_dir: &Path,
+        audio_cache_dir: &Path,
+    ) -> Self {
         Self {
             python_path: python_path.to_path_buf(),
             engine_path: engine_path.to_path_buf(),
-            cache_dir: cache_dir.to_path_buf(),
+            models_dir: models_dir.to_path_buf(),
+            cache_dir: audio_cache_dir.to_path_buf(),
         }
     }
 
@@ -73,9 +85,13 @@ impl PythonBridge {
         let mut cmd = create_hidden_command(&self.python_path);
         cmd.arg(&self.engine_path)
             .arg("--diarize-only")
-            .arg("--provider").arg("sherpa-onnx")
-            .arg("--audio").arg(audio_path)
-            .arg("--cache-dir").arg(&self.cache_dir)
+            .arg("--provider")
+            .arg("sherpa-onnx")
+            .arg("--audio")
+            .arg(audio_path)
+            .arg("--cache-dir")
+            .arg(&self.models_dir)
+            .env("PYTHONUNBUFFERED", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -83,47 +99,81 @@ impl PythonBridge {
             cmd.arg("--num-speakers").arg(n.to_string());
         }
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .map_err(|e| PythonBridgeError::SpawnError(format!("Failed to spawn Python: {}", e)))?;
 
-        let stdout = child.stdout.take().expect("Failed to capture stdout");
-        let stderr = child.stderr.take().expect("Failed to capture stderr");
+        let stdout = child.stdout.take().ok_or_else(|| {
+            PythonBridgeError::SpawnError(
+                "Failed to capture stdout from Python process (pipe not created)".to_string(),
+            )
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| {
+            PythonBridgeError::SpawnError(
+                "Failed to capture stderr from Python process (pipe not created)".to_string(),
+            )
+        })?;
 
-        let mut reader = BufReader::new(stdout).lines();
-        let mut stderr_reader = BufReader::new(stderr).lines();
+        let stdout_task = tokio::spawn(async move {
+            let mut reader = BufReader::new(stdout).lines();
+            let mut segments = Vec::new();
 
-        let mut segments = Vec::new();
+            while let Ok(Some(line)) = reader.next_line().await {
+                if line.trim().is_empty() {
+                    continue;
+                }
 
-        while let Ok(Some(line)) = reader.next_line().await {
-            if line.is_empty() || !line.starts_with('{') {
-                continue;
-            }
+                if !line.starts_with('{') {
+                    eprintln!("[PYTHON STDOUT] {}", line);
+                    continue;
+                }
 
-            if let Ok(msg) = serde_json::from_str::<DiarizationMessage>(&line) {
-                match msg {
-                    DiarizationMessage::Segments { segments: segs } => {
+                match serde_json::from_str::<DiarizationMessage>(&line) {
+                    Ok(DiarizationMessage::Segments { segments: segs }) => {
                         segments = segs;
                     }
-                    DiarizationMessage::Error { error } => {
+                    Ok(DiarizationMessage::Error { error }) => {
                         return Err(PythonBridgeError::ProcessError(error));
                     }
-                    _ => {}
+                    Ok(DiarizationMessage::Progress { message }) => {
+                        eprintln!("[DIARIZATION] {}", message);
+                    }
+                    Err(_) => {
+                        eprintln!("[PYTHON STDOUT] {}", line);
+                    }
                 }
             }
-        }
 
-        while let Ok(Some(line)) = stderr_reader.next_line().await {
-            eprintln!("[PYTHON STDERR] {}", line);
-        }
+            Ok::<Vec<SpeakerSegment>, PythonBridgeError>(segments)
+        });
+
+        let stderr_task = tokio::spawn(async move {
+            let mut stderr_reader = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = stderr_reader.next_line().await {
+                eprintln!("[PYTHON STDERR] {}", line);
+            }
+        });
 
         let status = child.wait().await?;
+
+        let segments = stdout_task
+            .await
+            .map_err(|e| PythonBridgeError::SpawnError(format!("stdout task failed: {}", e)))??;
+        stderr_task
+            .await
+            .map_err(|e| PythonBridgeError::SpawnError(format!("stderr task failed: {}", e)))?;
+
         if !status.success() {
-            return Err(PythonBridgeError::ProcessError(
-                format!("Python process exited with code: {:?}", status.code())
-            ));
+            return Err(PythonBridgeError::ProcessError(format!(
+                "Python process exited with code: {:?}",
+                status.code()
+            )));
         }
 
-        eprintln!("[INFO] PythonBridge: Diarization complete, {} segments", segments.len());
+        eprintln!(
+            "[INFO] PythonBridge: Diarization complete, {} segments",
+            segments.len()
+        );
         Ok(segments)
     }
 
@@ -131,7 +181,8 @@ impl PythonBridge {
     pub async fn check_available(&self) -> Result<bool, PythonBridgeError> {
         let output = create_hidden_command(&self.python_path)
             .arg(&self.engine_path)
-            .arg("--command").arg("check_python")
+            .arg("--command")
+            .arg("check_python")
             .output()
             .await?;
 
@@ -143,10 +194,16 @@ impl PythonBridge {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum DiarizationMessage {
-    Segments { segments: Vec<SpeakerSegment> },
-    Error { error: String },
+    Segments {
+        segments: Vec<SpeakerSegment>,
+    },
+    Error {
+        error: String,
+    },
     #[allow(dead_code)]
-    Progress { message: String },
+    Progress {
+        message: String,
+    },
 }
 
 #[cfg(test)]

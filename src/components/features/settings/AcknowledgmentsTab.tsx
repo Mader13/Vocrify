@@ -21,8 +21,8 @@ export function AcknowledgmentsTab() {
       </div>
 
       <div className="space-y-6">
-        <div className="p-4 bg-gradient-to-r from-red-500/10 to-pink-500/10 rounded-2xl border border-red-500/20 flex-shrink-0">
-          <p className="text-center text-sm text-red-500/90 dark:text-red-400">
+        <div className="p-4 rounded-2xl border border-destructive/35 bg-destructive/10 flex-shrink-0">
+          <p className="text-center text-sm text-destructive dark:text-destructive/85">
             <Heart className="h-4 w-4 inline mr-1.5 -mt-0.5" />
             {t("settings.acknowledgmentsThankYou")}
             <Heart className="h-4 w-4 inline ml-1.5 -mt-0.5" />

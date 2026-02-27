@@ -10,14 +10,14 @@ import type { DeviceInfo, LocalModel } from "./index";
  * - python: Check Python environment and PyTorch
  * - ffmpeg: Check FFmpeg installation
  * - device: Check available compute devices (GPU/CPU)
- * - optional: Optional components (HuggingFace token)
+ * - model: Check AI models
  * - summary: Final getting-started instructions before first transcription
  */
 export type SetupStep =
   | "python"
   | "ffmpeg"
   | "device"
-  | "optional"
+  | "model"
   | "summary";
 
 /**
@@ -49,14 +49,14 @@ export interface PythonCheckResult {
   executable: string | null;
   /** Whether Python is running in a virtual environment */
   inVenv: boolean;
-  /** Whether PyTorch is installed */
-  pytorchInstalled: boolean;
-  /** PyTorch version string (e.g., "2.5.1") */
-  pytorchVersion: string | null;
-  /** Whether CUDA is available in PyTorch */
-  cudaAvailable: boolean;
-  /** Whether MPS (Apple Silicon) is available in PyTorch */
-  mpsAvailable: boolean;
+
+
+
+
+
+
+
+
   /** Human-readable message about the check result */
   message: string;
 }
@@ -121,8 +121,6 @@ export interface SetupWizardState {
   device: DeviceCheckResult | null;
   /** Model check result */
   model: ModelCheckResult | null;
-  /** HuggingFace API token (optional) */
-  huggingFaceToken: string | null;
 }
 
 /**

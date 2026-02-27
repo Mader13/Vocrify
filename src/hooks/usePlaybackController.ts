@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePlaybackStore } from '@/stores/playbackStore';
 import { logger } from '@/lib/logger';
 
-export type SeekSource = 'video' | 'waveform' | 'miniplayer' | 'store' | null;
+export type SeekSource = 'video' | 'waveform' | 'store' | null;
 
 export interface UsePlaybackControllerOptions {
   taskId: string;
@@ -59,9 +59,11 @@ export function usePlaybackController({
   // Use individual store selector to track active player state
   const playingTaskId = usePlaybackStore((s) => s.playingTaskId);
   const storeIsPlaying = usePlaybackStore((s) => s.isPlaying);
+  const activeForegroundPlayerId = usePlaybackStore((s) => s.activeForegroundPlayerId);
   
-  // Track if we're the active player (the one shown on screen)
-  const isActivePlayer = playingTaskId === taskId;
+  // Track if this controller instance is the authoritative player.
+  const isTaskSelectedForPlayback = playingTaskId === taskId;
+  const isActivePlayer = isTaskSelectedForPlayback && activeForegroundPlayerId === taskId;
   
   // Local state for immediate UI feedback (before store updates)
   const [currentTime, setCurrentTime] = useState(0);
@@ -76,6 +78,7 @@ export function usePlaybackController({
   const isWaveformReadyRef = useRef(isWaveformReady);
   const hasVideoElementRef = useRef(hasVideoElement);
   const currentTimeRef = useRef(0);
+  const publishedTimeRef = useRef(0);
   const durationRef = useRef(0);
   
   // Store action refs for stable callback dependencies
@@ -266,6 +269,7 @@ export function usePlaybackController({
     
     // Update store
     store.updateTime(clampedTime);
+    publishedTimeRef.current = clampedTime;
     setCurrentTime(clampedTime);
     
     // Execute seek on authoritative element
@@ -331,69 +335,55 @@ export function usePlaybackController({
   // Event Subscriptions (authoritative element → store)
   // ============================================
   
-  // Subscribe to store changes for external control (MiniPlayer, etc.)
-  useEffect(() => {
-    if (!isActivePlayer) return;
-    
-    // Handle play requests from MiniPlayer via window events
-    const handlePlayRequest = (e: Event) => {
-      const taskIdFromEvent = (e as CustomEvent<{ taskId: string }>).detail?.taskId;
-      if (taskIdFromEvent !== taskId) return;
-      
-      logger.debug('[PlaybackController] Received play request', { taskId });
-      play();
-    };
-    
-    const handlePauseRequest = (e: Event) => {
-      const taskIdFromEvent = (e as CustomEvent<{ taskId: string }>).detail?.taskId;
-      if (taskIdFromEvent !== taskId) return;
-      
-      logger.debug('[PlaybackController] Received pause request', { taskId });
-      pause();
-    };
-    
-    window.addEventListener('miniplayer-play', handlePlayRequest);
-    window.addEventListener('miniplayer-pause', handlePauseRequest);
-    
-    return () => {
-      window.removeEventListener('miniplayer-play', handlePlayRequest);
-      window.removeEventListener('miniplayer-pause', handlePauseRequest);
-    };
-  }, [isActivePlayer, taskId, play, pause]);
-  
   // Sync with store state on mount (restore position)
   // FIX #3: Also trigger when transitioning from inactive → active
   const restorePlayed = useRef(false);
   useEffect(() => {
     const store = storeActionsRef.current;
-    
+    let frameId: number | null = null;
+
     // Only restore if we're active and haven't restored yet
     if (!isActivePlayer || restorePlayed.current) return;
-    restorePlayed.current = true;
-    
-    const { currentTime: storeTime, isPlaying: storeIsPlaying, duration: storeDuration } = store;
-    
-    // Restore position
-    if (storeTime > 0) {
-      const videoEl = videoElRef.current;
-      const ws = wsRef.current;
+
+    const tryRestore = () => {
+      const { currentTime: storeTime, isPlaying: storeIsPlaying, duration: storeDuration } = store;
       const hasVideo = hasVideoElementRef.current;
-      
-      if (hasVideo && videoEl) {
-        videoEl.currentTime = storeTime;
-      } else if (ws?.seekTo && isWaveformReadyRef.current) {
-        const dur = storeDuration || ws.getDuration?.() || 0;
-        if (dur > 0) {
-          ws.seekTo(storeTime / dur);
+      const videoEl = videoRef.current ?? videoElRef.current;
+      const ws = wsRef.current;
+      const waveformReady = isWaveformReadyRef.current;
+
+      const mediaReady = hasVideo ? !!videoEl : !!ws && waveformReady;
+      if (!mediaReady) {
+        frameId = requestAnimationFrame(tryRestore);
+        return;
+      }
+
+      restorePlayed.current = true;
+
+      if (storeTime > 0) {
+        if (hasVideo && videoEl) {
+          videoEl.currentTime = storeTime;
+        } else if (ws?.seekTo && waveformReady) {
+          const dur = storeDuration || ws.getDuration?.() || 0;
+          if (dur > 0) {
+            ws.seekTo(storeTime / dur);
+          }
         }
       }
-    }
-    
-    // Restore playing state
-    if (storeIsPlaying) {
-      play();
-    }
-  }, [isActivePlayer, play]);
+
+      if (storeIsPlaying) {
+        play();
+      }
+    };
+
+    tryRestore();
+
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [isActivePlayer, play, videoRef]);
   
   // Subscribe to store duration changes
   useEffect(() => {
@@ -421,7 +411,7 @@ export function usePlaybackController({
       const dur = videoEl.duration;
       
       // Update local state for immediate UI feedback
-      if (Math.abs(time - currentTimeRef.current) > 0.05) {
+      if (Math.abs(time - currentTimeRef.current) > 0.1) {
         setCurrentTime(time);
       }
       
@@ -434,8 +424,20 @@ export function usePlaybackController({
       // Publish to store (with source tracking to prevent loops)
       // We don't pass 'video' as source here to allow sync,
       // but the actual seek operations check source before applying
-      if (store.playingTaskId === taskId) {
+      if (
+        store.playingTaskId === taskId &&
+        Math.abs(time - publishedTimeRef.current) > 0.2
+      ) {
         store.updateTime(time);
+        publishedTimeRef.current = time;
+      }
+    };
+
+    const handleLoadedMetadata = () => {
+      const dur = videoEl.duration;
+      if (Number.isFinite(dur) && dur > 0 && dur !== durationRef.current) {
+        setDuration(dur);
+        store.setDuration(dur);
       }
     };
     
@@ -459,11 +461,15 @@ export function usePlaybackController({
     videoEl.addEventListener('play', handlePlay);
     videoEl.addEventListener('pause', handlePause);
     videoEl.addEventListener('seeked', handleSeeked);
+    videoEl.addEventListener('loadedmetadata', handleLoadedMetadata);
     
     // Set initial state
-    if (videoEl.duration > 0) {
-      setDuration(videoEl.duration);
-      store.setDuration(videoEl.duration);
+    if (videoEl.duration > 0 || videoEl.readyState >= 1) {
+      const dur = videoEl.duration;
+      if (Number.isFinite(dur) && dur > 0) {
+        setDuration(dur);
+        store.setDuration(dur);
+      }
     }
     
     return () => {
@@ -471,6 +477,7 @@ export function usePlaybackController({
       videoEl.removeEventListener('play', handlePlay);
       videoEl.removeEventListener('pause', handlePause);
       videoEl.removeEventListener('seeked', handleSeeked);
+      videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
     };
   }, [isActivePlayer, taskId, fileName]);
   
@@ -495,12 +502,16 @@ export function usePlaybackController({
     };
     
     const handleTimeUpdate = (time: number) => {
-      if (Math.abs(time - currentTimeRef.current) > 0.05) {
+      if (Math.abs(time - currentTimeRef.current) > 0.1) {
         setCurrentTime(time);
       }
       
-      if (store.playingTaskId === taskId) {
+      if (
+        store.playingTaskId === taskId &&
+        Math.abs(time - publishedTimeRef.current) > 0.2
+      ) {
         store.updateTime(time);
+        publishedTimeRef.current = time;
       }
     };
     

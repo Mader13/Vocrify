@@ -7,6 +7,7 @@ pub struct PostProcessing;
 impl PostProcessing {
     const EPS: f64 = 1e-6;
     const MERGE_GAP_SEC: f64 = 0.20;
+    const MIN_WORDS_FOR_TURN_SPLIT: usize = 4;
 
     fn overlap(start_a: f64, end_a: f64, start_b: f64, end_b: f64) -> f64 {
         let start = start_a.max(start_b);
@@ -503,7 +504,7 @@ impl PostProcessing {
                 })
                 .collect();
 
-            // If 0 or 1 turn overlaps — no splitting needed
+            // If 0 or 1 turn overlaps - no splitting needed
             if overlapping_turns.len() <= 1 {
                 result.push(segment.clone());
                 continue;
@@ -551,8 +552,13 @@ impl PostProcessing {
                 continue;
             }
 
-            // Proportionally distribute words across sub-segments
             let words: Vec<&str> = segment.text.split_whitespace().collect();
+            if words.len() <= Self::MIN_WORDS_FOR_TURN_SPLIT {
+                result.push(segment.clone());
+                continue;
+            }
+
+            // Proportionally distribute words across sub-segments
             let total_duration = merged_slices
                 .iter()
                 .map(|(s, e, _)| e - s)
@@ -828,6 +834,29 @@ mod tests {
     }
 
     #[test]
+    fn split_segments_keeps_short_phrase_unsplit_across_turn_boundary() {
+        let transcription_segments = vec![
+            segment_with_text(33.0, 42.0, "ya poluchil pismo.", None),
+        ];
+        let turns = vec![
+            SpeakerTurn {
+                start: 33.0,
+                end: 36.0,
+                speaker: "SPEAKER_00".to_string(),
+            },
+            SpeakerTurn {
+                start: 36.0,
+                end: 42.0,
+                speaker: "SPEAKER_01".to_string(),
+            },
+        ];
+
+        let split = PostProcessing::split_segments_by_turns(&transcription_segments, &turns);
+        assert_eq!(split.len(), 1, "Short phrases should not be split by speaker turns");
+        assert_eq!(split[0].text, "ya poluchil pismo.");
+    }
+
+    #[test]
     fn merge_diarization_distributes_speakers_on_skewed_input() {
         // Simulates the user's actual issue: majority of diarization time for SPEAKER_00,
         // tiny amount for SPEAKER_01, but transcription has segments spanning both.
@@ -851,7 +880,7 @@ mod tests {
         assert!(speakers.contains("SPEAKER_01"), "SPEAKER_01 must be present");
 
         // First transcription segment [0-15] overlaps both speakers,
-        // so it should be split — resulting in 3+ merged segments total
+        // so it should be split - resulting in 3+ merged segments total
         assert!(merged.len() >= 3, "Long segments should be split at speaker boundaries, got {}", merged.len());
     }
 }

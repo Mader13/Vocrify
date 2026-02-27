@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { normalizeSpeakerNameMap } from "@/lib/speaker-names";
+import { useI18n } from "@/hooks";
 
 interface SpeakerNamesModalProps {
   open: boolean;
@@ -28,6 +29,7 @@ export function SpeakerNamesModal({
   speakerNameMap,
   onSave,
 }: SpeakerNamesModalProps) {
+  const { t } = useI18n();
   const [draftMap, setDraftMap] = React.useState<Record<string, string>>({});
 
   React.useEffect(() => {
@@ -54,9 +56,9 @@ export function SpeakerNamesModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Speaker&apos;s names</DialogTitle>
+          <DialogTitle>{t("speakerNames.title")}</DialogTitle>
           <DialogDescription>
-            Rename speaker labels for this transcription. Original labels are kept if name is empty.
+            {t("speakerNames.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -74,7 +76,7 @@ export function SpeakerNamesModal({
                     const value = event.target.value;
                     setDraftMap((prev) => ({ ...prev, [speaker]: value }));
                   }}
-                  placeholder="Enter display name"
+                  placeholder={t("speakerNames.placeholder")}
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 />
                 <Button
@@ -86,7 +88,7 @@ export function SpeakerNamesModal({
                   }}
                   disabled={!draftMap[speaker]?.trim()}
                 >
-                  Reset
+                  {t("common.reset")}
                 </Button>
               </div>
             </div>
@@ -105,14 +107,14 @@ export function SpeakerNamesModal({
               className="gap-1.5"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              Reset All
+              {t("common.resetAll")}
             </Button>
             <div className="flex items-center gap-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="button" onClick={handleSave}>
-                Save
+                {t("common.save")}
               </Button>
             </div>
           </div>

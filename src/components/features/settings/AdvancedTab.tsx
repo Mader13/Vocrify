@@ -39,10 +39,10 @@ export function AdvancedTab() {
           </Button>
         </div>
 
-        <div className="flex items-center justify-between p-4 rounded-2xl bg-red-500/5 border border-red-500/20 hover:border-red-500/30 transition-colors">
+        <div className="flex items-center justify-between p-4 rounded-2xl bg-destructive/10 border border-destructive/35 hover:border-destructive/50 transition-colors">
           <div>
-            <h3 className="text-sm font-medium text-red-600 dark:text-red-400">{t("settings.resetTitle")}</h3>
-            <p className="text-xs mt-1 text-red-600/70 dark:text-red-400/70">{t("settings.resetDescription")}</p>
+            <h3 className="text-sm font-medium text-destructive">{t("settings.resetTitle")}</h3>
+            <p className="text-xs mt-1 text-destructive/85 dark:text-destructive/80">{t("settings.resetDescription")}</p>
           </div>
           <Button
             variant="destructive"

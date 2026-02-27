@@ -74,7 +74,7 @@ interface SetupStore {
   backgroundValidate: () => Promise<void>;
 }
 
-const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "optional", "summary"];
+const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "model", "summary"];
 
 const initialState = {
   currentStep: "python" as SetupStep,
@@ -96,10 +96,6 @@ function failedPythonCheck(message: string): PythonCheckResult {
     version: null,
     executable: null,
     inVenv: false,
-    pytorchInstalled: false,
-    pytorchVersion: null,
-    cudaAvailable: false,
-    mpsAvailable: false,
     message,
   };
 }
@@ -138,7 +134,8 @@ function buildRuntimeReadiness(
 ): RuntimeReadinessStatus {
   const pythonReady = pythonCheck.status === "ok";
   const ffmpegReady = ffmpegCheck.installed && ffmpegCheck.status !== "error";
-  const ready = pythonReady && ffmpegReady;
+  // Python is optional for basic transcription, so we only strictly require FFmpeg
+  const ready = ffmpegReady;
 
   return {
     ready,
@@ -148,7 +145,7 @@ function buildRuntimeReadiness(
     ffmpegMessage: ffmpegCheck.message,
     message: ready
       ? "Runtime ready"
-      : "Runtime is not ready: Python and/or FFmpeg are missing",
+      : "Runtime is not ready: FFmpeg is missing",
     checkedAt: new Date().toISOString(),
   };
 }
@@ -467,11 +464,11 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     try {
       const { pythonCheck, ffmpegCheck } = get();
 
-      // Use cached check results instead of re-running expensive checks
-      if (!pythonCheck || pythonCheck.status !== "ok") {
+      // Python is optional, so we don't block on it failing
+      if (!pythonCheck) {
         set({
           isComplete: false,
-          error: "Python check not completed or failed",
+          error: "Python check not completed",
         });
         return;
       }

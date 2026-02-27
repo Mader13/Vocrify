@@ -4,10 +4,10 @@
 
 Tauri desktop application for video/audio transcription using AI. Built with React 19, TypeScript, Tailwind CSS 4, and Zustand for state management.
 
-**Core Architecture (Phase 3 - transcribe-rs):**
+**Core Architecture:**
 
-- **Primary Engine:** Rust transcribe-rs (Whisper GGML, Parakeet ONNX, Moonshine ONNX)
-- **Secondary Engine:** Python backend for diarization only (PyAnnote, Sherpa-ONNX)
+- **Transcription Engine:** Rust `transcribe-rs` (Whisper GGML, Parakeet ONNX, Moonshine ONNX, SenseVoice ONNX)
+- **Speaker Diarization:** Python Sherpa-ONNX (via PythonBridge) - only when diarization is enabled
 - **GPU Acceleration:** CUDA (NVIDIA), MPS (Apple Silicon), Vulkan (AMD/Intel), CPU (fallback)
 
 ## Commands
@@ -24,7 +24,7 @@ bun run tauri:dev
 
 ````
 
-**Note:** The Rust backend (transcribe-rs) handles all transcription. Python backend is only used for speaker diarization when enabled.
+**Note:** The Rust `transcribe-rs` engine handles all transcription. Python is only used for Sherpa-ONNX speaker diarization when enabled.
 
 ### Build
 
@@ -32,18 +32,8 @@ bun run tauri:dev
 # Build for production (web)
 bun run build
 
-# Build Tauri application (includes ai-engine in resources)
+# Build Tauri application
 bun run tauri:build
-
-# Build with Rust transcribe-rs enabled (requires Vulkan SDK on Windows/Linux)
-cargo build --features rust-transcribe
-````
-
-### Preview
-
-```bash
-# Preview production build
-bun run preview
 ```
 
 ### Linting/Type Checking
@@ -80,7 +70,7 @@ bun add -d <package>
 
 ### Python Dependencies (AI Engine - Diarization Only)
 
-The Python backend (`ai-engine/`) is **only** used for speaker diarization.
+The Python backend (`ai-engine/`) is **only** used for speaker diarization (Sherpa-ONNX). All transcription is handled by the Rust `transcribe-rs` engine.
 
 **PyTorch Installation by Platform:**
 

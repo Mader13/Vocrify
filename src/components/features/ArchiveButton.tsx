@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useI18n } from "@/hooks";
 import { createPortal } from "react-dom";
 import { Archive, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,7 @@ interface ArchiveButtonProps {
 }
 
 export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
+  const { t } = useI18n();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
 
@@ -28,7 +30,7 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
       await archiveTaskWithMode(task.id, mode, compression);
 
       notifySuccess(
-        "Archived",
+        t("archive.archived"),
         `Video "${task.fileName}" has been moved to archive`
       );
     } catch (error) {
@@ -50,7 +52,7 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         )}
       >
         <Check className="h-4 w-4" />
-        {!iconOnly && <span>Archived</span>}
+        {!iconOnly && <span>{t("archive.archived")}</span>}
       </button>
     );
   }
@@ -76,7 +78,7 @@ export function ArchiveButton({ task, iconOnly = false }: ArchiveButtonProps) {
         ) : (
           <Archive className="h-4 w-4" />
         )}
-        {!iconOnly && <span className="hidden lg:inline">Archive</span>}
+        {!iconOnly && <span className="hidden lg:inline">{t("archive.archiveAction")}</span>}
       </button>
       {createPortal(
         <ArchiveModal

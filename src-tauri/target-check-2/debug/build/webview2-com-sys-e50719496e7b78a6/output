@@ -1,2 +1,0 @@
-cargo:rustc-link-search=native=E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\webview2-com-sys-e50719496e7b78a6\out\x64
-cargo:rustc-link-lib=advapi32

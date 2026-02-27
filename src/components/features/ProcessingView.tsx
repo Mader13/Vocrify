@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import { motion } from "framer-motion";
 import {
@@ -12,8 +12,9 @@ import {
   Mic2,
 } from "lucide-react";
 
-import { ProgressMetricsDisplay } from "@/components/features/ProgressMetrics";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useI18n } from "@/hooks";
+import type { TranslateFn } from "@/i18n";
 import { cn, formatTime } from "@/lib/utils";
 import type { TranscriptionTask } from "@/types";
 
@@ -33,56 +34,60 @@ const STAGE_ORDER_WITH_DIARIZATION: readonly TimelineStage[] = [
 
 const STAGE_ORDER_BASE: readonly TimelineStage[] = ["loading", "transcribing", "finalizing"];
 
-const stageConfig: Record<
+function buildStageConfig(t: TranslateFn): Record<
   StageKey,
   { icon: typeof Cpu; label: string; accent: string; iconClass: string }
-> = {
-  ready: {
-    icon: Clock,
-    label: "Preparing",
-    accent: "border-muted",
-    iconClass: "text-muted-foreground",
-  },
-  loading: {
-    icon: Cpu,
-    label: "Loading Model",
-    accent: "border-sky-400/40",
-    iconClass: "text-sky-400",
-  },
-  downloading: {
-    icon: Download,
-    label: "Downloading Model",
-    accent: "border-sky-400/40",
-    iconClass: "text-sky-400",
-  },
-  transcribing: {
-    icon: Mic2,
-    label: "Speech Recognition",
-    accent: "border-orange-400/40",
-    iconClass: "text-orange-400",
-  },
-  diarizing: {
-    icon: FileText,
-    label: "Speaker Diarization",
-    accent: "border-lime-400/40",
-    iconClass: "text-lime-400",
-  },
-  finalizing: {
-    icon: Check,
-    label: "Finalizing",
-    accent: "border-emerald-400/40",
-    iconClass: "text-emerald-400",
-  },
-};
+> {
+  return {
+    ready: {
+      icon: Clock,
+      label: t("processing.preparing"),
+      accent: "border-muted",
+      iconClass: "text-muted-foreground",
+    },
+    loading: {
+      icon: Cpu,
+      label: t("processing.loadingModel"),
+      accent: "border-sky-400/40",
+      iconClass: "text-sky-400",
+    },
+    downloading: {
+      icon: Download,
+      label: t("processing.downloadingModel"),
+      accent: "border-sky-400/40",
+      iconClass: "text-sky-400",
+    },
+    transcribing: {
+      icon: Mic2,
+      label: t("processing.speechRecognition"),
+      accent: "border-orange-400/40",
+      iconClass: "text-orange-400",
+    },
+    diarizing: {
+      icon: FileText,
+      label: t("processing.speakerDiarization"),
+      accent: "border-lime-400/40",
+      iconClass: "text-lime-400",
+    },
+    finalizing: {
+      icon: Check,
+      label: t("processing.finalizing"),
+      accent: "border-emerald-400/40",
+      iconClass: "text-emerald-400",
+    },
+  };
+}
 
-const stageDescriptions: Record<StageKey, string> = {
-  ready: "Preparing the task before processing.",
-  loading: "Initializing the engine and loading the model into memory.",
-  downloading: "Downloading the model. This only happens on first run.",
-  transcribing: "Analyzing audio and collecting text segments.",
-  diarizing: "Identifying speakers and linking utterances to voices.",
-  finalizing: "Saving the result and preparing it for viewing.",
-};
+function buildStageDescriptions(t: TranslateFn): Record<StageKey, string> {
+  return {
+    ready: t("processing.preparingDesc"),
+    loading: t("processing.loadingModelDesc"),
+    downloading: t("processing.downloadingModelDesc"),
+    transcribing: t("processing.speechRecognitionDesc"),
+    diarizing: t("processing.speakerDiarizationDesc"),
+    finalizing: t("processing.finalizingDesc"),
+  };
+}
 
 function getDeviceLabel(device: TranscriptionTask["options"]["device"]): string {
   if (device === "cuda") return "CUDA";
@@ -95,6 +100,8 @@ function getTimelineStages(enableDiarization: boolean): readonly TimelineStage[]
   return enableDiarization ? STAGE_ORDER_WITH_DIARIZATION : STAGE_ORDER_BASE;
 }
 
+const VALID_STAGE_KEYS: ReadonlySet<string> = new Set<StageKey>(["ready", "loading", "downloading", "transcribing", "diarizing", "finalizing"]);
+
 function normalizeStage(stage: string | undefined, status: TranscriptionTask["status"]): StageKey {
   const sourceStage = stage ?? (status === "completed" ? "finalizing" : "transcribing");
 
@@ -106,7 +113,7 @@ function normalizeStage(stage: string | undefined, status: TranscriptionTask["st
     return "diarizing";
   }
 
-  if (sourceStage in stageConfig) {
+  if (VALID_STAGE_KEYS.has(sourceStage)) {
     return sourceStage as StageKey;
   }
 
@@ -116,9 +123,11 @@ function normalizeStage(stage: string | undefined, status: TranscriptionTask["st
 interface StageRailProps {
   stages: readonly TimelineStage[];
   currentIndex: number;
+  stageConfig: ReturnType<typeof buildStageConfig>;
+  t: TranslateFn;
 }
 
-function StageRail({ stages, currentIndex }: StageRailProps) {
+function StageRail({ stages, currentIndex, stageConfig, t }: StageRailProps) {
   return (
     <div className="rounded-2xl border border-border/60 bg-card/60 p-3 sm:p-5">
       <ol className="space-y-2 sm:space-y-3">
@@ -128,6 +137,7 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
           const isComplete = index < currentIndex;
           const isCurrent = index === currentIndex;
           const isFuture = index > currentIndex;
+          const isDiarizing = isCurrent && stageKey === "diarizing";
 
           return (
             <motion.li
@@ -136,10 +146,11 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, delay: index * 0.07 }}
               className={cn(
-                "relative flex items-center gap-2 rounded-xl border px-2.5 py-2.5 sm:gap-3 sm:px-4 sm:py-3",
+                "relative flex items-center gap-2 rounded-xl border px-2.5 py-2.5 sm:gap-3 sm:px-4 sm:py-3 transition-all duration-300",
                 isCurrent && "border-foreground/20 bg-accent/50 shadow-sm",
                 isComplete && "border-emerald-500/25 bg-emerald-500/5",
                 isFuture && "border-border/60 bg-transparent",
+                isDiarizing && "border-lime-500/30 bg-lime-500/5",
               )}
             >
               <div
@@ -153,11 +164,21 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
                 {isComplete ? (
                   <Check className="h-4 w-4 text-emerald-400" />
                 ) : isCurrent ? (
-                  <Icon className={cn("h-4 w-4", config.iconClass)} />
+                  <>
+                    <Icon className={cn("h-4 w-4", config.iconClass)} />
+                    {isDiarizing && (
+                      <motion.div
+                        className="absolute inset-0 rounded-full bg-lime-400/10"
+                        initial={{ opacity: 0.6, scale: 1 }}
+                        animate={{ opacity: 0, scale: 1.5 }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
+                      />
+                    )}
+                  </>
                 ) : (
                   <Circle className="h-3 w-3 text-muted-foreground" />
                 )}
-                {isCurrent && (
+                {isCurrent && !isDiarizing && (
                   <motion.div
                     className={cn("absolute inset-0 rounded-full border", config.accent)}
                     initial={{ opacity: 0.5, scale: 1 }}
@@ -172,14 +193,22 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
                   className={cn(
                     "truncate text-xs font-medium sm:text-sm",
                     isFuture ? "text-muted-foreground" : "text-foreground",
+                    isDiarizing && "text-lime-700 dark:text-lime-400",
                   )}
                 >
                   {config.label}
                 </p>
-                <p className="text-[11px] text-muted-foreground sm:text-xs">Step {index + 1}</p>
+                <p className="text-[11px] text-muted-foreground sm:text-xs">{t("processing.step")} {index + 1}</p>
               </div>
 
-              {isCurrent && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
+              {isCurrent && (
+                <Loader2
+                  className={cn(
+                    "h-4 w-4 shrink-0 animate-spin",
+                    isDiarizing ? "text-lime-500" : "text-muted-foreground"
+                  )}
+                />
+              )}
             </motion.li>
           );
         })}
@@ -189,6 +218,11 @@ function StageRail({ stages, currentIndex }: StageRailProps) {
 }
 
 export const ProcessingView = React.memo(function ProcessingView({ task }: ProcessingViewProps) {
+  const { t } = useI18n();
+
+  const stageConfig = useMemo(() => buildStageConfig(t), [t]);
+  const stageDescriptions = useMemo(() => buildStageDescriptions(t), [t]);
+
   const normalizedStage = normalizeStage(task.stage as string | undefined, task.status);
   const config = stageConfig[normalizedStage] ?? stageConfig.transcribing;
   const Icon = config.icon;
@@ -199,6 +233,10 @@ export const ProcessingView = React.memo(function ProcessingView({ task }: Proce
   const stageIndex = stages.indexOf(normalizedStage as TimelineStage);
   const currentIndex = stageIndex >= 0 ? stageIndex : fallbackIndex;
   const currentStep = currentIndex + 1;
+
+  // Dynamic message for diarization stage
+  const isDiarizing = normalizedStage === "diarizing";
+  const customMessage = isDiarizing ? t("processing.linkingVoices") : undefined;
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -234,7 +272,7 @@ export const ProcessingView = React.memo(function ProcessingView({ task }: Proce
       <CardContent className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3 sm:p-5 lg:p-6">
         <div className="grid flex-1 grid-cols-1 gap-3 sm:gap-4 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
           <div className="order-2 xl:order-1">
-            <StageRail stages={stages} currentIndex={currentIndex} />
+            <StageRail stages={stages} currentIndex={currentIndex} stageConfig={stageConfig} t={t} />
           </div>
 
           <div className="order-1 flex min-w-0 flex-col gap-3 sm:gap-4 xl:order-2">
@@ -257,19 +295,28 @@ export const ProcessingView = React.memo(function ProcessingView({ task }: Proce
 
                 <div className="min-w-0">
                   <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground sm:text-xs">
-                    Currently Running
+                    {t("processing.currentlyRunning")}
                   </p>
                   <h3 className="mt-1 text-lg font-semibold leading-tight sm:text-xl">{config.label}</h3>
                   <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    {stageDescriptions[normalizedStage]}
+                    {customMessage || stageDescriptions[normalizedStage]}
                   </p>
+                  {isDiarizing && (
+                    <motion.p
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="mt-1.5 text-xs text-lime-600 dark:text-lime-400"
+                    >
+                      {t("processing.matchingSpeakers")}
+                    </motion.p>
+                  )}
                 </div>
               </div>
             </motion.div>
 
             <div className="rounded-2xl border border-border/60 bg-card/80 p-4 sm:p-5 lg:p-6">
               <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground sm:text-xs">
-                Elapsed Time
+                {t("processing.elapsedTime")}
               </p>
               <div className="mt-3 flex items-start gap-2.5 sm:items-center sm:gap-3">
                 <div className="flex flex-col">
@@ -294,38 +341,31 @@ export const ProcessingView = React.memo(function ProcessingView({ task }: Proce
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border border-border/60 bg-card p-4">
-                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Progress</p>
+                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{ t("processing.progress")}</p>
                 <p className="mt-2 text-lg font-semibold">
-                  Step {currentStep} of {stages.length}
+                  {`${t("processing.stepOf")} ${currentStep} ${t("common.of")} ${stages.length}`}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-border/60 bg-card p-4">
-                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Settings</p>
+                <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{t("processing.settingsLabel")}</p>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs">
                   <span className="max-w-full truncate rounded-full border border-border/70 px-2.5 py-1">
-                    Model: {task.options.model}
+                    {`${t("processing.model")}: ${task.options.model}`}
                   </span>
                   <span className="rounded-full border border-border/70 px-2.5 py-1">
-                    Device: {getDeviceLabel(task.options.device)}
+                    {`${t("processing.device")}: ${getDeviceLabel(task.options.device)}`}
                   </span>
                   <span className="rounded-full border border-border/70 px-2.5 py-1">
-                    Language: {task.options.language}
+                    {`${t("queued.language")}: ${task.options.language}`}
                   </span>
                 </div>
               </div>
             </div>
 
-            {task.metrics && (
-              <div className="rounded-2xl border border-border/60 bg-card p-4">
-                <p className="mb-3 text-xs uppercase tracking-[0.14em] text-muted-foreground">Metrics</p>
-                <ProgressMetricsDisplay metrics={task.metrics} />
-              </div>
-            )}
-
             {streamingSegments.length > 0 && (
               <div className="rounded-2xl border border-border/60 bg-card p-4">
-                <p className="mb-3 text-xs uppercase tracking-[0.14em] text-muted-foreground">Live transcript</p>
+                <p className="mb-3 text-xs uppercase tracking-[0.14em] text-muted-foreground">{t("processing.liveTranscript")}</p>
                 <div className="max-h-32 space-y-2 overflow-y-auto pr-1 sm:max-h-36">
                   {streamingSegments.slice(-4).map((segment) => (
                     <div key={`${segment.start}-${segment.end}-${segment.text}`} className="text-xs">

@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronUp,
   Clock3,
   FileText,
   Languages,
+  LocateFixed,
   Pencil,
   Search,
   Trash2,
@@ -16,27 +16,20 @@ import {
 import { ArchiveButton } from "@/components/features/ArchiveButton";
 import { ExportMenu } from "@/components/features/ExportMenu";
 import { PlayerErrorBoundary } from "@/components/features/PlayerErrorBoundary";
+import { DeleteTaskDialog } from "@/components/features/DeleteTaskDialog";
 import { SpeakerNamesModal } from "@/components/features/SpeakerNamesModal";
-import { TranscriptionSegments } from "@/components/features/TranscriptionSegments";
+import { TranscriptionSegments, type TranscriptionSegmentsHandle } from "@/components/features/TranscriptionSegments";
 import { VideoPlayer } from "@/components/features/VideoPlayer";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { applySpeakerNameMapToResult, collectSpeakerLabels } from "@/lib/speaker-names";
 import { sanitizeSegments } from "@/lib/segment-utils";
 import { cn, formatTime } from "@/lib/utils";
+import { useI18n } from "@/hooks";
 import { useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
 import {
   getCompletedViewLayoutMode,
+  getCompletedViewSplitThreshold,
   type CompletedViewLayoutMode,
 } from "@/components/features/completed-view-layout";
 
@@ -60,17 +53,22 @@ function MetaPill({ icon: Icon, label, value }: MetaPillProps) {
   );
 }
 
-const viewModeLabels: Record<"balanced" | "transcript-focus", string> = {
-  balanced: "Balanced",
-  "transcript-focus": "Transcript focus",
-};
 
-const waveformModeLabels: Record<"segments" | "speakers", string> = {
-  segments: "Segments",
-  speakers: "Speakers",
-};
 
 export const CompletedView = React.memo(function CompletedView({ task }: CompletedViewProps) {
+  const { t } = useI18n();
+
+  const viewModeLabels: Record<"balanced" | "transcript-focus", string> = {
+    balanced: t("completed.balanced"),
+    "transcript-focus": t("completed.transcriptFocus"),
+  };
+
+  const waveformModeLabels: Record<"clean" | "speakers", string> = {
+    clean: t("completed.clean"),
+    speakers: t("completed.speakers"),
+  };
+
+  const LAYOUT_MODE_HYSTERESIS_PX = 48;
   const displayMode = useUIStore((s) => s.displayMode);
   const setDisplayMode = useUIStore((s) => s.setDisplayMode);
   const isSidebarCollapsed = useUIStore((s) => s.isSidebarCollapsed);
@@ -83,7 +81,9 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const segmentsContainerRef = useRef<HTMLDivElement>(null);
+  const transcriptionSegmentsRef = useRef<TranscriptionSegmentsHandle>(null);
   const selectedSegmentIndexRef = useRef<number | undefined>(undefined);
+  const currentTimeRef = useRef(0);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedSegmentIndex, setSelectedSegmentIndex] = useState<number | undefined>(undefined);
@@ -113,17 +113,27 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   }, [selectedSegmentIndex]);
 
   useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
     const updateLayoutMode = (width: number) => {
-      setLayoutMode(
-        getCompletedViewLayoutMode(width, {
-          sidebarCollapsed: isSidebarCollapsed,
-        }),
-      );
+      const options = { sidebarCollapsed: isSidebarCollapsed };
+      const splitThreshold = getCompletedViewSplitThreshold(options);
+
+      setLayoutMode((previousMode) => {
+        if (previousMode === "split") {
+          return width < splitThreshold - LAYOUT_MODE_HYSTERESIS_PX ? "stacked" : "split";
+        }
+        return width >= splitThreshold + LAYOUT_MODE_HYSTERESIS_PX
+          ? "split"
+          : getCompletedViewLayoutMode(width, options);
+      });
     };
 
     updateLayoutMode(container.clientWidth);
@@ -158,10 +168,10 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     sanitizedSpeakerSegments.length > 0 || (mappedResult?.speakerTurns && mappedResult.speakerTurns.length > 0);
 
   const waveformMode: WaveformColorMode =
-    displayMode === "speakers" && !hasSpeakerData ? "segments" : displayMode;
+    displayMode === "speakers" && !hasSpeakerData ? "clean" : displayMode;
 
   const displaySegments = useMemo(() => {
-    if (waveformMode === "segments") {
+    if (waveformMode === "clean") {
       return sanitizedSegments;
     }
 
@@ -217,13 +227,14 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
   useEffect(() => {
     if (displayMode === "speakers" && !hasSpeakerData) {
-      setDisplayMode("segments");
+      setDisplayMode("clean");
     }
   }, [displayMode, hasSpeakerData, setDisplayMode]);
 
   const handleSegmentClick = useCallback((index: number, startTime: number) => {
     setSelectedSegmentIndex(index);
     setCurrentTime(startTime);
+    currentTimeRef.current = startTime;
 
     const videoElement = videoRef.current;
     if (videoElement) {
@@ -233,7 +244,10 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
   const handlePlayerTimeUpdate = useCallback(
     (time: number) => {
-      setCurrentTime(time);
+      if (Math.abs(time - currentTimeRef.current) >= 0.12) {
+        setCurrentTime(time);
+        currentTimeRef.current = time;
+      }
 
       const selectedIndex = selectedSegmentIndexRef.current;
       if (selectedIndex === undefined) {
@@ -241,7 +255,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
       }
 
       const selectedSegment = displaySegments[selectedIndex];
-      if (!selectedSegment || time > selectedSegment.end + 0.05) {
+      if (!selectedSegment || time > selectedSegment.end + 0.05 || time < selectedSegment.start - 0.05) {
         setSelectedSegmentIndex(undefined);
       }
     },
@@ -281,6 +295,10 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     }, 100);
   }, []);
 
+  const scrollToActiveSegment = useCallback(() => {
+    transcriptionSegmentsRef.current?.scrollToActive();
+  }, []);
+
   useEffect(() => {
     setHighlightedSearchIndex(-1);
   }, [searchQuery]);
@@ -316,6 +334,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
   useEffect(() => {
     setCurrentTime(0);
+    currentTimeRef.current = 0;
     setSelectedSegmentIndex(undefined);
     setSearchQuery("");
     setHighlightedSearchIndex(-1);
@@ -329,9 +348,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const actionButtonClass =
     "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 px-2.5 text-xs font-medium text-foreground transition-colors motion-safe:duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:px-3";
   const effectiveViewMode = viewMode;
-  const showMediaColumn = layoutMode === "stacked" || (layoutMode === "split" && effectiveViewMode === "balanced");
-  const showCollapsedMediaBar = layoutMode === "split" && effectiveViewMode === "transcript-focus";
-  const collapsedMediaLabel = `${formatTime(currentTime)} / ${durationLabel}`;
+  const isVideoVisible = effectiveViewMode !== "transcript-focus";
+  const showMediaColumn = effectiveViewMode === "balanced" && (layoutMode === "stacked" || layoutMode === "split");
 
   const handleConfirmDelete = useCallback(() => {
     removeTask(task.id);
@@ -415,8 +433,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                       type="button"
                       onClick={() => setIsEditingTitle(true)}
                       className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-80 transition-[opacity,color,background-color,transform] motion-safe:duration-200 motion-safe:ease-out motion-safe:hover:scale-105 hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      title="Edit transcription title"
-                      aria-label="Edit transcription title"
+                      title={t("completed.editTitle")}
+                      aria-label={t("completed.editTitle")}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
@@ -430,10 +448,10 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                     type="button"
                     onClick={() => setIsSpeakerNamesOpen(true)}
                     className={cn(actionButtonClass, "h-8 sm:h-9")}
-                    title="Rename speakers"
+                    title={t("completed.renameSpeakers")}
                   >
                     <Pencil className="h-3.5 w-3.5" />
-                    <span>Speaker&apos;s names</span>
+                    <span>{t("completed.speakerNames")}</span>
                   </button>
                 )}
                 <ExportMenu task={task} />
@@ -445,28 +463,28 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                     actionButtonClass,
                     "border-destructive/40 text-destructive hover:bg-destructive/10",
                   )}
-                  title="Delete transcription"
+                  title={t("completed.deleteTranscription")}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  <span>Delete</span>
+                  <span>{t("common.delete")}</span>
                 </button>
               </div>
             </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                  <MetaPill icon={Clock3} label="Duration" value={durationLabel} />
-                  <MetaPill icon={FileText} label="Segments" value={String(displaySegments.length)} />
+                  <MetaPill icon={Clock3} label={t("completed.duration")} value={durationLabel} />
+                  <MetaPill icon={FileText} label={t("completed.segments")} value={String(displaySegments.length)} />
                   {showSpeakerCount && (
-                    <MetaPill icon={UserRound} label="Speakers" value={String(speakerCount)} />
+                    <MetaPill icon={UserRound} label={t("completed.speakers")} value={String(speakerCount)} />
                   )}
-                  <MetaPill icon={Languages} label="Language" value={languageLabel} />
+                  <MetaPill icon={Languages} label={t("completed.language")} value={languageLabel} />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   {hasSpeakerData && (
                     <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
-                      {(["segments", "speakers"] as const).map((mode) => (
+                      {(["clean", "speakers"] as const).map((mode) => (
                         <button
                           key={mode}
                           type="button"
@@ -474,11 +492,11 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                           className={cn(
                             "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
                             displayMode === mode
-                              ? "bg-foreground text-card-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                              ? "bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
                               : "text-muted-foreground hover:text-foreground",
                           )}
                           aria-pressed={displayMode === mode}
-                          title={`Show ${waveformModeLabels[mode]} waveform`}
+                          title={`${t("completed.showWaveform")} ${waveformModeLabels[mode]}`}
                         >
                           {waveformModeLabels[mode]}
                         </button>
@@ -491,11 +509,13 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                       <button
                         key={mode}
                         type="button"
-                        onClick={() => setCompletedViewModeForTask(task.id, mode)}
+                        onClick={() => {
+                          setCompletedViewModeForTask(task.id, mode);
+                        }}
                         className={cn(
                           "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
                           viewMode === mode
-                            ? "bg-foreground text-card-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                            ? "bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
                             : "text-muted-foreground hover:text-foreground",
                         )}
                         aria-pressed={viewMode === mode}
@@ -521,13 +541,13 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
         >
           <Card
             className={cn(
-              "flex flex-col border-border/70",
-              layoutMode === "split" && "h-full min-h-0 overflow-hidden",
+              "flex flex-col border border-border/60 bg-card/40 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_12px_48px_rgba(0,0,0,0.4)]",
+              layoutMode === "split" && "h-full min-h-0",
             )}
           >
-            <CardHeader className="border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
-              <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Media Dock
+            <CardHeader className="shrink-0 border-b border-border/10 px-3 py-2.5 sm:px-5 sm:py-3">
+              <CardTitle className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80">
+                {t("completed.mediaDock")}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-2.5 sm:p-4 lg:p-5">
@@ -537,7 +557,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                   task={task}
                   colorMode={waveformMode}
                   onTimeUpdate={handlePlayerTimeUpdate}
-                  isVideoVisible
+                  isVideoVisible={isVideoVisible}
+                  showControls={false}
                   className="w-full"
                 />
               </PlayerErrorBoundary>
@@ -546,75 +567,86 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
           <Card
             className={cn(
-              "flex flex-col border-border/70",
+              "flex flex-col border-transparent bg-transparent shadow-none",
               layoutMode === "split" && "h-full min-h-0",
             )}
           >
-            <CardHeader className="shrink-0 border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
+            <CardHeader className="shrink-0 border-b border-border/30 px-3 py-3 sm:px-5 sm:py-4">
               <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Transcript
+                <div className="flex items-center justify-between gap-2 pb-1">
+                  <CardTitle className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80">
+                    {t("completed.transcript")}
                   </CardTitle>
-                  <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[11px] text-muted-foreground sm:px-2.5 sm:text-xs">
-                    {displaySegments.length} entries
+                  <span className="rounded-md border border-border/40 bg-transparent px-2 py-1 text-[11px] font-medium text-muted-foreground sm:px-2.5 sm:text-xs">
+                    {displaySegments.length} {t("completed.entries")}
                   </span>
                 </div>
 
-                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                  <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Search transcript or speaker"
-                      className={cn(
-                        "h-9 w-full rounded-lg border border-input bg-background px-10 pr-24 text-sm sm:h-10",
-                        "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                        "transition-colors motion-safe:duration-150",
+                <div className="flex w-full items-center gap-2 mt-1 sm:mt-2">
+                  <div className="flex flex-1 items-center overflow-hidden rounded-full border border-border/40 backdrop-blur-md bg-muted/20 transition-all duration-300 focus-within:border-primary/50 focus-within:bg-background/80 focus-within:shadow-sm h-10 sm:h-11 shadow-sm">
+                    <div className="flex h-full items-center justify-center pl-4 pr-3 text-muted-foreground">
+                      <Search className="h-4 w-4" />
+                    </div>
+                    <div className="relative flex-1 h-full">
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder={t("completed.searchTranscript")}
+                        className="h-full w-full bg-transparent px-1 text-sm font-medium placeholder:text-muted-foreground/60 focus:outline-none focus:ring-0"
+                      />
+                      {searchQuery && (
+                        <span className="absolute right-9 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums text-muted-foreground opacity-70">
+                          {highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/{matchingSegmentsCount}
+                        </span>
                       )}
-                    />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery("")}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                          aria-label={t("completed.clearSearch")}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
 
-                    <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums text-muted-foreground">
-                      {searchQuery &&
-                        `${highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/${matchingSegmentsCount}`
-                      }
-                    </span>
-
-                    {searchQuery && (
+                    <div className="flex items-center gap-0.5 pr-2 pl-2 h-6">
                       <button
                         type="button"
-                        onClick={() => setSearchQuery("")}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                        aria-label="Clear search"
+                        onClick={goToPreviousSearch}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+                        title={t("completed.prevResult")}
+                        disabled={!searchQuery || matchingSegmentsCount === 0}
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <ChevronUp className="h-4 w-4" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={goToNextSearch}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+                        title={t("completed.nextResult")}
+                        disabled={!searchQuery || matchingSegmentsCount === 0}
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={scrollToActiveSegment}
+                    className={cn(
+                      actionButtonClass,
+                      "shrink-0 h-10 sm:h-11 gap-1.5 px-3",
                     )}
-                  </div>
-
-                  <div className="ml-auto flex items-center gap-1 rounded-lg border border-border/70 bg-background/70 p-1">
-                    <button
-                      type="button"
-                      onClick={goToPreviousSearch}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                      title="Previous result (Shift+F3 or Ctrl+Shift+G)"
-                      disabled={!searchQuery || matchingSegmentsCount === 0}
-                    >
-                      <ChevronUp className="h-4 w-4" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={goToNextSearch}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                      title="Next result (F3 or Ctrl+G)"
-                      disabled={!searchQuery || matchingSegmentsCount === 0}
-                    >
-                      <ChevronDown className="h-4 w-4" />
-                    </button>
-                  </div>
+                    title={t("completed.scrollToActive")}
+                    aria-label={t("completed.scrollToActive")}
+                  >
+                    <LocateFixed className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{t("completed.locate")}</span>
+                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -631,11 +663,12 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                   className={cn(layoutMode === "split" && "flex-1 min-h-0")}
                 >
                   <TranscriptionSegments
+                    ref={transcriptionSegmentsRef}
                     segments={displaySegments}
                     currentTime={currentTime}
                     selectedSegmentIndex={selectedSegmentIndex}
                     onSegmentClick={handleSegmentClick}
-                    isVideoVisible={showMediaColumn}
+                    isVideoVisible={isVideoVisible}
                     layoutMode={layoutMode}
                     searchQuery={searchQuery}
                     highlightedSearchIndex={highlightedSearchIndex}
@@ -644,7 +677,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                 </div>
               ) : (
                 <div className="flex h-36 items-center justify-center px-6 text-center">
-                  <p className="text-sm text-muted-foreground">No transcription segments available for this task.</p>
+                  <p className="text-sm text-muted-foreground">{t("completed.noSegments")}</p>
                 </div>
               )}
             </CardContent>
@@ -652,97 +685,104 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
         </div>
       ) : (
         <>
-          {showCollapsedMediaBar && (
-            <Card className="border-border/70">
-              <CardContent className="flex flex-col gap-2 p-2.5 sm:p-3">
-                <div className="flex items-center gap-3 px-0.5">
-                  <div className="leading-tight">
-                    <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Media preview</p>
-                    <p className="mt-0.5 text-sm font-mono text-foreground tabular-nums">{collapsedMediaLabel}</p>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-border/60 bg-card/80">
-                  <PlayerErrorBoundary>
-                    <VideoPlayer
-                      ref={videoRef}
-                      task={task}
-                      colorMode={waveformMode}
-                      onTimeUpdate={handlePlayerTimeUpdate}
-                      isVideoVisible={false}
-                      className="w-full gap-0"
-                    />
-                  </PlayerErrorBoundary>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          <Card className="border border-border/60 bg-card/40 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_12px_48px_rgba(0,0,0,0.4)]">
+            <CardHeader className="shrink-0 border-b border-border/10 px-3 py-2.5 sm:px-5 sm:py-3">
+              <CardTitle className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80">
+                {t("completed.mediaDock")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-2.5 sm:p-4 lg:p-5">
+              <PlayerErrorBoundary>
+                <VideoPlayer
+                  ref={videoRef}
+                  task={task}
+                  colorMode={waveformMode}
+                  onTimeUpdate={handlePlayerTimeUpdate}
+                  isVideoVisible={false}
+                  showControls
+                  className="w-full"
+                />
+              </PlayerErrorBoundary>
+            </CardContent>
+          </Card>
 
-          <Card className="flex min-h-0 flex-col border-border/70">
-            <CardHeader className="shrink-0 border-b border-border/60 px-3 py-3 sm:px-5 sm:py-4">
+          <Card className="flex min-h-0 flex-col border-transparent bg-transparent shadow-none">
+            <CardHeader className="shrink-0 border-b border-border/30 px-3 py-3 sm:px-5 sm:py-4">
               <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="text-sm font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                    Transcript
+                <div className="flex items-center justify-between gap-2 pb-1">
+                  <CardTitle className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80">
+                    {t("completed.transcript")}
                   </CardTitle>
-                  <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1 text-[11px] text-muted-foreground sm:px-2.5 sm:text-xs">
-                    {displaySegments.length} entries
+                  <span className="rounded-md border border-border/40 bg-transparent px-2 py-1 text-[11px] font-medium text-muted-foreground sm:px-2.5 sm:text-xs">
+                    {displaySegments.length} {t("completed.entries")}
                   </span>
                 </div>
 
-                <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                  <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Search transcript or speaker"
-                      className={cn(
-                        "h-9 w-full rounded-lg border border-input bg-background px-10 pr-24 text-sm sm:h-10",
-                        "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-                        "transition-colors motion-safe:duration-150",
+                <div className="flex w-full items-center gap-2 mt-1 sm:mt-2">
+                  <div className="flex flex-1 items-center overflow-hidden rounded-full border border-border/40 backdrop-blur-md bg-muted/20 transition-all duration-300 focus-within:border-primary/50 focus-within:bg-background/80 focus-within:shadow-sm h-10 sm:h-11 shadow-sm">
+                    <div className="flex h-full items-center justify-center pl-4 pr-3 text-muted-foreground">
+                      <Search className="h-4 w-4" />
+                    </div>
+                    <div className="relative flex-1 h-full">
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder={t("completed.searchTranscript")}
+                        className="h-full w-full bg-transparent px-1 text-sm font-medium placeholder:text-muted-foreground/60 focus:outline-none focus:ring-0"
+                      />
+                      {searchQuery && (
+                        <span className="absolute right-9 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums text-muted-foreground opacity-70">
+                          {highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/{matchingSegmentsCount}
+                        </span>
                       )}
-                    />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery("")}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                          aria-label={t("completed.clearSearch")}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
 
-                    <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[11px] font-medium tabular-nums text-muted-foreground">
-                      {searchQuery &&
-                        `${highlightedSearchIndex >= 0 ? highlightedSearchIndex + 1 : 0}/${matchingSegmentsCount}`
-                      }
-                    </span>
-
-                    {searchQuery && (
+                    <div className="flex items-center gap-0.5 pr-2 pl-2 h-6">
                       <button
                         type="button"
-                        onClick={() => setSearchQuery("")}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                        aria-label="Clear search"
+                        onClick={goToPreviousSearch}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+                        title={t("completed.prevResult")}
+                        disabled={!searchQuery || matchingSegmentsCount === 0}
                       >
-                        <X className="h-3.5 w-3.5" />
+                        <ChevronUp className="h-4 w-4" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={goToNextSearch}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+                        title={t("completed.nextResult")}
+                        disabled={!searchQuery || matchingSegmentsCount === 0}
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={scrollToActiveSegment}
+                    className={cn(
+                      actionButtonClass,
+                      "shrink-0 h-10 sm:h-11 gap-1.5 px-3",
                     )}
-                  </div>
-
-                  <div className="ml-auto flex items-center gap-1 rounded-lg border border-border/70 bg-background/70 p-1">
-                    <button
-                      type="button"
-                      onClick={goToPreviousSearch}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                      title="Previous result (Shift+F3 or Ctrl+Shift+G)"
-                      disabled={!searchQuery || matchingSegmentsCount === 0}
-                    >
-                      <ChevronUp className="h-4 w-4" />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={goToNextSearch}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-                      title="Next result (F3 or Ctrl+G)"
-                      disabled={!searchQuery || matchingSegmentsCount === 0}
-                    >
-                      <ChevronDown className="h-4 w-4" />
-                    </button>
-                  </div>
+                    title={t("completed.scrollToActive")}
+                    aria-label={t("completed.scrollToActive")}
+                  >
+                    <LocateFixed className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">{t("completed.locate")}</span>
+                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -754,11 +794,12 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                   className="flex-1 min-h-0"
                 >
                   <TranscriptionSegments
+                    ref={transcriptionSegmentsRef}
                     segments={displaySegments}
                     currentTime={currentTime}
                     selectedSegmentIndex={selectedSegmentIndex}
                     onSegmentClick={handleSegmentClick}
-                    isVideoVisible={false}
+                    isVideoVisible={isVideoVisible}
                     layoutMode={layoutMode}
                     searchQuery={searchQuery}
                     highlightedSearchIndex={highlightedSearchIndex}
@@ -767,7 +808,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                 </div>
               ) : (
                 <div className="flex h-36 items-center justify-center px-6 text-center">
-                  <p className="text-sm text-muted-foreground">No transcription segments available for this task.</p>
+                  <p className="text-sm text-muted-foreground">{t("completed.noSegments")}</p>
                 </div>
               )}
             </CardContent>
@@ -785,30 +826,11 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
         }}
       />
 
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
-              Delete Transcription?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this transcription? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setIsDeleteDialogOpen(false)}>
-                Cancel
-              </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteTaskDialog
+        open={isDeleteDialogOpen}
+        onOpenChange={setIsDeleteDialogOpen}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 });

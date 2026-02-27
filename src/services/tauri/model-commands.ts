@@ -5,8 +5,7 @@ import type { CommandResult } from "./core";
 
 export async function downloadModel(
   modelName: string,
-  modelType: string,
-  huggingFaceToken?: string | null
+  modelType: string
 ): Promise<CommandResult<string>> {
   logger.modelInfo("Starting model download", { modelName, modelType });
 
@@ -14,7 +13,6 @@ export async function downloadModel(
     const result = await invoke<string>("download_model", {
       modelName,
       modelType,
-      huggingFaceToken: huggingFaceToken || null,
     });
     logger.modelInfo("Model download started", { modelName });
     return { success: true, data: result };
@@ -30,26 +28,6 @@ export async function getLocalModels(): Promise<CommandResult<LocalModel[]>> {
     return { success: true, data: models };
   } catch (error) {
     return { success: false, error: String(error) };
-  }
-}
-
-export async function saveHuggingFaceToken(token: string): Promise<CommandResult<void>> {
-  try {
-    await invoke("save_huggingface_token", { token });
-    return { success: true };
-  } catch (error) {
-    logger.error("Failed to save HuggingFace token", { error: String(error) });
-    return { success: false, error: String(error) };
-  }
-}
-
-export async function getHuggingFaceToken(): Promise<CommandResult<string | null>> {
-  try {
-    const token = await invoke<string | null>("get_huggingface_token_command");
-    return { success: true, data: token };
-  } catch (error) {
-    logger.error("Failed to get HuggingFace token", { error: String(error) });
-    return { success: false, error: String(error), data: null };
   }
 }
 

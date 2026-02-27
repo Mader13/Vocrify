@@ -1,6 +1,6 @@
 import type { AIModel } from "./models";
 import type { DeviceType } from "./devices";
-import type { DiarizationProvider, ArchiveMode } from "./settings";
+import type { DiarizationProvider, ArchiveMode, AudioProfile } from "./settings";
 import type { ProgressStage, ProgressMetrics, ProgressEvent } from "./progress";
 
 export type TaskStatus = "queued" | "processing" | "completed" | "failed" | "cancelled" | "interrupted";
@@ -16,6 +16,7 @@ export interface TranscriptionOptions {
   enableDiarization: boolean;
   diarizationProvider?: DiarizationProvider;
   numSpeakers: number;
+  audioProfile?: AudioProfile;
 }
 
 export interface TranscriptionSegment {

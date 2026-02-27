@@ -5,7 +5,7 @@
   "identifier": "com.vocrify",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://127.0.0.1:5173",
+    "devUrl": "http://127.0.0.1:5174",
     "beforeBuildCommand": "bun run prepare:tauri-resources && bun run build",
     "frontendDist": "../dist"
   },
@@ -16,7 +16,7 @@
         "width": 1200,
         "height": 800,
         "minWidth": 800,
-        "minHeight": 600,
+        "minHeight": 800,
         "center": true
       }
     ],

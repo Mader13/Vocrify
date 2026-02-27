@@ -1,5 +1,6 @@
-import { useCallback, useState, memo, useEffect, useRef, useMemo } from 'react';
-import { Play, Pause, X, GripVertical, FileAudio } from 'lucide-react';
+import { useCallback, useState, memo, useEffect, useRef, useLayoutEffect } from 'react';
+import { useI18n } from '@/hooks';
+import { X, GripVertical, FileAudio } from 'lucide-react';
 import { cn, formatTime } from '@/lib/utils';
 import { usePlaybackStore, type MiniPlayerPosition } from '@/stores/playbackStore';
 import { useUIStore } from '@/stores';
@@ -14,31 +15,40 @@ const getTargetPosition = (position: MiniPlayerPosition, viewportWidth: number, 
     case 'top-left':
       return { x: gap, y: headerHeight + gap };
     case 'top-right':
-      return { x: viewportWidth - 288 - gap, y: headerHeight + gap };
+      return { x: viewportWidth - 320 - gap, y: headerHeight + gap };
     case 'bottom-left':
       return { x: gap, y: viewportHeight - elementHeight - gap };
     case 'bottom-right':
-      return { x: viewportWidth - 288 - gap, y: viewportHeight - elementHeight - gap };
+      return { x: viewportWidth - 320 - gap, y: viewportHeight - elementHeight - gap };
   }
 };
 
 const DRAG_THRESHOLD = 8; // Minimum pixels to move before considering it a drag
 
 function MiniPlayerInner() {
-  const setSelectedTask = useUIStore((s) => s.setSelectedTask);
+  const { t } = useI18n();
   const setCurrentView = useUIStore((s) => s.setCurrentView);
+  const setSelectedTask = useUIStore((s) => s.setSelectedTask);
   const currentView = useUIStore((s) => s.currentView);
-  // Hide MiniPlayer when the user is already viewing the playing task's page
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
   const playingTaskId = usePlaybackStore((s) => s.playingTaskId);
   const playingTaskFileName = usePlaybackStore((s) => s.playingTaskFileName);
-  const isPlaying = usePlaybackStore((s) => s.isPlaying);
   const duration = usePlaybackStore((s) => s.duration);
   const currentTime = usePlaybackStore((s) => s.currentTime);
   const miniPlayerPosition = usePlaybackStore((s) => s.miniPlayerPosition);
+  const activeForegroundPlayerId = usePlaybackStore((s) => s.activeForegroundPlayerId);
   const stopPlayback = usePlaybackStore((s) => s.stop);
   const setPosition = usePlaybackStore((s) => s.setPosition);
   const elementRef = useRef<HTMLDivElement>(null);
+
+  const isOnTranscriptionView = currentView === 'transcription';
+  const isViewingPlayingTaskByRoute =
+    isOnTranscriptionView && !!playingTaskId && selectedTaskId === playingTaskId;
+  const isViewingPlayingTaskByForeground =
+    isOnTranscriptionView && activeForegroundPlayerId === playingTaskId;
+  const isViewingPlayingTask =
+    isViewingPlayingTaskByRoute || isViewingPlayingTaskByForeground;
+  const isVisible = !!playingTaskId && !isViewingPlayingTask;
 
   const [isDragging, setIsDragging] = useState(false);
   const [isSnapping, setIsSnapping] = useState(false);
@@ -49,29 +59,8 @@ function MiniPlayerInner() {
   const isDraggingRef = useRef(false);
 
   const handleClose = useCallback(() => {
-    if (playingTaskId) {
-      window.dispatchEvent(new CustomEvent('miniplayer-pause', {
-        detail: { taskId: playingTaskId }
-      }));
-    }
     stopPlayback();
-  }, [playingTaskId, stopPlayback]);
-
-  const handleTogglePlayPause = useCallback(() => {
-    if (!playingTaskId) return;
-
-    if (isPlaying) {
-      // Pause
-      window.dispatchEvent(new CustomEvent('miniplayer-pause', {
-        detail: { taskId: playingTaskId }
-      }));
-    } else {
-      // Play
-      window.dispatchEvent(new CustomEvent('miniplayer-play', {
-        detail: { taskId: playingTaskId }
-      }));
-    }
-  }, [isPlaying, playingTaskId]);
+  }, [stopPlayback]);
 
   const handleGoToTask = useCallback(() => {
     if (playingTaskId) {
@@ -108,7 +97,7 @@ function MiniPlayerInner() {
   }, []);
 
   // Set initial position based on store position
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Don't override position during/just after drag
     if (isDraggingRef.current || isSnapping) return;
 
@@ -136,8 +125,7 @@ function MiniPlayerInner() {
       elementRef.current.style.right = 'auto';
     };
 
-    // Use requestAnimationFrame to ensure element is rendered
-    requestAnimationFrame(applyPosition);
+    applyPosition();
 
     // Update position on window resize
     const handleResize = () => {
@@ -150,7 +138,7 @@ function MiniPlayerInner() {
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [miniPlayerPosition, isSnapping]);
+  }, [miniPlayerPosition, isSnapping, isVisible]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -249,20 +237,11 @@ function MiniPlayerInner() {
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  // Calculate initial position for first render (must be before conditional return)
-  const initialPosition = useMemo(() => {
-    // Default to bottom-left with estimated height for first render
-    const estimatedHeight = 80;
-    return getTargetPosition(miniPlayerPosition, window.innerWidth, window.innerHeight, estimatedHeight);
-  }, [miniPlayerPosition]);
 
-  const isViewingPlayingTask = currentView === 'transcription' && selectedTaskId === playingTaskId;
 
-  // Don't render if there's no task loaded (but show even when paused)
-  // Also hide when the user is currently viewing the playing task's page —
-  // the VideoPlayer controls are already visible, showing MiniPlayer simultaneously
-  // creates a second play button that can trigger audio duplication.
-  if (!playingTaskId || isViewingPlayingTask) {
+  // Don't render if there's no task loaded
+  // Also hide when the user is currently viewing the task's page.
+  if (!isVisible) {
     return null;
   }
 
@@ -270,18 +249,15 @@ function MiniPlayerInner() {
     <div
       ref={elementRef}
       className={cn(
-        'fixed z-50 flex items-center gap-3 px-4 py-3 rounded-xl',
+        'fixed z-[70] flex items-center gap-3 px-4 py-3 rounded-3xl',
         'bg-card border shadow-lg backdrop-blur-sm',
-        'w-72 select-none h-fit',
+        'w-80 select-none h-fit',
         // Don't use positionClasses - we use inline styles for dynamic positioning
         isDragging ? 'opacity-80 scale-105' : '',
         isSnapping ? '' : 'transition-all duration-200'
       )}
       style={{
         cursor: isDragging ? 'grabbing' : 'grab',
-        // Initial position to prevent appearing at (0,0)
-        left: `${initialPosition.x}px`,
-        top: `${initialPosition.y}px`,
       }}
       onMouseDown={handleDragStart}
       draggable={false}
@@ -295,22 +271,6 @@ function MiniPlayerInner() {
         <GripVertical className="h-4 w-4" />
       </div>
 
-      {/* Play/Pause button */}
-      <button
-        onClick={handleTogglePlayPause}
-        className={cn(
-          'flex items-center justify-center w-10 h-10 rounded-full',
-          'bg-primary text-primary-foreground hover:bg-primary/90',
-          'transition-colors shrink-0'
-        )}
-      >
-        {isPlaying ? (
-          <Pause className="h-4 w-4" />
-        ) : (
-          <Play className="h-4 w-4 ml-0.5" />
-        )}
-      </button>
-
       {/* File info and progress */}
       <div
         className="flex-1 min-w-0 cursor-pointer"
@@ -319,10 +279,10 @@ function MiniPlayerInner() {
       >
         <div className="flex items-center gap-2 mb-1">
           <FileAudio className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <p className="text-sm font-medium truncate">
-              {playingTaskFileName || 'Unknown'}
-            </p>
-          </div>
+          <p className="text-sm font-medium truncate">
+            {playingTaskFileName || t('miniPlayer.unknown')}
+          </p>
+        </div>
 
         {/* Progress bar */}
         <div className="h-1 bg-muted rounded-full overflow-hidden">
@@ -333,11 +293,11 @@ function MiniPlayerInner() {
         </div>
 
         {/* Time display */}
-          <div className="flex justify-between mt-1 text-xs text-muted-foreground">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
-          </div>
+        <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
         </div>
+      </div>
 
       {/* Close button */}
       <button
@@ -347,7 +307,7 @@ function MiniPlayerInner() {
           'text-muted-foreground hover:text-foreground',
           'shrink-0'
         )}
-        title="Stop and close"
+        title={t('miniPlayer.stopAndClose')}
       >
         <X className="h-4 w-4" />
       </button>

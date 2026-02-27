@@ -1,9 +1,11 @@
-import { useEffect } from "react";
-import { Box } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Box, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckCard } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
 import { AVAILABLE_MODELS, type LocalModel } from "@/types";
+import { useModelsStore } from "@/stores/modelsStore";
+import { useI18n } from "@/hooks";
 
 /**
  * Format model size for display
@@ -40,7 +42,7 @@ function ModelCard({ model }: ModelCardProps) {
         <h5 className="text-sm font-medium truncate">{model.name}</h5>
         <p className="text-xs text-muted-foreground">
           {model.modelType.toUpperCase()}
-          {model.sizeMb && ` • ${formatModelSize(model.sizeMb * 1024 * 1024)}`}
+          {model.sizeMb && ` | ${formatModelSize(model.sizeMb * 1024 * 1024)}`}
         </p>
       </div>
     </div>
@@ -52,7 +54,10 @@ function ModelCard({ model }: ModelCardProps) {
  * Verifies at least one AI model is installed
  */
 export function ModelStep() {
+  const { t } = useI18n();
   const { modelCheck, checkModel, isChecking } = useSetupStore();
+  const { downloads, downloadModel } = useModelsStore();
+  const [isDownloadingBase, setIsDownloadingBase] = useState(false);
 
   // Run check on mount
   useEffect(() => {
@@ -61,22 +66,35 @@ export function ModelStep() {
     }
   }, [modelCheck, checkModel]);
 
+  // Watch for download completion to re-check models
+  useEffect(() => {
+    const baseDownload = downloads["whisper-base"];
+    if (isDownloadingBase && baseDownload?.status === "completed") {
+      setIsDownloadingBase(false);
+      checkModel();
+    } else if (isDownloadingBase && baseDownload?.status === "error") {
+      setIsDownloadingBase(false);
+    }
+  }, [downloads, isDownloadingBase, checkModel]);
+
   const hasModels = modelCheck && modelCheck.installedModels.length > 0;
+  const baseDownloadState = downloads["whisper-base"];
+  const isDownloading = baseDownloadState?.status === "downloading";
 
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">AI Models</h3>
+        <h3 className="text-lg font-semibold">{t("setup.modelsTitle")}</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Checking installed models for transcription
+          {t("setup.modelsStepDesc")}
         </p>
       </div>
 
       {/* Main check card */}
       <CheckCard
-        title="AI Models"
+        title={t("setup.modelsTitle")}
         status={modelCheck?.status ?? "pending"}
-        message={modelCheck?.message ?? "Checking models..."}
+        message={modelCheck?.message ?? t("setup.modelsStepCheckMessage")}
         onRetry={checkModel}
       />
 
@@ -84,7 +102,7 @@ export function ModelStep() {
       {hasModels && (
         <div className="space-y-3">
           <h4 className="text-sm font-medium text-muted-foreground">
-            Models installed: {modelCheck.installedModels.length}
+            {t("setup.modelsStepInstalled")}: {modelCheck.installedModels.length}
           </h4>
           <div className="grid gap-2">
             {modelCheck.installedModels.map((model, index) => (
@@ -98,38 +116,43 @@ export function ModelStep() {
       {modelCheck && !hasModels && (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4 space-y-3">
           <h4 className="font-medium text-yellow-600 dark:text-yellow-400">
-            No models found
+            {t("setup.modelsStepNoModels")}
           </h4>
           <p className="text-sm text-muted-foreground">
-            You need to install at least one Whisper or Parakeet model for transcription.
+            {t("setup.modelsStepNoModelsDesc")}
           </p>
-          <div className="text-sm space-y-2">
-            <p className="font-medium text-foreground">Recommended models:</p>
-            <ul className="list-disc list-inside space-y-1 ml-2 text-muted-foreground">
-              <li>
-                <span className="font-medium">whisper-base</span> — fast, for simple tasks (~{getModelSizeLabel("whisper-base")})
-              </li>
-              <li>
-                <span className="font-medium">whisper-small</span> — balanced (~{getModelSizeLabel("whisper-small")})
-              </li>
-              <li>
-                <span className="font-medium">whisper-medium</span> — high quality (~{getModelSizeLabel("whisper-medium")})
-              </li>
-              <li>
-                <span className="font-medium">whisper-large-v3</span> — best quality (~{getModelSizeLabel("whisper-large-v3")})
-              </li>
-            </ul>
+          <div className="pt-2">
+            <Button 
+              onClick={() => {
+                setIsDownloadingBase(true);
+                downloadModel("whisper-base", "whisper");
+              }}
+              disabled={isDownloading}
+              className="w-full sm:w-auto gap-2"
+            >
+              {isDownloading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t("setup.downloading")}... {baseDownloadState?.progress ? `${Math.round(baseDownloadState.progress)}%` : ""}
+                </>
+              ) : (
+                `${t("setup.modelsStepDownloadBase")} (~${getModelSizeLabel("whisper-base")})`
+              )}
+            </Button>
+            {baseDownloadState?.status === "error" && (
+              <p className="text-xs text-red-700 dark:text-red-400 mt-2">
+                {t("setup.error")}: {baseDownloadState.error}
+              </p>
+            )}
           </div>
         </div>
       )}
 
       {/* Info about models */}
       <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
-        <h4 className="text-sm font-medium mb-2">About Models</h4>
+        <h4 className="text-sm font-medium mb-2">{t("setup.aboutModels") || "About Models"}</h4>
         <p className="text-xs text-muted-foreground">
-          Whisper models from OpenAI provide high-quality transcription.
-          Parakeet models from NVIDIA are optimized for real-time processing.
-          Models are downloaded automatically on first use or through the application settings.
+          {t("setup.aboutModelsDesc") || "Whisper models provide high-quality transcription. Models can be downloaded later through the application settings."}
         </p>
       </div>
 
@@ -137,7 +160,7 @@ export function ModelStep() {
       {isChecking && !modelCheck && (
         <div className="flex items-center justify-center py-8">
           <div className="animate-pulse text-muted-foreground">
-            Checking models...
+            {t("setup.checking")}
           </div>
         </div>
       )}
@@ -154,6 +177,7 @@ export interface ModelStepFooterProps {
 }
 
 export function ModelStepFooter({ onBack, onNext }: ModelStepFooterProps) {
+  const { t } = useI18n();
   const { modelCheck, checkModel, isChecking } = useSetupStore();
   
   const hasModels = modelCheck && modelCheck.installedModels.length > 0;
@@ -162,7 +186,7 @@ export function ModelStepFooter({ onBack, onNext }: ModelStepFooterProps) {
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onBack}>
-          Back
+          {t("common.back")}
         </Button>
         {modelCheck?.status === "error" && (
           <Button
@@ -170,13 +194,18 @@ export function ModelStepFooter({ onBack, onNext }: ModelStepFooterProps) {
             onClick={() => checkModel()}
             disabled={isChecking}
           >
-            Retry
+            {t("common.retry")}
           </Button>
         )}
       </div>
       <div className="flex items-center gap-2">
+        {!hasModels && (
+          <span className="text-xs text-muted-foreground mr-2">
+            {t("setup.optional")}
+          </span>
+        )}
         <Button onClick={onNext} disabled={isChecking}>
-          {hasModels ? "Continue" : "Skip"}
+          {hasModels ? t("common.continue") : t("setup.skipSetup")}
         </Button>
       </div>
     </div>

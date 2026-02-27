@@ -30,7 +30,7 @@ const DEFAULT_MAX_VISIBLE = 5;
 /**
  * Default position for notification container
  */
-const DEFAULT_POSITION: NotificationPosition = "top-right";
+const DEFAULT_POSITION: NotificationPosition = "bottom-right";
 
 /**
  * Notification store state and actions

@@ -2,13 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { shouldUseRustEngine } from "@/services/transcription";
-
 describe("transcription legacy compatibility guard", () => {
-  it("does not advertise unsupported sensevoice path in rust routing", () => {
-    expect(shouldUseRustEngine("sensevoice-small")).toBe(false);
-  });
-
   it("removes deprecated rust-whisper Cargo feature", () => {
     const cargoToml = readFileSync(
       join(process.cwd(), "src-tauri", "Cargo.toml"),

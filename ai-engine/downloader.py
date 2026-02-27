@@ -51,53 +51,18 @@ except ImportError:
     HfApi = None
 
 from ipc_events import emit_download_complete, emit_error
+from model_config import (
+    MODEL_SIZE_ESTIMATES_MB,
+    ASSET_SIZE_ESTIMATES_MB,
+    MODEL_REPOSITORIES,
+    GGML_FILENAMES,
+    get_model_size_mb,
+    estimate_model_size_bytes,
+    estimate_asset_size_bytes,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-
-# Fallback size estimates (in bytes) used when upstream does not provide Content-Length.
-# Values are intentionally approximate and are used only for progress estimation.
-MODEL_SIZE_ESTIMATES_MB = {
-    "whisper-tiny": 74,
-    "whisper-base": 139,
-    "whisper-small": 466,
-    "whisper-medium": 1505,
-    "whisper-large-v3": 2960,
-    "distil-small": 378,
-    "distil-medium": 756,
-    "distil-large-v2": 1400,
-    "distil-large-v3": 1480,
-    "parakeet-tdt-0.6b-v3": 640,
-    "parakeet-tdt-1.1b": 2490,
-    "sherpa-onnx-diarization": 45,
-}
-
-ASSET_SIZE_ESTIMATES_MB = {
-    "sherpa-onnx-segmentation.tar.bz2": 7,
-    "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx": 38,
-}
-
-
-def estimate_model_size_bytes(model_name: str) -> int:
-    """Return best-effort total size estimate for a model in bytes."""
-    exact = MODEL_SIZE_ESTIMATES_MB.get(model_name)
-    if exact is not None:
-        return int(exact * 1024 * 1024)
-
-    # Fallback: support namespaced/internal folder names like
-    # "nemo/nvidia_parakeet-tdt-0.6b-v3" by matching known model IDs.
-    normalized = model_name.lower().replace("_", "-")
-    for known_model, size_mb in MODEL_SIZE_ESTIMATES_MB.items():
-        if known_model in normalized:
-            return int(size_mb * 1024 * 1024)
-
-    return 0
-
-
-def estimate_asset_size_bytes(asset_name: str) -> int:
-    """Return best-effort size estimate for a downloadable asset in bytes."""
-    return int(ASSET_SIZE_ESTIMATES_MB.get(asset_name, 0) * 1024 * 1024)
 
 
 def calculate_directory_stats(path: Path) -> tuple[int, int]:
@@ -766,7 +731,7 @@ class ImprovedDownloader:
             # Some sources don't provide Content-Length on HEAD,
             # but do provide it on the actual GET response.
             # Also: if the HEAD was a redirect and returned a small body size,
-            # the actual GET response will have the correct file size — always prefer it.
+            # the actual GET response will have the correct file size - always prefer it.
             actual_size = int(response.headers.get("content-length", 0) or 0)
             if actual_size > total_size:
                 total_size = actual_size
@@ -1015,21 +980,7 @@ def download_model(
         progress_callback=progress_callback or emit_progress_wrapper,
     )
 
-    # Model repositories mapping
-    # IMPORTANT: Use GGML models for Rust whisper.cpp engine
-    MODEL_REPOSITORIES = {
-        "whisper-tiny": "ggerganov/whisper.cpp",
-        "whisper-base": "ggerganov/whisper.cpp",
-        "whisper-small": "ggerganov/whisper.cpp",
-        "whisper-medium": "ggerganov/whisper.cpp",
-        "whisper-large-v3": "ggerganov/whisper.cpp",
-        "distil-small": "Systran/faster-distil-whisper-small.en",
-        "distil-medium": "distil-whisper/distil-medium.en",
-        "distil-large-v2": "distil-whisper/distil-large-v2",
-        "distil-large-v3": "distil-whisper/distil-large-v3",
-        "parakeet-tdt-0.6b-v3": "nvidia/parakeet-tdt-0.6b-v3",
-        "parakeet-tdt-1.1b": "nvidia/parakeet-tdt-1.1b",
-    }
+    # MODEL_REPOSITORIES imported from model_config.py (canonical source)
 
     # Emit initial progress event to signal download start
     # This helps UI immediately switch to loading state
@@ -1051,17 +1002,7 @@ def download_model(
     try:
         if model_type == "whisper":
             # Use direct download from GitHub for GGML models
-            # Map model names to GGML filenames
-            model_filename = {
-                "tiny": "ggml-tiny.bin",
-                "base": "ggml-base.bin",
-                "small": "ggml-small.bin",
-                "medium": "ggml-medium.bin",
-                "large": "ggml-large-v1.bin",
-                "large-v1": "ggml-large-v1.bin",
-                "large-v2": "ggml-large-v2.bin",
-                "large-v3": "ggml-large-v3.bin",
-            }.get(model_name)
+            model_filename = GGML_FILENAMES.get(model_name)
 
             if not model_filename:
                 emit_error(f"Unknown Whisper model: {model_name}")
@@ -1203,16 +1144,3 @@ def emit_progress_wrapper(progress: DownloadProgress):
         },
     }
     print(json.dumps(data), flush=True)
-
-
-def get_model_size_mb(path: str) -> int:
-    """Get the size of a model directory in MB."""
-    total_size = 0
-    for dirpath, dirnames, filenames in os.walk(path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            try:
-                total_size += os.path.getsize(fp)
-            except (OSError, IOError):
-                pass
-    return total_size // (1024 * 1024)

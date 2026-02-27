@@ -1,5 +1,5 @@
 /**
- * Notification Service — barrel re-exports.
+ * Notification Service - barrel re-exports.
  *
  * All consumers should import from `@/services/notifications`.
  * Internal modules live in separate files for maintainability.

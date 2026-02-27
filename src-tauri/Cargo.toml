@@ -14,7 +14,8 @@ tauri-build = { version = "2.5.5", features = [] }
 
 [dependencies]
 # Pin ort to match Handy's version to avoid ndarray conflicts
-ort = { version = "=2.0.0-rc.10" }
+# Use copy-dylibs to copy ONNX Runtime DLL next to the executable
+ort = { version = "=2.0.0-rc.10", features = ["download-binaries", "copy-dylibs"] }
 tauri = { version = "2.10.2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2.5.3"
 tauri-plugin-dialog = "2.6.0"
@@ -51,14 +52,17 @@ audrey = "0.3"
 symphonia = { version = "0.5", features = ["mp3", "aac", "alac", "flac", "ogg", "wav", "isomp4"] }
 hound = "3.5"
 anyhow = "1.0"
+rubato = "0.15"
 
 # Phase 3: transcribe-rs - all engines included by default
 # NOTE: Building with rust-transcribe requires Vulkan SDK on Windows/Linux
 # Disable default features to skip transcribe-rs for faster builds
-transcribe-rs = { version = "=0.2.2", optional = true, features = ["whisper", "parakeet", "moonshine"] }
+transcribe-rs = { version = "0.2.5", optional = true, features = ["whisper", "parakeet", "moonshine"] }
+silero-vad-rust = "6.2.1"
+biquad = "0.5.0"
 
-# Sherpa-ONNX for speaker diarization (future)
-# sherpa-rs = { version = "0.1", features = ["download-binaries"] }
+# Sherpa-ONNX for native speaker diarization
+sherpa-rs = { version = "0.6.8", features = ["download-binaries"] }
 
 [features]
 # Phase 3: transcribe-rs (disabled by default - Windows path length issue)
@@ -72,3 +76,8 @@ rust-transcribe = ["dep:transcribe-rs"]
 # - Windows: Long path support must be enabled + may need project at short path (C:\project)
 #
 # To disable all GPU: cargo build --no-default-features
+
+[patch.crates-io]
+# Local patch: update Windows sherpa-onnx prebuilt selection to avoid ONNX Runtime
+# version conflicts with the `ort` runtime used by transcription engines.
+sherpa-rs-sys = { path = "vendor/sherpa-rs-sys" }

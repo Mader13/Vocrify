@@ -26,7 +26,7 @@ const STATUS_CONFIG: Record<StatusType, StatusConfig> = {
     bg: "bg-red-500/5",
     border: "border-red-500/20",
     label: "Error",
-    color: "text-red-600 dark:text-red-400",
+    color: "text-red-700 dark:text-red-400",
     bgBadge: "bg-red-500/10",
     dot: "bg-red-500",
   },

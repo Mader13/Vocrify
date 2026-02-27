@@ -1,15 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TranscriptionTask } from "@/types";
 import { logger } from "@/lib/logger";
-
-/**
- * Command response type matching the pattern from tauri.ts
- */
-interface CommandResult<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
-}
+import type { CommandResult } from "@/services/tauri/core";
 
 /**
  * Task metadata returned from list_transcriptions

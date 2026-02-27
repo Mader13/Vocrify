@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useI18n } from "@/hooks";
 import { FileVideo, Music, FileText, Info, Archive, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -24,30 +25,7 @@ interface ArchiveModalProps {
   showFileSizes?: boolean;
 }
 
-const ARCHIVE_OPTIONS: { mode: ArchiveMode; label: string; description: string }[] = [
-  {
-    mode: "keep_all",
-    label: "Keep All",
-    description: "Keep video and audio",
-  },
-  {
-    mode: "delete_video",
-    label: "Delete Video",
-    description: "Delete video, keep audio and transcription",
-  },
-  {
-    mode: "text_only",
-    label: "Text Only",
-    description: "Delete video and audio, keep only transcription",
-  },
-];
 
-const COMPRESSION_OPTIONS: { value: ArchiveCompression; label: string; desc: string }[] = [
-  { value: "none", label: "No compression", desc: "Max quality" },
-  { value: "light", label: "Light", desc: "~30% smaller" },
-  { value: "medium", label: "Medium", desc: "Balanced" },
-  { value: "heavy", label: "Heavy", desc: "Smallest size" },
-];
 
 export function ArchiveModal({
   task,
@@ -59,9 +37,35 @@ export function ArchiveModal({
   defaultCompression = "none",
   showFileSizes = true,
 }: ArchiveModalProps) {
+  const { t } = useI18n();
   const [selectedMode, setSelectedMode] = useState<ArchiveMode>(defaultMode);
   const [selectedCompression, setSelectedCompression] = useState<ArchiveCompression>(defaultCompression);
   const [fileSize, setFileSize] = useState<number | null>(null);
+
+  const ARCHIVE_OPTIONS: { mode: ArchiveMode; label: string; description: string }[] = [
+    {
+      mode: "keep_all",
+      label: t("archiveModal.keepAll"),
+      description: t("archiveModal.keepAllDesc"),
+    },
+    {
+      mode: "delete_video",
+      label: t("archiveModal.deleteVideo"),
+      description: t("archiveModal.deleteVideoDesc"),
+    },
+    {
+      mode: "text_only",
+      label: t("archiveModal.textOnly"),
+      description: t("archiveModal.textOnlyDesc"),
+    },
+  ];
+
+  const COMPRESSION_OPTIONS: { value: ArchiveCompression; label: string; desc: string }[] = [
+    { value: "none", label: t("archiveModal.noCompression"), desc: t("archiveModal.maxQuality") },
+    { value: "light", label: t("archiveModal.light"), desc: t("archiveModal.lightDesc") },
+    { value: "medium", label: t("archiveModal.medium"), desc: t("archiveModal.mediumDesc") },
+    { value: "heavy", label: t("archiveModal.heavy"), desc: t("archiveModal.heavyDesc") },
+  ];
 
   useEffect(() => {
     if (isOpen) {
@@ -110,10 +114,10 @@ export function ArchiveModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Archive className="h-5 w-5" />
-            Archiving: {task.fileName}
+            {t("archiveModal.archiving")} {task.fileName}
           </DialogTitle>
           <DialogDescription>
-            Choose what to do with media files when archiving
+            {t("archiveModal.chooseAction")}
           </DialogDescription>
         </DialogHeader>
 
@@ -122,15 +126,15 @@ export function ArchiveModal({
             <div className="bg-muted/50 rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Info className="h-4 w-4" />
-                File size
+                {t("archiveModal.fileSize")}
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Video:</span>
+                <span className="text-muted-foreground">{t("archiveModal.video")}</span>
                 <span>{formatFileSize(fileSize)}</span>
               </div>
               {estimatedSavings !== null && estimatedSavings > 0 && (
                 <div className="flex justify-between text-sm font-medium text-green-600 border-t pt-2 mt-2">
-                  <span>Space saved:</span>
+                  <span>{t("archiveModal.spaceSaved")}</span>
                   <span>~{formatFileSize(estimatedSavings)}</span>
                 </div>
               )}
@@ -138,7 +142,7 @@ export function ArchiveModal({
           )}
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">What to do with media files:</label>
+            <label className="text-sm font-medium">{t("archiveModal.mediaAction")}</label>
             <div className="space-y-2">
               {ARCHIVE_OPTIONS.map((option) => (
                 <button
@@ -177,7 +181,7 @@ export function ArchiveModal({
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Zap className="h-4 w-4" />
-                Video Compression:
+                {t("archiveModal.compression")}
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {COMPRESSION_OPTIONS.map((option) => (
@@ -217,7 +221,7 @@ export function ArchiveModal({
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium rounded-md hover:bg-muted transition-colors"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             onClick={handleSubmit}
@@ -231,12 +235,12 @@ export function ArchiveModal({
             {isLoading ? (
               <>
                 <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                Archiving...
+                {t("archiveModal.archivingProgress")}
               </>
             ) : (
               <>
                 <Archive className="h-4 w-4" />
-                Archive
+                {t("archive.archiveAction")}
               </>
             )}
           </button>

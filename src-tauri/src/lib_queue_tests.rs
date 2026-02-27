@@ -11,6 +11,7 @@ fn create_options() -> TranscriptionOptions {
         enable_diarization: false,
         diarization_provider: None,
         num_speakers: -1,
+        audio_profile: None,
     }
 }
 

@@ -2,14 +2,14 @@
 //!
 //! This module handles FFmpeg binary download and management.
 
+use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
-use std::path::PathBuf;
 use std::fs::File;
 use std::io::{self, BufReader};
-use zip::ZipArchive;
-use futures_util::stream::StreamExt;
+use std::path::PathBuf;
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
+use zip::ZipArchive;
 
 /// Event payload for FFmpeg download progress
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,24 +62,30 @@ fn emit_ffmpeg_progress(app: &AppHandle, current: u64, total: u64) {
     } else {
         0.0
     };
-    
-    let _ = app.emit("ffmpeg-download-progress", FFmpegDownloadProgressEvent {
-        current_bytes: current,
-        total_bytes: total,
-        percent,
-        status: "downloading".to_string(),
-    });
+
+    let _ = app.emit(
+        "ffmpeg-download-progress",
+        FFmpegDownloadProgressEvent {
+            current_bytes: current,
+            total_bytes: total,
+            percent,
+            status: "downloading".to_string(),
+        },
+    );
 }
 
 /// Emit FFmpeg status event with user-friendly message
 fn emit_ffmpeg_status(app: &AppHandle, status: &str, message: &str) {
     // Convert technical messages to user-friendly ones
     let user_message = convert_to_user_message(status, message);
-    
-    let _ = app.emit("ffmpeg-status", FFmpegStatusEvent {
-        status: status.to_string(),
-        message: user_message,
-    });
+
+    let _ = app.emit(
+        "ffmpeg-status",
+        FFmpegStatusEvent {
+            status: status.to_string(),
+            message: user_message,
+        },
+    );
 }
 
 /// Convert technical error messages to user-friendly ones
@@ -123,13 +129,14 @@ fn cleanup_on_error(ffmpeg_dir: &PathBuf) {
 fn validate_zip_archive(archive_path: &PathBuf) -> Result<usize, String> {
     let file = File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
     let reader = BufReader::new(file);
-    let archive = ZipArchive::new(reader).map_err(|e| format!("Archive is corrupted or not a ZIP: {}", e))?;
+    let archive =
+        ZipArchive::new(reader).map_err(|e| format!("Archive is corrupted or not a ZIP: {}", e))?;
     let count = archive.len();
-    
+
     if count == 0 {
         return Err("Archive is empty".to_string());
     }
-    
+
     Ok(count)
 }
 
@@ -172,7 +179,10 @@ async fn download_with_retry(
     let mut retry_delay = 2; // Start with 2 seconds
 
     for attempt in 1..=max_retries {
-        eprintln!("[DEBUG] FFmpeg download attempt {}/{}", attempt, max_retries);
+        eprintln!(
+            "[DEBUG] FFmpeg download attempt {}/{}",
+            attempt, max_retries
+        );
 
         if attempt > 1 {
             let msg = format!("Retrying download ({} of {})...", attempt, max_retries);
@@ -196,17 +206,23 @@ async fn download_with_retry(
         }
     }
 
-    Err(format!("Failed to download FFmpeg after {} attempts: {}", max_retries, last_error))
+    Err(format!(
+        "Failed to download FFmpeg after {} attempts: {}",
+        max_retries, last_error
+    ))
 }
 
-/// Download with streaming progress — writes directly to dest_path (no in-memory buffer)
+/// Download with streaming progress - writes directly to dest_path (no in-memory buffer)
 async fn download_with_progress(
     client: &reqwest::Client,
     url: &str,
     dest_path: &PathBuf,
     app: &AppHandle,
 ) -> Result<u64, String> {
-    let response = client.get(url).send().await
+    let response = client
+        .get(url)
+        .send()
+        .await
         .map_err(|e| format!("Connection error: {}", e))?;
 
     let status = response.status();
@@ -215,12 +231,16 @@ async fn download_with_progress(
     }
 
     let total_size = response.content_length().unwrap_or(0);
-    eprintln!("[DEBUG] FFmpeg download size: {} MB", total_size / 1024 / 1024);
+    eprintln!(
+        "[DEBUG] FFmpeg download size: {} MB",
+        total_size / 1024 / 1024
+    );
 
     emit_ffmpeg_progress(app, 0, total_size);
 
     // Open destination file for streaming write
-    let mut file = tokio::fs::File::create(dest_path).await
+    let mut file = tokio::fs::File::create(dest_path)
+        .await
         .map_err(|e| format!("Failed to create destination file: {}", e))?;
 
     let mut downloaded: u64 = 0;
@@ -230,7 +250,8 @@ async fn download_with_progress(
     let mut stream = response.bytes_stream();
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| format!("Download error: {}", e))?;
-        file.write_all(&chunk).await
+        file.write_all(&chunk)
+            .await
             .map_err(|e| format!("Write error: {}", e))?;
         downloaded += chunk.len() as u64;
 
@@ -240,7 +261,9 @@ async fn download_with_progress(
         }
     }
 
-    file.flush().await.map_err(|e| format!("Flush error: {}", e))?;
+    file.flush()
+        .await
+        .map_err(|e| format!("Flush error: {}", e))?;
     emit_ffmpeg_progress(app, downloaded, total_size);
 
     Ok(downloaded)
@@ -265,23 +288,21 @@ pub async fn get_ffmpeg_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::er
         Ok(ffmpeg_path)
     } else {
         // Fallback: check system PATH
-        if let Some(system_ffmpeg) = std::env::var_os("PATH")
-            .and_then(|p| {
-                std::env::split_paths(&p)
-                    .filter_map(|p| {
-                        let full_path = p.join(platform_suffix);
-                        if full_path.exists() {
-                            Some(full_path)
-                        } else {
-                            None
-                        }
-                    })
-                    .next()
-            })
-        {
+        if let Some(system_ffmpeg) = std::env::var_os("PATH").and_then(|p| {
+            std::env::split_paths(&p)
+                .filter_map(|p| {
+                    let full_path = p.join(platform_suffix);
+                    if full_path.exists() {
+                        Some(full_path)
+                    } else {
+                        None
+                    }
+                })
+                .next()
+        }) {
             return Ok(system_ffmpeg);
         }
-        
+
         Err(format!("FFmpeg not found at {:?} or in system PATH", ffmpeg_path).into())
     }
 }
@@ -304,18 +325,23 @@ fn extract_zip(archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<(), Stri
     let mut archive = ZipArchive::new(reader).map_err(|e| format!("Failed to read ZIP: {}", e))?;
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| format!("Failed to read from ZIP: {}", e))?;
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| format!("Failed to read from ZIP: {}", e))?;
         let outpath = extract_dir.join(file.mangled_name());
 
         if file.name().ends_with('/') {
-            std::fs::create_dir_all(&outpath).map_err(|e| format!("Failed to create directory: {}", e))?;
+            std::fs::create_dir_all(&outpath)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
         } else {
             if let Some(parent) = outpath.parent() {
                 if !parent.exists() {
-                    std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("Failed to create directory: {}", e))?;
                 }
             }
-            let mut outfile = File::create(&outpath).map_err(|e| format!("Failed to create file: {}", e))?;
+            let mut outfile =
+                File::create(&outpath).map_err(|e| format!("Failed to create file: {}", e))?;
             io::copy(&mut file, &mut outfile).map_err(|e| format!("Extraction error: {}", e))?;
         }
     }
@@ -326,7 +352,7 @@ fn extract_zip(archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<(), Stri
 /// Extract TAR archive
 fn extract_tar(archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<(), String> {
     use std::process::Command as ProcessCommand;
-    
+
     let output = ProcessCommand::new("tar")
         .arg("-xf")
         .arg(archive_path)
@@ -334,12 +360,12 @@ fn extract_tar(archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<(), Stri
         .arg(extract_dir)
         .output()
         .map_err(|e| format!("Failed to run tar: {}", e))?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("tar extraction error: {}", stderr));
     }
-    
+
     Ok(())
 }
 
@@ -349,11 +375,16 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let ffmpeg_dir = app_data.join("Vocrify").join("ffmpeg");
 
-    std::fs::create_dir_all(&ffmpeg_dir).map_err(|e| format!("Failed to create directory: {}", e))?;
+    std::fs::create_dir_all(&ffmpeg_dir)
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
 
     // Derive archive extension from URL so ZIP validation works correctly
     let (url, _version) = get_ffmpeg_urls();
-    let archive_ext = if url.ends_with(".tar.xz") { "tar.xz" } else { "zip" };
+    let archive_ext = if url.ends_with(".tar.xz") {
+        "tar.xz"
+    } else {
+        "zip"
+    };
     let archive_path = ffmpeg_dir.join(format!("ffmpeg_archive.{}", archive_ext));
 
     eprintln!("[DEBUG] Downloading FFmpeg from: {}", url);
@@ -366,7 +397,7 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    // Download directly to disk with retry (3 attempts) — no in-memory buffer
+    // Download directly to disk with retry (3 attempts) - no in-memory buffer
     let downloaded_bytes = match download_with_retry(&client, &url, &archive_path, &app, 3).await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -387,9 +418,12 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
         return Err(err_msg);
     }
 
-    eprintln!("[DEBUG] Download complete ({} bytes), validating...", downloaded_bytes);
+    eprintln!(
+        "[DEBUG] Download complete ({} bytes), validating...",
+        downloaded_bytes
+    );
 
-    // Validate ZIP integrity before extraction (now always works — archive has .zip extension)
+    // Validate ZIP integrity before extraction (now always works - archive has .zip extension)
     if archive_ext == "zip" {
         match validate_zip_archive(&archive_path) {
             Ok(count) => eprintln!("[DEBUG] ZIP archive valid, {} entries", count),
@@ -429,7 +463,11 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
 
     eprintln!("[DEBUG] Extraction complete, finding FFmpeg binary...");
 
-    let ffmpeg_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    let ffmpeg_name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
 
     let source_path = match validate_ffmpeg_extraction(&extract_dir, ffmpeg_name) {
         Ok(path) => path,
@@ -461,7 +499,7 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
 
     let _ = std::fs::remove_dir_all(&extract_dir);
 
-    // Set executable bit on Unix — without this the binary cannot be run
+    // Set executable bit on Unix - without this the binary cannot be run
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -492,14 +530,18 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
             Ok(())
         }
         Ok(output) => {
-            // Binary exists but failed to run — DLLs may be missing on Windows
+            // Binary exists but failed to run - DLLs may be missing on Windows
             let stderr = String::from_utf8_lossy(&output.stderr);
             eprintln!("[WARN] FFmpeg installed but failed to run: {}", stderr);
-            emit_ffmpeg_status(&app, "completed", "FFmpeg installed (system restart may be required)");
+            emit_ffmpeg_status(
+                &app,
+                "completed",
+                "FFmpeg installed (system restart may be required)",
+            );
             Ok(())
         }
         Err(e) => {
-            // Cannot execute — remove broken binary
+            // Cannot execute - remove broken binary
             let _ = std::fs::remove_file(&target_path);
             let err_msg = format!("Failed to verify FFmpeg: {}", e);
             emit_ffmpeg_status(&app, "failed", &err_msg);

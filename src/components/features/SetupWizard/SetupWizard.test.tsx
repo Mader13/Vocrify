@@ -15,10 +15,6 @@ function setSummaryFailureState() {
       version: null,
       executable: null,
       inVenv: false,
-      pytorchInstalled: false,
-      pytorchVersion: null,
-      cudaAvailable: false,
-      mpsAvailable: false,
       message: "Python not ready",
     },
     ffmpegCheck: {

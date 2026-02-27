@@ -7,44 +7,48 @@
 //! - Event emission to the frontend
 //! - Model management (download, list, delete)
 
-use serde::{de::Error as DeError, Deserialize, Serialize};
+use scopeguard;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-    OnceLock,
-};
 use std::sync::RwLock;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, OnceLock,
+};
 use tauri::{AppHandle, Emitter, Manager, State};
-use std::env;
+use tauri_plugin_dialog::DialogExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Mutex;
-use tauri_plugin_dialog::DialogExt;
-use scopeguard;
 
 use python_installer::{create_hidden_command, create_hidden_std_command};
-use python_ipc::{PythonMessage, is_critical_error};
+use python_ipc::{is_critical_error, PythonMessage};
 use task_queue::{
-    QueuedTask, RunningTask, TaskManager, dequeue_next_task, enqueue_task,
-    should_process_next_after_cleanup,
+    dequeue_next_task, enqueue_task, should_process_next_after_cleanup, QueuedTask, RunningTask,
+    TaskManager,
 };
 use transcription_orchestrator::cleanup_temp_wav_file;
 
-pub mod ffmpeg_manager;
-pub mod whisper_engine;
-pub mod sherpa_diarizer;
-pub mod python_bridge;
-pub mod engine_router;
-pub mod transcription_manager;
-pub mod python_installer;
-pub mod performance_config;
-pub mod model_downloader;
 pub mod audio;
-pub(crate) mod task_queue;
+pub mod chunking_strategy;
+pub mod disk_utils;
+pub mod diarization;
+pub mod engine_router;
+pub mod ffmpeg_manager;
+pub mod model_downloader;
+pub mod performance_config;
+pub mod post_processing;
+pub mod python_bridge;
+pub mod python_installer;
 pub(crate) mod python_ipc;
+pub mod quality_gate;
+pub(crate) mod task_queue;
+pub mod timeline_normalizer;
+pub mod transcription_manager;
 pub(crate) mod transcription_orchestrator;
+pub mod types;
 
 #[cfg(test)]
 mod lib_queue_tests;
@@ -59,37 +63,198 @@ mod temp_wav_cleanup_tests;
 mod lib_refactor_contract_tests;
 
 // Re-export FFmpeg types for frontend
-pub use ffmpeg_manager::{FFmpegStatus, FFmpegDownloadProgressEvent, get_ffmpeg_status, get_ffmpeg_path, download_ffmpeg};
+pub use ffmpeg_manager::{
+    download_ffmpeg, get_ffmpeg_path, get_ffmpeg_status, FFmpegDownloadProgressEvent, FFmpegStatus,
+};
 
 // Re-export Python installer types for frontend
-pub use python_installer::{InstallProgress, check_python_installed, install_python_full, get_python_install_progress, cancel_python_install};
+pub use python_installer::{
+    cancel_python_install, check_python_installed, get_python_install_progress,
+    install_python_full, InstallProgress,
+};
 
 // Re-export TranscriptionManager types for frontend (Phase 3: transcribe-rs)
 #[allow(unused_imports)]
 pub use transcription_manager::{
-    TranscriptionManager,
-    TranscriptionError,
-    TranscriptionResult as TResult,
+    EngineType, SpeakerTurn as TSpeakerTurn, TranscriptionError, TranscriptionManager,
+    TranscriptionOptions as TOptions, TranscriptionResult as TResult,
     TranscriptionSegment as TSegment,
-    TranscriptionOptions as TOptions,
-    SpeakerTurn as TSpeakerTurn,
-    EngineType,
 };
 
-// Re-export Diarization types for frontend
-pub use sherpa_diarizer::{SherpaDiarizer, DiarizationProvider, SpeakerSegment};
-
 // Re-export PythonBridge types for frontend
-pub use python_bridge::{PythonBridge, SpeakerSegment as PythonSpeakerSegment};
+pub use python_bridge::PythonBridge;
+pub use types::SpeakerSegment;
 
 // Re-export EngineRouter types for frontend
-pub use engine_router::{EngineRouter, EnginePreference};
+pub use engine_router::{EnginePreference, EngineRouter};
 
 // Re-export PerformanceConfig types for frontend
 pub use performance_config::PerformanceConfig;
 
 /// Maximum concurrent model downloads
 const MAX_CONCURRENT_DOWNLOADS: usize = 3;
+
+/// Ensure C-runtime stdio descriptors are valid on Windows.
+///
+/// Some native libraries (notably diarization stacks) may call low-level CRT reads
+/// even in GUI/dev contexts where stdin/stdout/stderr are not opened by parent process.
+/// That can trigger a CRT debug assertion:
+/// `_osfile(fh) & FOPEN` in `read.cpp`.
+#[cfg(windows)]
+fn ensure_windows_stdio_descriptors() {
+    const O_RDONLY: i32 = 0x0000;
+    const O_WRONLY: i32 = 0x0001;
+
+    unsafe extern "C" {
+        fn _wopen(filename: *const u16, oflag: i32, pmode: i32) -> i32;
+        fn _dup2(fd1: i32, fd2: i32) -> i32;
+        fn _close(fd: i32) -> i32;
+    }
+
+    fn redirect_fd(target_fd: i32, flags: i32, mode_name: &str) {
+        let nul: Vec<u16> = "NUL\0".encode_utf16().collect();
+        // SAFETY: `_wopen/_dup2/_close` are C runtime functions with C ABI.
+        // We pass a valid NUL-terminated UTF-16 path and plain integer fd values.
+        unsafe {
+            let fd = _wopen(nul.as_ptr(), flags, 0);
+            if fd < 0 {
+                eprintln!(
+                    "[WARN] Failed to open NUL for fd {} ({})",
+                    target_fd, mode_name
+                );
+                return;
+            }
+
+            if _dup2(fd, target_fd) != 0 {
+                eprintln!(
+                    "[WARN] Failed to dup NUL into fd {} ({})",
+                    target_fd, mode_name
+                );
+            }
+
+            let _ = _close(fd);
+        }
+    }
+
+    redirect_fd(0, O_RDONLY, "stdin");
+    redirect_fd(1, O_WRONLY, "stdout");
+    redirect_fd(2, O_WRONLY, "stderr");
+}
+
+/// Initialize ONNX Runtime from an explicit DLL path to avoid loading old system DLLs.
+///
+/// Search order:
+/// 1. `ORT_DYLIB_PATH` environment variable (explicit override)
+/// 2. Bundled resources next to the exe (`<exe_dir>/resources/ort/onnxruntime.dll`)
+/// 3. Next to the executable (`<exe_dir>/onnxruntime.dll`)
+/// 4. `CARGO_MANIFEST_DIR/resources/ort/` (dev-time only, compile-time path)
+///
+/// The function **refuses** to fall back to a system-wide DLL (e.g.
+/// `C:\Windows\System32\onnxruntime.dll`) because version mismatches cause
+/// hard-to-diagnose ONNX session errors.
+#[cfg(feature = "rust-transcribe")]
+fn init_onnx_runtime() -> Result<(), String> {
+    let ort_dll_name = if cfg!(windows) {
+        "onnxruntime.dll"
+    } else if cfg!(target_os = "macos") {
+        "libonnxruntime.dylib"
+    } else {
+        "libonnxruntime.so"
+    };
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // 1. Explicit env override - highest priority
+    if let Ok(path) = env::var("ORT_DYLIB_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed));
+        }
+    }
+
+    // 2-3. Paths relative to the running executable (works in both dev and prod).
+    // Prefer the bundled resources path first to avoid stale DLLs left in target/debug.
+    if let Ok(exe_path) = std::env::current_exe() {
+        let base_dir = exe_path.parent().unwrap_or(std::path::Path::new(""));
+        candidates.push(base_dir.join("resources").join("ort").join(ort_dll_name));
+        candidates.push(base_dir.join(ort_dll_name));
+    }
+
+    // 4. CARGO_MANIFEST_DIR - only useful during `cargo run` from the source tree.
+    //    In production builds the compile-time path is baked in and may not exist;
+    //    that's fine - we just skip it when the file is absent.
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("ort")
+            .join(ort_dll_name),
+    );
+
+    let mut checked_paths: Vec<String> = Vec::new();
+    let mut last_load_error: Option<String> = None;
+
+    for dll_path in &candidates {
+        checked_paths.push(dll_path.display().to_string());
+
+        if !dll_path.exists() {
+            continue;
+        }
+
+        eprintln!("[INFO] Trying ONNX Runtime DLL: {:?}", dll_path);
+        let init = ort::init_from(dll_path.to_string_lossy().to_string());
+        match init.commit() {
+            Ok(_) => {
+                eprintln!(
+                    "[INFO] ONNX Runtime initialized successfully from {:?}",
+                    dll_path
+                );
+                return Ok(());
+            }
+            Err(error) => {
+                let message = format!(
+                    "Failed to initialize ONNX Runtime from {:?}: {}",
+                    dll_path, error
+                );
+                eprintln!("[WARN] {}", message);
+                last_load_error = Some(message);
+            }
+        }
+    }
+
+    // If we found a DLL but it failed to load, that's a hard error.
+    if let Some(error) = last_load_error {
+        return Err(error);
+    }
+
+    // No DLL found at all - warn but allow the ort crate's default loader
+    // to try its own built-in search. We explicitly warn if a stale system
+    // DLL might be picked up.
+    eprintln!(
+        "[WARN] ONNX Runtime DLL not found in any bundled location. Checked: {}",
+        checked_paths.join(", ")
+    );
+
+    #[cfg(windows)]
+    {
+        let system_dll = PathBuf::from(r"C:\Windows\System32\onnxruntime.dll");
+        if system_dll.exists() {
+            eprintln!(
+                "[ERROR] A system-wide {} exists and will likely be loaded by the OS. \
+                 This may cause version-mismatch crashes. \
+                 Set ORT_DYLIB_PATH or place the correct DLL in resources/ort/.",
+                ort_dll_name
+            );
+            return Err(format!(
+                "ONNX Runtime DLL not bundled, and a potentially incompatible system-wide {} exists at {}. \
+                 Please bundle the correct version in resources/ort/ or set ORT_DYLIB_PATH.",
+                ort_dll_name,
+                system_dll.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
 
 /// Extract model size from model name (e.g., "whisper-base" -> "base", "parakeet-tdt-0.6b-v3" -> "0.6b")
 fn get_model_size(model_name: &str) -> &str {
@@ -129,14 +294,14 @@ fn get_max_concurrent_tasks(device: &str, model_size: &str) -> usize {
         ("cpu", "tiny") => 4,
         ("cpu", "base") => 4,
         ("cpu", "small") => 3,
-        ("cpu", "0.6b") => 4,  // Parakeet 0.6B
-        ("cpu", _) => 2,       // medium, large, or unknown
+        ("cpu", "0.6b") => 4, // Parakeet 0.6B
+        ("cpu", _) => 2,      // medium, large, or unknown
 
         // GPU: Can handle many more concurrent tasks
         ("cuda", "tiny") => 8,
         ("cuda", "base") => 8,
         ("cuda", "small") => 6,
-        ("cuda", "0.6b") => 8,  // Parakeet 0.6B
+        ("cuda", "0.6b") => 8, // Parakeet 0.6B
         ("cuda", "medium") => 4,
         ("cuda", "large") => 2,
 
@@ -150,13 +315,11 @@ fn get_max_concurrent_tasks(device: &str, model_size: &str) -> usize {
 fn pass_token_securely(token: &str) -> Result<PathBuf, AppError> {
     use std::io::Write;
     use tempfile::NamedTempFile;
-    
-    let mut temp_file = NamedTempFile::new()
-        .map_err(|e| AppError::IoError(e))?;
-    
-    writeln!(temp_file, "{}", token)
-        .map_err(|e| AppError::IoError(e))?;
-    
+
+    let mut temp_file = NamedTempFile::new().map_err(|e| AppError::IoError(e))?;
+
+    writeln!(temp_file, "{}", token).map_err(|e| AppError::IoError(e))?;
+
     // On Unix, set read-only permissions
     #[cfg(unix)]
     {
@@ -165,15 +328,15 @@ fn pass_token_securely(token: &str) -> Result<PathBuf, AppError> {
             .map_err(|e| AppError::IoError(e))?
             .permissions();
         perms.set_mode(0o400); // Read-only for owner
-        std::fs::set_permissions(temp_file.path(), perms)
-            .map_err(|e| AppError::IoError(e))?;
+        std::fs::set_permissions(temp_file.path(), perms).map_err(|e| AppError::IoError(e))?;
     }
-    
+
     // Keep the file alive by returning the path
     let path = temp_file.path().to_path_buf();
-    temp_file.persist(&path)
+    temp_file
+        .persist(&path)
         .map_err(|e| AppError::IoError(e.into()))?;
-    
+
     Ok(path)
 }
 
@@ -183,6 +346,7 @@ const ALLOWED_DIRS: &[&str] = &[];
 
 /// Transcription options passed from the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TranscriptionOptions {
     pub model: String,
     pub device: String,
@@ -190,10 +354,12 @@ pub struct TranscriptionOptions {
     pub enable_diarization: bool,
     pub diarization_provider: Option<String>,
     pub num_speakers: i32,
+    pub audio_profile: Option<String>,
 }
 
 /// Transcription options for Rust transcribe-rs (Phase 3)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RustTranscriptionOptions {
     pub model: String,
     pub device: String,
@@ -201,6 +367,7 @@ pub struct RustTranscriptionOptions {
     pub enable_diarization: bool,
     pub diarization_provider: Option<String>,
     pub num_speakers: i32,
+    pub audio_profile: Option<String>,
 }
 
 /// Implement From for RustTranscriptionOptions -> TranscriptionOptions
@@ -213,42 +380,13 @@ impl From<RustTranscriptionOptions> for TranscriptionOptions {
             enable_diarization: opts.enable_diarization,
             diarization_provider: opts.diarization_provider,
             num_speakers: opts.num_speakers,
+            audio_profile: opts.audio_profile,
         }
     }
 }
 
-/// A single transcription segment
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TranscriptionSegment {
-    pub start: f64,
-    pub end: f64,
-    pub text: String,
-    pub speaker: Option<String>,
-    pub confidence: f64,
-}
-
-/// A speaker turn from diarization
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpeakerTurn {
-    pub start: f64,
-    pub end: f64,
-    pub speaker: String,
-}
-
-/// Transcription result
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TranscriptionResult {
-    pub segments: Vec<TranscriptionSegment>,
-    pub language: String,
-    pub duration: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub speaker_turns: Option<Vec<SpeakerTurn>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub speaker_segments: Option<Vec<TranscriptionSegment>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metrics: Option<ProgressMetrics>,
-}
+// TranscriptionSegment, SpeakerTurn, TranscriptionResult - canonical definitions in types.rs
+pub use types::{SpeakerTurn, TranscriptionResult, TranscriptionSegment};
 
 /// Progress event sent to the frontend
 #[derive(Debug, Clone, Serialize)]
@@ -320,11 +458,9 @@ pub struct PythonCheckResult {
     pub status: String,
     pub version: Option<String>,
     pub executable: Option<String>,
+    #[serde(rename = "inVenv", alias = "in_venv")]
     pub in_venv: bool,
-    pub pytorch_installed: bool,
-    pub pytorch_version: Option<String>,
-    pub cuda_available: bool,
-    pub mps_available: bool,
+
     pub message: String,
 }
 
@@ -498,7 +634,6 @@ impl Serialize for AppError {
     }
 }
 
-
 /// Get the path to the Python engine
 fn get_python_engine_path(app: &AppHandle) -> PathBuf {
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -506,7 +641,12 @@ fn get_python_engine_path(app: &AppHandle) -> PathBuf {
     // Prefer app data location first (used by runtime installer flow)
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         candidates.push(app_data_dir.join("ai-engine").join("main.py"));
-        candidates.push(app_data_dir.join("Vocrify").join("ai-engine").join("main.py"));
+        candidates.push(
+            app_data_dir
+                .join("Vocrify")
+                .join("ai-engine")
+                .join("main.py"),
+        );
     }
 
     // Resource directory candidates (for production builds).
@@ -514,7 +654,12 @@ fn get_python_engine_path(app: &AppHandle) -> PathBuf {
     // ".../resources" or app root near the executable.
     if let Ok(resource_path) = app.path().resource_dir() {
         candidates.push(resource_path.join("ai-engine").join("main.py"));
-        candidates.push(resource_path.join("resources").join("ai-engine").join("main.py"));
+        candidates.push(
+            resource_path
+                .join("resources")
+                .join("ai-engine")
+                .join("main.py"),
+        );
     }
 
     // Executable-relative candidates (Windows installer layouts).
@@ -538,7 +683,10 @@ fn get_python_engine_path(app: &AppHandle) -> PathBuf {
         }
     }
 
-    eprintln!("[WARN] Python engine main.py not found. Checked paths: {:?}", candidates);
+    eprintln!(
+        "[WARN] Python engine main.py not found. Checked paths: {:?}",
+        candidates
+    );
 
     // Last resort fallback for diagnostics.
     PathBuf::from("ai-engine/main.py")
@@ -589,9 +737,9 @@ fn validate_file_path(file_path: &str) -> Result<PathBuf, AppError> {
             let allowed_path = Path::new(allowed_dir);
             // Try to canonicalize the allowed directory
             match allowed_path.canonicalize() {
-                Ok(allowed_canonical) => canonical
-                    .as_path()
-                    .starts_with(allowed_canonical.as_path()),
+                Ok(allowed_canonical) => {
+                    canonical.as_path().starts_with(allowed_canonical.as_path())
+                }
                 Err(_) => false,
             }
         });
@@ -637,17 +785,20 @@ fn python_is_runnable(python_exe: &Path) -> bool {
 /// Pick the best Python executable from candidates.
 /// Prefer interpreters with torch installed for ML workloads.
 fn pick_best_python_executable(candidates: Vec<PathBuf>) -> Option<PathBuf> {
-    let existing: Vec<PathBuf> = candidates
-        .into_iter()
-        .filter(|p| p.exists())
-        .collect();
+    let existing: Vec<PathBuf> = candidates.into_iter().filter(|p| p.exists()).collect();
 
-    eprintln!("[DEBUG] pick_best_python_executable: candidates = {:?}", existing);
+    eprintln!(
+        "[DEBUG] pick_best_python_executable: candidates = {:?}",
+        existing
+    );
 
     // Prefer environments with torch available
     for exe in &existing {
         let has_torch = python_has_torch(exe);
-        eprintln!("[DEBUG] Checking python: {:?}, has_torch = {}", exe, has_torch);
+        eprintln!(
+            "[DEBUG] Checking python: {:?}, has_torch = {}",
+            exe, has_torch
+        );
         if has_torch {
             eprintln!("[INFO] Selected Python with torch: {:?}", exe);
             return Some(dunce::simplified(exe).to_path_buf());
@@ -696,7 +847,10 @@ fn pick_best_system_python(candidates: Vec<PathBuf>) -> Option<PathBuf> {
         .filter(|p| python_is_runnable(p))
         .collect();
 
-    eprintln!("[DEBUG] pick_best_system_python: runnable candidates = {:?}", runnable);
+    eprintln!(
+        "[DEBUG] pick_best_system_python: runnable candidates = {:?}",
+        runnable
+    );
 
     for exe in &runnable {
         let has_torch = python_has_torch(exe);
@@ -705,7 +859,10 @@ fn pick_best_system_python(candidates: Vec<PathBuf>) -> Option<PathBuf> {
             exe, has_torch
         );
         if has_torch {
-            eprintln!("[INFO] Selected system Python with torch installed: {:?}", exe);
+            eprintln!(
+                "[INFO] Selected system Python with torch installed: {:?}",
+                exe
+            );
             return Some(exe.clone());
         }
     }
@@ -758,10 +915,16 @@ fn discover_project_venv_pythons(project_root: &Path) -> Vec<PathBuf> {
 /// Get the Python executable path (venv or system)
 fn get_python_executable(app: &AppHandle) -> PathBuf {
     let engine_path = get_python_engine_path(app);
-    eprintln!("[DEBUG] get_python_executable: engine_path = {:?}", engine_path);
+    eprintln!(
+        "[DEBUG] get_python_executable: engine_path = {:?}",
+        engine_path
+    );
     let fallback = PathBuf::from(".");
     let engine_dir = engine_path.parent().unwrap_or(&fallback);
-    eprintln!("[DEBUG] get_python_executable: engine_dir = {:?}", engine_dir);
+    eprintln!(
+        "[DEBUG] get_python_executable: engine_dir = {:?}",
+        engine_dir
+    );
 
     // Try multiple venv locations in order of preference.
     // Includes legacy project-level env names used in this repository.
@@ -794,7 +957,12 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         #[cfg(target_os = "windows")]
         {
-            venv_paths.push(app_data_dir.join("ai-engine").join("python").join("python.exe"));
+            venv_paths.push(
+                app_data_dir
+                    .join("ai-engine")
+                    .join("python")
+                    .join("python.exe"),
+            );
             venv_paths.push(
                 app_data_dir
                     .join("Vocrify")
@@ -806,7 +974,13 @@ fn get_python_executable(app: &AppHandle) -> PathBuf {
 
         #[cfg(not(target_os = "windows"))]
         {
-            venv_paths.push(app_data_dir.join("ai-engine").join("python").join("bin").join("python"));
+            venv_paths.push(
+                app_data_dir
+                    .join("ai-engine")
+                    .join("python")
+                    .join("bin")
+                    .join("python"),
+            );
             venv_paths.push(
                 app_data_dir
                     .join("Vocrify")
@@ -917,7 +1091,9 @@ async fn ensure_python_download_dependencies(python_exe: &Path) -> Result<(), Ap
         .stderr(Stdio::piped())
         .output()
         .await
-        .map_err(|e| AppError::PythonError(format!("Failed to install Python dependencies: {}", e)))?;
+        .map_err(|e| {
+            AppError::PythonError(format!("Failed to install Python dependencies: {}", e))
+        })?;
 
     if !install_output.status.success() {
         let stderr = String::from_utf8_lossy(&install_output.stderr);
@@ -934,19 +1110,17 @@ async fn ensure_python_download_dependencies(python_exe: &Path) -> Result<(), Ap
 /// Build TranscriptionManager with Python bridge configured for diarization.
 fn build_transcription_manager(app: &AppHandle) -> Result<TranscriptionManager, String> {
     let models_dir = get_models_dir(app).map_err(|e| e.to_string())?;
-    let python_exe = get_python_executable(app);
-    let engine_path = get_python_engine_path(app);
+    let audio_cache_dir = get_audio_cache_dir(app).map_err(|e| e.to_string())?;
 
     eprintln!("[INFO] Initializing TranscriptionManager");
     eprintln!("[DEBUG]   models_dir: {:?}", models_dir);
-    eprintln!("[DEBUG]   python_exe: {:?}", python_exe);
-    eprintln!("[DEBUG]   engine_path: {:?}", engine_path);
+    eprintln!("[DEBUG]   audio_cache_dir: {:?}", audio_cache_dir);
 
     TranscriptionManager::new(
         &models_dir,
-        Some(&python_exe),
-        Some(&engine_path),
-        Some(&models_dir),
+        None,
+        None,
+        Some(&audio_cache_dir),
     )
     .map_err(|e| format!("Failed to create TranscriptionManager: {}", e))
 }
@@ -993,9 +1167,10 @@ async fn spawn_transcription(
     // Check if we need to use downloaded FFmpeg
     let ffmpeg_path: Option<PathBuf> = ffmpeg_manager::get_ffmpeg_path(&app).await.ok();
     let ffmpeg_env_var = if let Some(ref path) = ffmpeg_path {
-        let path_str = path.parent()
-            .and_then(|p: &Path| p.to_str())
-            .unwrap_or_else(|| "");
+        let path_str = path
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
         format!("{};{}", path_str, env::var("PATH").unwrap_or_default())
     } else {
         "".to_string()
@@ -1043,7 +1218,8 @@ async fn spawn_transcription(
         } else {
             eprintln!("[WARN] Diarization enabled but no provider specified!");
         }
-        cmd.arg("--num-speakers").arg(options.num_speakers.to_string());
+        cmd.arg("--num-speakers")
+            .arg(options.num_speakers.to_string());
         eprintln!("[DEBUG] Num speakers: {}", options.num_speakers);
     } else {
         eprintln!("[INFO] Diarization disabled");
@@ -1052,7 +1228,10 @@ async fn spawn_transcription(
     eprintln!("[DEBUG] Spawning child process...");
     let mut child = match cmd.spawn() {
         Ok(c) => {
-            eprintln!("[INFO] Child process spawned successfully with PID: {:?}", c.id());
+            eprintln!(
+                "[INFO] Child process spawned successfully with PID: {:?}",
+                c.id()
+            );
             c
         }
         Err(e) => {
@@ -1063,25 +1242,33 @@ async fn spawn_transcription(
     };
 
     // Take stdout/stderr BEFORE storing in Arc (while we still own the child)
-    let stdout = child.stdout.take().expect("Failed to capture stdout");
-    let stderr = child.stderr.take().expect("Failed to capture stderr");
-    
+    let stdout = child.stdout.take().ok_or_else(|| {
+        AppError::PythonError(
+            "Failed to capture stdout from Python process (pipe not created)".to_string(),
+        )
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        AppError::PythonError(
+            "Failed to capture stderr from Python process (pipe not created)".to_string(),
+        )
+    })?;
+
     // HIGH-1: Store child process for cancellation - KEEP IT THERE!
     // This allows cancel_transcription to kill the process via child_process Arc.
     {
         let mut guard = child_process.lock().await;
         *guard = Some(child);
     }
-    
+
     // Note: We no longer use scopeguard here because the process stays in child_process.
     // Cleanup happens via:
     // 1. cancel_transcription kills the process
     // 2. Normal completion: we take the process back for wait() at the end
     // 3. Panic: the process will be orphaned but will be cleaned up by OS when parent exits
-    
+
     let mut reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
-    
+
     // Read stderr in background, count critical errors, and emit them to frontend
     let app_clone = app.clone();
     let task_id_clone = task_id.clone();
@@ -1092,10 +1279,13 @@ async fn spawn_transcription(
 
             if is_critical_error(&line) {
                 error_count += 1;
-                let _ = app_clone.emit("transcription-error", serde_json::json!({
-                    "taskId": task_id_clone,
-                    "error": line,
-                }));
+                let _ = app_clone.emit(
+                    "transcription-error",
+                    serde_json::json!({
+                        "taskId": task_id_clone,
+                        "error": line,
+                    }),
+                );
             }
         }
         error_count
@@ -1114,7 +1304,7 @@ async fn spawn_transcription(
         if line.is_empty() {
             continue;
         }
-        
+
         // Skip non-JSON lines (e.g. NeMo/PyTorch log lines that leak to stdout)
         if !line.starts_with('{') {
             eprintln!("[DEBUG] Skipping non-JSON line from Python: {}", line);
@@ -1129,8 +1319,16 @@ async fn spawn_transcription(
                 PythonMessage::Debug { message } => {
                     eprintln!("[PYTHON DEBUG] {}", message);
                 }
-                PythonMessage::Progress { stage, progress, message, metrics } => {
-                    eprintln!("[DEBUG] Emitting progress: {}% - stage: {}, msg: {}", progress, stage, message);
+                PythonMessage::Progress {
+                    stage,
+                    progress,
+                    message,
+                    metrics,
+                } => {
+                    eprintln!(
+                        "[DEBUG] Emitting progress: {}% - stage: {}, msg: {}",
+                        progress, stage, message
+                    );
                     let progress_event = ProgressEvent {
                         task_id: task_id.clone(),
                         progress,
@@ -1138,19 +1336,38 @@ async fn spawn_transcription(
                         message,
                         metrics,
                     };
-                    eprintln!("[DEBUG] ProgressEvent JSON: {:?}", serde_json::to_string(&progress_event));
+                    eprintln!(
+                        "[DEBUG] ProgressEvent JSON: {:?}",
+                        serde_json::to_string(&progress_event)
+                    );
                     let _ = app.emit("progress-update", progress_event);
                 }
-                PythonMessage::Segment { segment, index, total } => {
-                    eprintln!("[DEBUG] Emitting segment: index={}, total={:?}", index, total);
-                    let _ = app.emit("segment-update", serde_json::json!({
-                        "taskId": task_id,
-                        "segment": segment,
-                        "index": index,
-                        "total": total,
-                    }));
+                PythonMessage::Segment {
+                    segment,
+                    index,
+                    total,
+                } => {
+                    eprintln!(
+                        "[DEBUG] Emitting segment: index={}, total={:?}",
+                        index, total
+                    );
+                    let _ = app.emit(
+                        "segment-update",
+                        serde_json::json!({
+                            "taskId": task_id,
+                            "segment": segment,
+                            "index": index,
+                            "total": total,
+                        }),
+                    );
                 }
-                PythonMessage::Result { segments: segs, language, duration: _, speaker_turns: st_turns, speaker_segments: st_segs } => {
+                PythonMessage::Result {
+                    segments: segs,
+                    language,
+                    duration: _,
+                    speaker_turns: st_turns,
+                    speaker_segments: st_segs,
+                } => {
                     segments = segs;
                     result_language = language;
                     speaker_turns = st_turns;
@@ -1159,10 +1376,13 @@ async fn spawn_transcription(
                     // Use duration from Python result if available, otherwise calculate from segments
                 }
                 PythonMessage::Error { error } => {
-                    let _ = app.emit("transcription-error", serde_json::json!({
-                        "taskId": task_id,
-                        "error": error,
-                    }));
+                    let _ = app.emit(
+                        "transcription-error",
+                        serde_json::json!({
+                            "taskId": task_id,
+                            "error": error,
+                        }),
+                    );
                     return Err(AppError::PythonError(error));
                 }
                 PythonMessage::ProgressDownload { .. } => {}
@@ -1196,7 +1416,7 @@ async fn spawn_transcription(
         let mut guard = child_process.lock().await;
         guard.take()
     };
-    
+
     match child_opt {
         Some(mut child) => {
             let status = child.wait().await?;
@@ -1212,26 +1432,31 @@ async fn spawn_transcription(
                         exit_code
                     );
                 } else {
-                let error_msg = format!(
-                    "Python process exited with code: {}. \
+                    let error_msg = format!(
+                        "Python process exited with code: {}. \
                     Ensure Python 3.8-3.12 is installed with all required dependencies. \
                     Check the application logs for detailed error information.",
-                    exit_code
-                );
+                        exit_code
+                    );
 
-                let _ = app.emit("transcription-error", serde_json::json!({
-                    "taskId": task_id,
-                    "error": error_msg,
-                }));
+                    let _ = app.emit(
+                        "transcription-error",
+                        serde_json::json!({
+                            "taskId": task_id,
+                            "error": error_msg,
+                        }),
+                    );
 
-                return Err(AppError::PythonError(error_msg));
+                    return Err(AppError::PythonError(error_msg));
                 }
             }
         }
         None => {
             // Process was killed by cancel_transcription
             eprintln!("[INFO] Transcription was cancelled (process killed)");
-            return Err(AppError::PythonError("Transcription was cancelled".to_string()));
+            return Err(AppError::PythonError(
+                "Transcription was cancelled".to_string(),
+            ));
         }
     }
 
@@ -1242,9 +1467,7 @@ async fn spawn_transcription(
     }
 
     // Calculate duration from the last segment's end time
-    let duration = segments.iter()
-        .map(|s| s.end)
-        .fold(0.0, f64::max);
+    let duration = segments.iter().map(|s| s.end).fold(0.0, f64::max);
 
     let segments_count = segments.len();
     let speaker_turns_count = speaker_turns.as_ref().map_or(0, |v| v.len());
@@ -1265,19 +1488,19 @@ async fn spawn_transcription(
         speaker_segments_count
     );
 
-    let _ = app.emit("transcription-complete", serde_json::json!({
-        "taskId": task_id,
-        "result": result,
-    }));
+    let _ = app.emit(
+        "transcription-complete",
+        serde_json::json!({
+            "taskId": task_id,
+            "result": result,
+        }),
+    );
 
     Ok(())
 }
 
 /// Process the next queued task if any
-async fn process_next_queued_task(
-    app: AppHandle,
-    task_manager: &TaskManagerState,
-) {
+async fn process_next_queued_task(app: AppHandle, task_manager: &TaskManagerState) {
     // CRITICAL-5 FIX: Use Mutex guard to ensure only one queue processor runs at a time
     // First lock the task manager to get access to the queue_processor_guard
     let manager_guard = task_manager.lock().await;
@@ -1292,7 +1515,9 @@ async fn process_next_queued_task(
 
     // Check if we can start more tasks
     // Calculate max concurrent tasks based on all queued tasks
-    let max_concurrent = manager.queued_tasks.iter()
+    let max_concurrent = manager
+        .queued_tasks
+        .iter()
         .map(|task| {
             let model_size = get_model_size(&task.options.model);
             get_max_concurrent_tasks(&task.options.device, model_size)
@@ -1331,15 +1556,19 @@ async fn process_next_queued_task(
                 file_path_clone,
                 options_clone,
                 child_process_clone,
-            ).await;
+            )
+            .await;
 
             if let Err(e) = result {
                 eprintln!("Transcription error: {}", e);
 
-                let _ = app_clone_for_error.emit("transcription-error", serde_json::json!({
-                    "taskId": task_id_for_error,
-                    "error": e.to_string(),
-                }));
+                let _ = app_clone_for_error.emit(
+                    "transcription-error",
+                    serde_json::json!({
+                        "taskId": task_id_for_error,
+                        "error": e.to_string(),
+                    }),
+                );
             }
 
             let should_process_next = {
@@ -1352,10 +1581,13 @@ async fn process_next_queued_task(
             }
         });
 
-        manager.running_tasks.insert(task_id, RunningTask {
-            handle,
-            child_process: child_process_for_task,
-        });
+        manager.running_tasks.insert(
+            task_id,
+            RunningTask {
+                handle,
+                child_process: child_process_for_task,
+            },
+        );
     }
 
     // Guard is automatically released when it goes out of scope
@@ -1370,32 +1602,27 @@ async fn start_transcription(
     file_path: String,
     options: TranscriptionOptions,
 ) -> Result<(), AppError> {
+    let mut options = options;
     eprintln!("[INFO] start_transcription called with task_id: {}, file: {}, enable_diarization: {}, provider: {:?}",
         task_id, file_path, options.enable_diarization, options.diarization_provider);
 
-    // CRITICAL: Validate diarization settings
     if options.enable_diarization {
-        match &options.diarization_provider {
-            None => {
-                eprintln!("[ERROR] Diarization enabled but provider is None!");
-                let error_msg = "Diarization is enabled but no provider is selected. Please select 'sherpa-onnx' as the diarization provider.";
-                let _ = app.emit("transcription-error", serde_json::json!({
-                    "taskId": task_id,
-                    "error": error_msg,
-                }));
-                return Err(AppError::PythonError(error_msg.to_string()));
+        let normalized = options
+            .diarization_provider
+            .as_ref()
+            .map(|p| p.trim().to_ascii_lowercase());
+
+        match normalized.as_deref() {
+            None | Some("") | Some("none") => {
+                options.diarization_provider = Some("native".to_string());
+                eprintln!("[INFO] Diarization provider was missing/none; normalized to 'native'");
             }
-            Some(provider) if provider == "none" => {
-                eprintln!("[ERROR] Diarization enabled but provider is 'none'!");
-                let error_msg = "Diarization is enabled but provider is set to 'none'. Please select 'sherpa-onnx' as the diarization provider.";
-                let _ = app.emit("transcription-error", serde_json::json!({
-                    "taskId": task_id,
-                    "error": error_msg,
-                }));
-                return Err(AppError::PythonError(error_msg.to_string()));
+            Some("sherpa-onnx") => {
+                options.diarization_provider = Some("native".to_string());
+                eprintln!("[INFO] Diarization provider 'sherpa-onnx' mapped to 'native'");
             }
             Some(provider) => {
-                eprintln!("[INFO] Diarization validated with provider: {}", provider);
+                options.diarization_provider = Some(provider.to_string());
             }
         }
     }
@@ -1408,11 +1635,14 @@ async fn start_transcription(
 
     if manager.running_tasks.len() >= max_concurrent {
         // Queue the task
-        enqueue_task(&mut manager.queued_tasks, QueuedTask {
-            id: task_id,
-            file_path,
-            options,
-        });
+        enqueue_task(
+            &mut manager.queued_tasks,
+            QueuedTask {
+                id: task_id,
+                file_path,
+                options,
+            },
+        );
         return Ok(());
     }
 
@@ -1433,7 +1663,7 @@ async fn start_transcription(
     let child_process = Arc::new(Mutex::new(None));
     let child_process_clone = child_process.clone();
     let child_process_for_task = child_process.clone();
-    
+
     let handle = tokio::spawn(async move {
         let result = spawn_transcription(
             app_clone,
@@ -1441,15 +1671,19 @@ async fn start_transcription(
             file_path_clone,
             options_clone,
             child_process_clone,
-        ).await;
+        )
+        .await;
 
         if let Err(e) = result {
             eprintln!("Transcription error: {}", e);
 
-            let _ = app_clone_for_error.emit("transcription-error", serde_json::json!({
-                "taskId": task_id_for_error,
-                "error": e.to_string(),
-            }));
+            let _ = app_clone_for_error.emit(
+                "transcription-error",
+                serde_json::json!({
+                    "taskId": task_id_for_error,
+                    "error": e.to_string(),
+                }),
+            );
         }
 
         let should_process_next = {
@@ -1462,10 +1696,13 @@ async fn start_transcription(
         }
     });
 
-    manager.running_tasks.insert(task_id, RunningTask {
-        handle,
-        child_process: child_process_for_task,
-    });
+    manager.running_tasks.insert(
+        task_id,
+        RunningTask {
+            handle,
+            child_process: child_process_for_task,
+        },
+    );
 
     Ok(())
 }
@@ -1478,7 +1715,7 @@ async fn cancel_transcription(
     task_id: String,
 ) -> Result<(), AppError> {
     let mut manager = task_manager.lock().await;
-    
+
     if let Some(running_task) = manager.running_tasks.remove(&task_id) {
         // HIGH-1: Kill the child process first
         let mut child = running_task.child_process.lock().await;
@@ -1487,11 +1724,11 @@ async fn cancel_transcription(
             let _ = proc.wait().await;
         }
         drop(child);
-        
+
         running_task.handle.abort();
         return Ok(());
     }
-    
+
     // Check if it's queued
     manager.queued_tasks.retain(|t| t.id != task_id);
     drop(manager);
@@ -1511,7 +1748,7 @@ async fn get_queue_status(
     task_manager: State<'_, TaskManagerState>,
 ) -> Result<serde_json::Value, AppError> {
     let manager = task_manager.lock().await;
-    
+
     Ok(serde_json::json!({
         "running": manager.running_tasks.len(),
         "queued": manager.queued_tasks.len(),
@@ -1523,23 +1760,23 @@ async fn get_queue_status(
 async fn run_python_engine(app: AppHandle) -> Result<String, AppError> {
     let engine_path = get_python_engine_path(&app);
     let python_exe = get_python_executable(&app);
-    
+
     let output = create_hidden_command(&python_exe)
         .arg(&engine_path)
         .arg("--test")
         .output()
         .await?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    
+
     if !output.status.success() {
         return Err(AppError::PythonError(format!(
             "Python engine failed: {}",
             stderr
         )));
     }
-    
+
     Ok(stdout)
 }
 
@@ -1547,13 +1784,13 @@ async fn run_python_engine(app: AppHandle) -> Result<String, AppError> {
 #[tauri::command]
 async fn check_cuda_available(app: AppHandle) -> Result<bool, AppError> {
     let python_exe = get_python_executable(&app);
-    
+
     let output = create_hidden_command(&python_exe)
         .arg("-c")
         .arg("import torch; print(torch.cuda.is_available())")
         .output()
         .await?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     Ok(stdout.trim() == "True")
 }
@@ -1569,7 +1806,10 @@ async fn check_cuda_available(app: AppHandle) -> Result<bool, AppError> {
 /// - Subsequent calls with `refresh=false`: Returns cached result instantly
 /// - Cache persists for the app session (until app restart)
 #[tauri::command]
-async fn get_available_devices(app: AppHandle, refresh: bool) -> Result<DevicesResponse, AppError> {
+async fn get_available_devices(
+    _app: AppHandle,
+    refresh: bool,
+) -> Result<DevicesResponse, AppError> {
     // Get or initialize the global cache
     let cache = DEVICE_CACHE.get_or_init(|| Arc::new(Mutex::new(None)));
 
@@ -1584,112 +1824,202 @@ async fn get_available_devices(app: AppHandle, refresh: bool) -> Result<DevicesR
         drop(cached);
     }
 
-    eprintln!("[DEBUG] get_available_devices: running device detection (refresh={})", refresh);
+    eprintln!(
+        "[DEBUG] get_available_devices: running native device detection (refresh={})",
+        refresh
+    );
 
-    let python_exe = get_python_executable(&app);
-    eprintln!("[DEBUG] get_available_devices: python_exe = {:?}", python_exe);
+    let mut devices = Vec::new();
 
-    // Run Python script to detect devices
-    let script = r#"
-import json
-import sys
+    // 1. CPU is always available
+    devices.push(DeviceInfo {
+        device_type: "cpu".to_string(),
+        name: "CPU".to_string(),
+        available: true,
+        memory_mb: None,
+        compute_capability: None,
+        is_recommended: false, // Will be updated later
+    });
 
-try:
-    import torch
-    
-    devices = []
-    
-    # Check CUDA
-    cuda_available = torch.cuda.is_available()
-    cuda_device = {
-        "deviceType": "cuda",
-        "name": "CPU Fallback",
-        "available": False,
-        "memoryMb": None,
-        "computeCapability": None,
-        "isRecommended": False
+    // 2. Check MacOS MPS
+    #[cfg(target_os = "macos")]
+    {
+        let is_apple_silicon = std::env::consts::ARCH == "aarch64";
+        devices.push(DeviceInfo {
+            device_type: "mps".to_string(),
+            name: "Apple Silicon".to_string(),
+            available: is_apple_silicon,
+            memory_mb: None,
+            compute_capability: None,
+            is_recommended: is_apple_silicon,
+        });
     }
-    if cuda_available:
-        gpu_name = torch.cuda.get_device_name(0)
-        gpu_memory = torch.cuda.get_device_properties(0).total_memory // (1024 * 1024)
-        capability = f"{torch.cuda.get_device_properties(0).major}.{torch.cuda.get_device_properties(0).minor}"
-        cuda_device = {
-            "deviceType": "cuda",
-            "name": gpu_name,
-            "available": True,
-            "memoryMb": gpu_memory,
-            "computeCapability": capability,
-            "isRecommended": True
+    #[cfg(not(target_os = "macos"))]
+    {
+        devices.push(DeviceInfo {
+            device_type: "mps".to_string(),
+            name: "Apple Silicon".to_string(),
+            available: false,
+            memory_mb: None,
+            compute_capability: None,
+            is_recommended: false,
+        });
+    }
+
+    // 3. Check NVIDIA CUDA via nvidia-smi
+    let mut cuda_available = false;
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        // On Windows and Linux we can use nvidia-smi
+        let smi_cmd = if cfg!(target_os = "windows") {
+            "nvidia-smi"
+        } else {
+            "nvidia-smi" // Assuming it's in PATH on Linux too
+        };
+
+        // Use create_hidden_command pattern from python_installer (which wraps tokio::process::Command)
+        // Here we just use tokio::process::Command directly with CREATE_NO_WINDOW on Windows
+        let mut cmd = tokio::process::Command::new(smi_cmd);
+        cmd.arg("--query-gpu=name,memory.total");
+        cmd.arg("--format=csv,noheader,nounits");
+
+        #[cfg(target_os = "windows")]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
         }
-    devices.append(cuda_device)
-    
-    # Check MPS (Apple Silicon)
-    mps_available = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
-    mps_device = {
-        "deviceType": "mps",
-        "name": "Apple Silicon",
-        "available": mps_available,
-        "memoryMb": None,
-        "computeCapability": None,
-        "isRecommended": False
+
+        if let Ok(output) = cmd.output().await {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Some(line) = stdout.lines().next() {
+                    let parts: Vec<&str> = line.split(',').collect();
+                    if parts.len() == 2 {
+                        let name = parts[0].trim().to_string();
+                        let mem_str = parts[1].trim();
+                        let memory_mb = mem_str.parse::<u64>().ok();
+
+                        devices.push(DeviceInfo {
+                            device_type: "cuda".to_string(),
+                            name,
+                            available: true,
+                            memory_mb,
+                            compute_capability: None, // Hard to get reliably without NVML
+                            is_recommended: true,     // Strongly recommended
+                        });
+                        cuda_available = true;
+                    }
+                }
+            }
+        }
     }
-    if mps_available and not cuda_available:
-        mps_device["isRecommended"] = True
-    devices.append(mps_device)
-    
-    # CPU is always available
-    cpu_device = {
-        "deviceType": "cpu",
-        "name": "CPU",
-        "available": True,
-        "memoryMb": None,
-        "computeCapability": None,
-        "isRecommended": not (cuda_available or mps_available)
+
+    // Add fallback dummy CUDA device if none detected (matches frontend expectations)
+    if !cuda_available {
+        devices.push(DeviceInfo {
+            device_type: "cuda".to_string(),
+            name: "CPU Fallback".to_string(),
+            available: false,
+            memory_mb: None,
+            compute_capability: None,
+            is_recommended: false,
+        });
     }
-    devices.append(cpu_device)
-    
-    # Determine recommended device
-    recommended = "cpu"
-    if cuda_available:
-        recommended = "cuda"
-    elif mps_available:
-        recommended = "mps"
-    
-    result = {
-        "devices": devices,
-        "recommended": recommended
+
+    // 4. Check Vulkan (AMD/Intel)
+    let mut vulkan_available = false;
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        let mut cmd = tokio::process::Command::new("vulkaninfo");
+        cmd.arg("--summary");
+
+        #[cfg(target_os = "windows")]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        if let Ok(output) = cmd.output().await {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+
+                // Parse deviceName from vulkaninfo summary
+                let mut vulkan_name = "Vulkan GPU".to_string();
+                let mut found_discrete = false;
+
+                for line in stdout.lines() {
+                    let line = line.trim();
+                    if line.starts_with("deviceName") {
+                        if let Some(idx) = line.find('=') {
+                            vulkan_name = line[idx + 1..].trim().to_string();
+                        }
+                    }
+                    if line.starts_with("deviceType") && line.contains("DISCRETE_GPU") {
+                        found_discrete = true;
+                    }
+                }
+
+                // Only mark Vulkan as available if it's not the primary NVIDIA card (to avoid duplicate options like CUDA + Vulkan for same card)
+                // In a perfect world we'd allow both, but for user simplicity we prefer CUDA over Vulkan for NVIDIA
+                let is_nvidia = vulkan_name.to_lowercase().contains("nvidia");
+
+                if stdout.contains("VULKANINFO") && (!is_nvidia || !cuda_available) {
+                    devices.push(DeviceInfo {
+                        device_type: "vulkan".to_string(),
+                        name: vulkan_name,
+                        available: true,
+                        memory_mb: None,
+                        compute_capability: None,
+                        is_recommended: !cuda_available && found_discrete,
+                    });
+                    vulkan_available = true;
+                }
+            }
+        }
     }
-    print(json.dumps(result))
-    
-except Exception as e:
-    error_result = {
-        "devices": [{
-            "deviceType": "cpu",
-            "name": "CPU (Error Fallback)",
-            "available": True,
-            "memoryMb": None,
-            "computeCapability": None,
-            "isRecommended": True
-        }],
-        "recommended": "cpu"
+
+    if !vulkan_available {
+        devices.push(DeviceInfo {
+            device_type: "vulkan".to_string(),
+            name: "Vulkan".to_string(),
+            available: false,
+            memory_mb: None,
+            compute_capability: None,
+            is_recommended: false,
+        });
     }
-    print(json.dumps(error_result))
-"#;
-    
-    let output = create_hidden_command(&python_exe)
-        .arg("-c")
-        .arg(script)
-        .output()
-        .await?;
-    
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    
-    // Parse JSON response
-    let response: DevicesResponse = serde_json::from_str(&stdout)
-        .map_err(|e| AppError::JsonError(DeError::custom(format!(
-            "Failed to parse device info: {}. Output: {}",
-            e, stdout
-        ))))?;
+
+    // Determine overall recommended device
+    let recommended = if cuda_available {
+        "cuda".to_string()
+    } else if vulkan_available {
+        "vulkan".to_string()
+    } else {
+        #[cfg(target_os = "macos")]
+        {
+            if std::env::consts::ARCH == "aarch64" {
+                "mps".to_string()
+            } else {
+                "cpu".to_string()
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            "cpu".to_string()
+        }
+    };
+
+    // Set CPU as recommended only if no other hardware is available
+    if recommended == "cpu" {
+        if let Some(cpu) = devices.iter_mut().find(|d| d.device_type == "cpu") {
+            cpu.is_recommended = true;
+        }
+    }
+
+    let response = DevicesResponse {
+        devices,
+        recommended,
+    };
 
     // Update cache with fresh result
     *cache.lock().await = Some(response.clone());
@@ -1705,18 +2035,20 @@ async fn select_media_files(app: AppHandle) -> Result<Vec<String>, AppError> {
         .dialog()
         .file()
         .set_title("Select Media Files")
-        .add_filter("Media Files", &["mp3", "mp4", "wav", "m4a", "flac", "ogg", "webm", "mov", "avi", "mkv"])
+        .add_filter(
+            "Media Files",
+            &[
+                "mp3", "mp4", "wav", "m4a", "flac", "ogg", "webm", "mov", "avi", "mkv",
+            ],
+        )
         .add_filter("Audio Files", &["mp3", "wav", "m4a", "flac", "ogg"])
         .add_filter("Video Files", &["mp4", "webm", "mov", "avi", "mkv"])
         .add_filter("All Files", &["*"])
         .blocking_pick_files();
-    
+
     match files {
         Some(paths) => {
-            let file_paths: Vec<String> = paths
-                .into_iter()
-                .map(|path| path.to_string())
-                .collect();
+            let file_paths: Vec<String> = paths.into_iter().map(|path| path.to_string()).collect();
             Ok(file_paths)
         }
         None => Ok(vec![]),
@@ -1727,12 +2059,9 @@ async fn select_media_files(app: AppHandle) -> Result<Vec<String>, AppError> {
 /// Returns false if all speakers are None or if there's only one unique speaker
 fn should_show_speaker(segments: &[TranscriptionSegment]) -> bool {
     use std::collections::HashSet;
-    
-    let speakers: HashSet<_> = segments
-        .iter()
-        .filter_map(|s| s.speaker.as_ref())
-        .collect();
-    
+
+    let speakers: HashSet<_> = segments.iter().filter_map(|s| s.speaker.as_ref()).collect();
+
     // Show speaker if there are multiple different speakers
     speakers.len() > 1
 }
@@ -1747,14 +2076,15 @@ async fn export_transcription(
 ) -> Result<(), AppError> {
     let export_mode = export_mode.as_deref().unwrap_or("with_timestamps");
     let show_speaker = should_show_speaker(&result.segments);
-    
+
     let content = match format.as_str() {
         "json" => serde_json::to_string_pretty(&result)?,
         "txt" => {
             match export_mode {
                 "plain_text" => {
                     // Plain text: join all segments with space, no timestamps, no speakers
-                    result.segments
+                    result
+                        .segments
                         .iter()
                         .map(|s| s.text.clone())
                         .collect::<Vec<_>>()
@@ -1762,7 +2092,8 @@ async fn export_transcription(
                 }
                 _ => {
                     // With timestamps: show time and speaker (if multiple speakers)
-                    result.segments
+                    result
+                        .segments
                         .iter()
                         .map(|s| {
                             let time = format_time(s.start);
@@ -1778,22 +2109,21 @@ async fn export_transcription(
                 }
             }
         }
-        "srt" => {
-            result.segments
-                .iter()
-                .enumerate()
-                .map(|(i, s)| {
-                    format!(
-                        "{}\n{} --> {}\n{}\n",
-                        i + 1,
-                        format_srt_time(s.start),
-                        format_srt_time(s.end),
-                        s.text
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
+        "srt" => result
+            .segments
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                format!(
+                    "{}\n{} --> {}\n{}\n",
+                    i + 1,
+                    format_srt_time(s.start),
+                    format_srt_time(s.end),
+                    s.text
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         "vtt" => {
             let mut lines = vec!["WEBVTT".to_string(), "".to_string()];
             lines.extend(result.segments.iter().enumerate().map(|(i, s)| {
@@ -1811,7 +2141,8 @@ async fn export_transcription(
             match export_mode {
                 "plain_text" => {
                     // Plain text: join all segments with space, no timestamps, no speakers
-                    result.segments
+                    result
+                        .segments
                         .iter()
                         .map(|s| s.text.clone())
                         .collect::<Vec<_>>()
@@ -1819,7 +2150,8 @@ async fn export_transcription(
                 }
                 _ => {
                     // With timestamps: show time and speaker (if multiple speakers)
-                    result.segments
+                    result
+                        .segments
                         .iter()
                         .map(|s| {
                             let time = format_time(s.start);
@@ -1872,29 +2204,47 @@ fn format_srt_time(seconds: f64) -> String {
     let minutes = ((seconds % 3600.0) / 60.0) as u32;
     let secs = (seconds % 60.0) as u32;
     let millis = ((seconds % 1.0) * 1000.0) as u32;
-    
+
     format!("{:02}:{:02}:{:02},{:03}", hours, minutes, secs, millis)
 }
 
 /// Get the models directory path
 fn get_models_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| AppError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "Failed to get app data dir")))?;
+    let app_data = app.path().app_data_dir().map_err(|_| {
+        AppError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to get app data dir",
+        ))
+    })?;
 
     let models_dir = app_data.join("Vocrify").join("models");
 
-    std::fs::create_dir_all(&models_dir)
-        .map_err(|e| AppError::IoError(e))?;
+    std::fs::create_dir_all(&models_dir).map_err(|e| AppError::IoError(e))?;
 
     // Get absolute path and remove Windows extended-length path prefix (\\?\)
     // faster-whisper cannot handle paths with this prefix
     let normalized = dunce::simplified(&models_dir).to_path_buf();
 
-    eprintln!("[DEBUG] Models dir - original: {:?}, normalized: {:?}", models_dir, normalized);
+    eprintln!(
+        "[DEBUG] Models dir - original: {:?}, normalized: {:?}",
+        models_dir, normalized
+    );
 
     Ok(normalized)
+}
+
+/// Get directory for temporary audio caches used by diarization.
+fn get_audio_cache_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let app_data = app.path().app_data_dir().map_err(|_| {
+        AppError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to get app data dir",
+        ))
+    })?;
+
+    let audio_cache_dir = app_data.join("Vocrify").join("cache").join("audio");
+    std::fs::create_dir_all(&audio_cache_dir).map_err(AppError::IoError)?;
+    Ok(dunce::simplified(&audio_cache_dir).to_path_buf())
 }
 
 /// Get the models store path
@@ -1915,13 +2265,13 @@ async fn get_huggingface_token(app: &AppHandle) -> Result<Option<String>, AppErr
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&store_path)
-        .map_err(|e| AppError::IoError(e))?;
+    let content = std::fs::read_to_string(&store_path).map_err(|e| AppError::IoError(e))?;
 
-    let store_data: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| AppError::JsonError(e))?;
+    let store_data: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| AppError::JsonError(e))?;
 
-    Ok(store_data.get("huggingFaceToken")
+    Ok(store_data
+        .get("huggingFaceToken")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string()))
@@ -1934,15 +2284,12 @@ async fn save_huggingface_token(app: AppHandle, token: String) -> Result<(), App
     let fallback = PathBuf::from(".");
     let store_dir = store_path.parent().unwrap_or(&fallback);
 
-    std::fs::create_dir_all(store_dir)
-        .map_err(|e| AppError::IoError(e))?;
+    std::fs::create_dir_all(store_dir).map_err(|e| AppError::IoError(e))?;
 
     // Read existing store data if it exists
     let mut store_data: serde_json::Value = if store_path.exists() {
-        let content = std::fs::read_to_string(&store_path)
-            .map_err(|e| AppError::IoError(e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| AppError::JsonError(e))?
+        let content = std::fs::read_to_string(&store_path).map_err(|e| AppError::IoError(e))?;
+        serde_json::from_str(&content).map_err(|e| AppError::JsonError(e))?
     } else {
         serde_json::json!({})
     };
@@ -1950,8 +2297,7 @@ async fn save_huggingface_token(app: AppHandle, token: String) -> Result<(), App
     // Update the token
     store_data["huggingFaceToken"] = serde_json::Value::String(token);
 
-    std::fs::write(&store_path, store_data.to_string())
-        .map_err(|e| AppError::IoError(e))?;
+    std::fs::write(&store_path, store_data.to_string()).map_err(|e| AppError::IoError(e))?;
 
     Ok(())
 }
@@ -2013,8 +2359,7 @@ async fn get_audio_duration(file_path: String) -> Result<f64, String> {
         return Err(format!("File does not exist: {}", file_path));
     }
 
-    crate::audio::utils::get_duration(&path)
-        .map_err(|e| format!("Failed to get duration: {}", e))
+    crate::audio::utils::get_duration(&path).map_err(|e| format!("Failed to get duration: {}", e))
 }
 
 /// Extract audio segment and save as WAV
@@ -2032,7 +2377,10 @@ async fn extract_audio_segment(
         return Err(format!("Input file does not exist: {}", file_path));
     }
 
-    eprintln!("[AUDIO CMD] Extracting segment from {}ms to {}ms", start_ms, end_ms);
+    eprintln!(
+        "[AUDIO CMD] Extracting segment from {}ms to {}ms",
+        start_ms, end_ms
+    );
 
     // Extract segment
     let segment = crate::audio::utils::slice_audio(&input, start_ms, end_ms)
@@ -2059,14 +2407,15 @@ async fn get_audio_metadata(file_path: String) -> Result<AudioInfo, String> {
         return Err(format!("File does not exist: {}", file_path));
     }
 
-    let audio = crate::audio::loader::load(&path)
-        .map_err(|e| format!("Failed to load audio: {}", e))?;
+    let audio =
+        crate::audio::loader::load(&path).map_err(|e| format!("Failed to load audio: {}", e))?;
 
     Ok(AudioInfo {
         sample_rate: audio.sample_rate,
         channels: audio.channels,
         duration: audio.duration(),
-        format: path.extension()
+        format: path
+            .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("unknown")
             .to_string(),
@@ -2129,11 +2478,13 @@ async fn open_models_folder_command(app: AppHandle) -> Result<(), AppError> {
 /// Open archive directory in system file manager
 #[tauri::command]
 async fn open_archive_folder_command(app: AppHandle) -> Result<(), AppError> {
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| AppError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "Failed to get app data dir")))?;
-    
+    let app_data = app.path().app_data_dir().map_err(|_| {
+        AppError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to get app data dir",
+        ))
+    })?;
+
     let archive_dir = app_data.join("archive");
     let archive_dir_str = archive_dir.to_string_lossy().to_string();
 
@@ -2141,8 +2492,7 @@ async fn open_archive_folder_command(app: AppHandle) -> Result<(), AppError> {
 
     // Create directory if it doesn't exist
     if !archive_dir.exists() {
-        std::fs::create_dir_all(&archive_dir)
-            .map_err(|e| AppError::IoError(e))?;
+        std::fs::create_dir_all(&archive_dir).map_err(|e| AppError::IoError(e))?;
     }
 
     // Platform-specific folder opening
@@ -2176,11 +2526,67 @@ async fn open_archive_folder_command(app: AppHandle) -> Result<(), AppError> {
         }
     }
 
-    eprintln!("[DEBUG] Successfully opened archive folder: {:?}", archive_dir_str);
+    eprintln!(
+        "[DEBUG] Successfully opened archive folder: {:?}",
+        archive_dir_str
+    );
     Ok(())
 }
 
-/// Spawn a model download — all models downloaded via Rust-native ModelDownloader.
+/// Open application directory in system file manager
+#[tauri::command]
+async fn open_app_directory_command(app: AppHandle) -> Result<(), AppError> {
+    let app_data = app.path().app_data_dir().map_err(|_| {
+        AppError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to get app data dir",
+        ))
+    })?;
+
+    let app_dir = app_data.join("Vocrify");
+    let app_dir_str = app_dir.to_string_lossy().to_string();
+
+    eprintln!("[DEBUG] Opening app directory: {:?}", app_dir_str);
+
+    if !app_dir.exists() {
+        std::fs::create_dir_all(&app_dir).map_err(AppError::IoError)?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&app_dir_str)
+            .spawn()
+            .map_err(AppError::IoError)?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&app_dir_str)
+            .spawn()
+            .map_err(AppError::IoError)?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let open_result = std::process::Command::new("xdg-open")
+            .arg(&app_dir_str)
+            .spawn();
+
+        if open_result.is_err() {
+            std::process::Command::new("nautilus")
+                .arg(&app_dir_str)
+                .spawn()
+                .map_err(AppError::IoError)?;
+        }
+    }
+
+    eprintln!("[DEBUG] Successfully opened app directory: {:?}", app_dir_str);
+    Ok(())
+}
+
+/// Spawn a model download - all models downloaded via Rust-native ModelDownloader.
 ///
 /// | model type      | engine |
 /// |-----------------|--------|
@@ -2216,10 +2622,15 @@ async fn download_model(
     {
         let manager = task_manager.lock().await;
         if manager.downloading_models.len() >= MAX_CONCURRENT_DOWNLOADS {
-            return Err(AppError::ModelError("Maximum concurrent downloads reached".to_string()));
+            return Err(AppError::ModelError(
+                "Maximum concurrent downloads reached".to_string(),
+            ));
         }
         if manager.downloading_models.contains_key(&model_name) {
-            return Err(AppError::ModelError(format!("Download already in progress for: {}", model_name)));
+            return Err(AppError::ModelError(format!(
+                "Download already in progress for: {}",
+                model_name
+            )));
         }
     }
 
@@ -2258,7 +2669,8 @@ async fn download_model(
             token_file_clone,
             child_arc_for_task,
             cancel_token_for_task,
-        ).await;
+        )
+        .await;
 
         // Cleanup token file regardless of outcome
         if let Some(path) = token_file_for_cleanup {
@@ -2279,11 +2691,17 @@ async fn download_model(
             }
             Err(e) => {
                 let error_text = e.to_string();
-                eprintln!("[ERROR] Model download failed for {}: {}", model_name_clone, error_text);
-                let _ = app_for_events.emit("model-download-error", serde_json::json!({
-                    "modelName": model_name_clone,
-                    "error": error_text,
-                }));
+                eprintln!(
+                    "[ERROR] Model download failed for {}: {}",
+                    model_name_clone, error_text
+                );
+                let _ = app_for_events.emit(
+                    "model-download-error",
+                    serde_json::json!({
+                        "modelName": model_name_clone,
+                        "error": error_text,
+                    }),
+                );
             }
         }
     });
@@ -2291,9 +2709,15 @@ async fn download_model(
     // Register in all tracking maps
     {
         let mut manager = task_manager.lock().await;
-        manager.downloading_models.insert(model_name.clone(), handle);
-        manager.downloading_processes.insert(model_name.clone(), child_arc);
-        manager.cancel_tokens.insert(model_name.clone(), cancel_token);
+        manager
+            .downloading_models
+            .insert(model_name.clone(), handle);
+        manager
+            .downloading_processes
+            .insert(model_name.clone(), child_arc);
+        manager
+            .cancel_tokens
+            .insert(model_name.clone(), cancel_token);
     }
 
     Ok(model_name)
@@ -2308,10 +2732,7 @@ async fn get_local_models(app: AppHandle) -> Result<Vec<LocalModel>, AppError> {
 
 /// Delete a model
 #[tauri::command]
-async fn delete_model(
-    app: AppHandle,
-    model_name: String,
-) -> Result<(), AppError> {
+async fn delete_model(app: AppHandle, model_name: String) -> Result<(), AppError> {
     let models_dir = get_models_dir(&app)?;
 
     eprintln!("Deleting model: {}", model_name);
@@ -2339,7 +2760,10 @@ async fn delete_model(
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
     if !output.status.success() {
-        eprintln!("[ERROR] Python delete_model failed:\nstdout: {}\nstderr: {}", stdout, stderr);
+        eprintln!(
+            "[ERROR] Python delete_model failed:\nstdout: {}\nstderr: {}",
+            stdout, stderr
+        );
 
         // Try to extract structured error from stdout JSON lines
         let error_detail = stdout
@@ -2350,7 +2774,10 @@ async fn delete_model(
             .last();
 
         let error_msg = error_detail.unwrap_or_else(|| stderr.clone());
-        return Err(AppError::PythonError(format!("Failed to delete model: {}", error_msg)));
+        return Err(AppError::PythonError(format!(
+            "Failed to delete model: {}",
+            error_msg
+        )));
     }
 
     eprintln!("Model deleted successfully via Python: {}", model_name);
@@ -2366,9 +2793,9 @@ async fn delete_model(
             if let Ok(store_data) = serde_json::from_str::<serde_json::Value>(&content) {
                 if let Some(selected) = store_data.get("selected_model").and_then(|v| v.as_str()) {
                     // Check if the deleted model matches the stored selection
-                    let needs_clear = selected == &model_name ||
-                        selected == &format!("transcription:{}", model_name) ||
-                        selected == &format!("diarization:{}", model_name);
+                    let needs_clear = selected == &model_name
+                        || selected == &format!("transcription:{}", model_name)
+                        || selected == &format!("diarization:{}", model_name);
 
                     if needs_clear {
                         let fallback = PathBuf::from(".");
@@ -2381,7 +2808,10 @@ async fn delete_model(
 
                         if std::fs::create_dir_all(store_dir).is_ok() {
                             let _ = std::fs::write(&store_path, cleared_data.to_string());
-                            eprintln!("Cleared selected model from store (deleted: {})", model_name);
+                            eprintln!(
+                                "Cleared selected model from store (deleted: {})",
+                                model_name
+                            );
                         }
                     }
                 }
@@ -2407,7 +2837,10 @@ async fn cancel_model_download(
     };
 
     if handle.is_none() && child_arc.is_none() && cancel_token.is_none() {
-        return Err(AppError::ModelError(format!("Model download not found: {}", model_name)));
+        return Err(AppError::ModelError(format!(
+            "Model download not found: {}",
+            model_name
+        )));
     }
 
     // 1. Signal cancel token so Rust downloader stops gracefully
@@ -2435,7 +2868,7 @@ async fn cancel_model_download(
 #[tauri::command]
 async fn get_disk_usage(app: AppHandle) -> Result<DiskUsage, AppError> {
     let models_dir = get_models_dir(&app)?;
-    
+
     let total_size_mb = if models_dir.exists() {
         let mut total_size = 0u64;
         for dir_entry in std::fs::read_dir(&models_dir)? {
@@ -2456,17 +2889,9 @@ async fn get_disk_usage(app: AppHandle) -> Result<DiskUsage, AppError> {
     } else {
         0
     };
-    
-    let free_space_mb = {
-        if let Some(_dir) = models_dir.parent() {
-            // Calculate approximate free space (this is a simplified version)
-            // For accurate disk space, you may need to use a crate like `sysinfo`
-            0u64
-        } else {
-            0u64
-        }
-    };
-    
+
+    let free_space_mb = disk_utils::get_free_space_mb(&models_dir);
+
     Ok(DiskUsage {
         total_size_mb,
         free_space_mb,
@@ -2479,10 +2904,7 @@ async fn clear_cache(app: AppHandle) -> Result<(), AppError> {
     let models_dir = get_models_dir(&app)?;
 
     // Directories to clear
-    let cache_dirs = vec![
-        models_dir.join(".hf_cache"),
-        models_dir.join("hf_cache"),
-    ];
+    let cache_dirs = vec![models_dir.join(".hf_cache"), models_dir.join("hf_cache")];
 
     let mut cleared_count = 0;
     let mut error_count = 0;
@@ -2495,7 +2917,10 @@ async fn clear_cache(app: AppHandle) -> Result<(), AppError> {
                     cleared_count += 1;
                 }
                 Err(e) => {
-                    eprintln!("[WARN] Failed to clear cache directory {:?}: {}", cache_dir, e);
+                    eprintln!(
+                        "[WARN] Failed to clear cache directory {:?}: {}",
+                        cache_dir, e
+                    );
                     error_count += 1;
                 }
             }
@@ -2505,10 +2930,36 @@ async fn clear_cache(app: AppHandle) -> Result<(), AppError> {
     if cleared_count == 0 && error_count == 0 {
         eprintln!("[INFO] No cache directories found to clear");
     } else {
-        eprintln!("[INFO] Cache clear completed: {} cleared, {} errors", cleared_count, error_count);
+        eprintln!(
+            "[INFO] Cache clear completed: {} cleared, {} errors",
+            cleared_count, error_count
+        );
     }
 
     Ok(())
+}
+
+/// Generate waveform peaks for a media file without loading into RAM fully
+#[tauri::command]
+async fn generate_waveform_peaks(
+    file_path: String,
+    target_peaks: usize,
+) -> Result<Vec<f32>, AppError> {
+    eprintln!(
+        "[AUDIO] Request to generate {} peaks for {}",
+        target_peaks, file_path
+    );
+    let path = validate_file_path(&file_path)?;
+
+    // Process audio and generate peaks using standard tokio blocking
+    let peaks = tokio::task::spawn_blocking(move || {
+        audio::utils::generate_waveform_peaks(&path, target_peaks)
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Task execution failed: {}", e)))?
+    .map_err(|e| AppError::Other(format!("Peak generation failed: {}", e)))?;
+
+    Ok(peaks)
 }
 
 /// Save selected model to store
@@ -2517,17 +2968,15 @@ async fn save_selected_model(app: AppHandle, model: String) -> Result<(), AppErr
     let store_path = get_store_path(&app);
     let fallback = PathBuf::from(".");
     let store_dir = store_path.parent().unwrap_or(&fallback);
-    
-    std::fs::create_dir_all(store_dir)
-        .map_err(|e| AppError::IoError(e))?;
-    
+
+    std::fs::create_dir_all(store_dir).map_err(|e| AppError::IoError(e))?;
+
     let store_data = serde_json::json!({
         "selected_model": model,
     });
-    
-    std::fs::write(&store_path, store_data.to_string())
-        .map_err(|e| AppError::IoError(e))?;
-    
+
+    std::fs::write(&store_path, store_data.to_string()).map_err(|e| AppError::IoError(e))?;
+
     Ok(())
 }
 
@@ -2540,13 +2989,14 @@ async fn load_selected_model(app: AppHandle) -> Result<Option<String>, AppError>
         return Ok(None);
     }
 
-    let content = std::fs::read_to_string(&store_path)
-        .map_err(|e| AppError::IoError(e))?;
+    let content = std::fs::read_to_string(&store_path).map_err(|e| AppError::IoError(e))?;
 
-    let store_data: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| AppError::JsonError(e))?;
+    let store_data: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| AppError::JsonError(e))?;
 
-    Ok(store_data.get("selected_model").and_then(|v| v.as_str().map(|s| s.to_string())))
+    Ok(store_data
+        .get("selected_model")
+        .and_then(|v| v.as_str().map(|s| s.to_string())))
 }
 
 /// File metadata structure
@@ -2570,7 +3020,8 @@ async fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMetadata>
         if !path.exists() {
             metadata_list.push(FileMetadata {
                 path: file_path.clone(),
-                name: path.file_name()
+                name: path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| file_path.clone()),
                 size: 0,
@@ -2579,10 +3030,10 @@ async fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMetadata>
             continue;
         }
 
-        let metadata = std::fs::metadata(&path)
-            .map_err(|e| AppError::IoError(e))?;
+        let metadata = std::fs::metadata(&path).map_err(|e| AppError::IoError(e))?;
 
-        let file_name = path.file_name()
+        let file_name = path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| file_path.clone());
 
@@ -2645,8 +3096,7 @@ fn persist_setup_state(app: &AppHandle, state: &SetupState) -> Result<(), String
 
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| format!("Failed to serialize setup state: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("Failed to write setup state: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to write setup state: {}", e))?;
 
     eprintln!("[INFO] Setup state saved at: {:?}", path);
     Ok(())
@@ -2680,23 +3130,15 @@ fn update_runtime_state_impl(
     let existing = load_setup_state(app);
     // Preserve existing completed_at regardless of current runtime readiness
     // Once setup is completed, it stays completed even if runtime has issues
-    let completed_at = existing
-        .and_then(|state| state.completed_at)
-        .or_else(|| {
-            if readiness.ready {
-                Some(now_rfc3339())
-            } else {
-                None
-            }
-        });
+    let completed_at = existing.and_then(|state| state.completed_at).or_else(|| {
+        if readiness.ready {
+            Some(now_rfc3339())
+        } else {
+            None
+        }
+    });
 
-    mark_setup_complete_impl(
-        app,
-        readiness,
-        completed_at,
-        python_executable,
-        ffmpeg_path,
-    )
+    mark_setup_complete_impl(app, readiness, completed_at, python_executable, ffmpeg_path)
 }
 
 /// Reset setup by removing the state file and legacy marker.
@@ -2723,7 +3165,7 @@ fn reset_setup_impl(app: &AppHandle) -> Result<(), String> {
 // ============================================================================
 
 fn is_python_runtime_ready(check: &PythonCheckResult) -> bool {
-    check.status == "ok" && check.pytorch_installed && check.version.is_some()
+    check.status == "ok" && check.version.is_some()
 }
 
 fn is_ffmpeg_runtime_ready(check: &FFmpegCheckResult) -> bool {
@@ -2737,11 +3179,11 @@ async fn run_python_environment_check_impl(app: &AppHandle) -> Result<PythonChec
         .parent()
         .map(|p| p.to_path_buf())
         .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
-    
+
     eprintln!("[INFO] Checking Python environment...");
     eprintln!("[DEBUG] Python exe: {:?}", python_exe);
     eprintln!("[DEBUG] Engine path: {:?}", engine_path);
-    
+
     let check_code = r#"
 import json, sys
 from pathlib import Path
@@ -2761,19 +3203,23 @@ print(json.dumps(check_python_environment()), flush=True)
         .output()
         .await
         .map_err(|e| format!("Failed to execute Python: {}", e))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    
+
     if !output.status.success() {
         eprintln!("[ERROR] Python check failed: {}", stderr);
         return Err(format!("Python check failed: {}", stderr));
     }
-    
+
     // Parse JSON response
-    let result: PythonCheckResult = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse Python check result: {}. Output: {}", e, stdout))?;
-    
+    let result: PythonCheckResult = serde_json::from_str(&stdout).map_err(|e| {
+        format!(
+            "Failed to parse Python check result: {}. Output: {}",
+            e, stdout
+        )
+    })?;
+
     eprintln!("[INFO] Python check complete: status={}", result.status);
     Ok(result)
 }
@@ -2785,7 +3231,7 @@ async fn run_ffmpeg_status_check_impl(app: &AppHandle) -> Result<FFmpegCheckResu
         .parent()
         .map(|p| p.to_path_buf())
         .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
-    
+
     eprintln!("[INFO] Checking FFmpeg status...");
 
     let check_code = r#"
@@ -2796,7 +3242,7 @@ sys.path.insert(0, str(engine_dir))
 from environment_checks import check_ffmpeg
 print(json.dumps(check_ffmpeg()), flush=True)
 "#;
-    
+
     let output = python_installer::create_hidden_command(&python_exe)
         .current_dir(&engine_dir)
         .arg("-c")
@@ -2807,19 +3253,26 @@ print(json.dumps(check_ffmpeg()), flush=True)
         .output()
         .await
         .map_err(|e| format!("Failed to execute Python: {}", e))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    
+
     if !output.status.success() {
         eprintln!("[ERROR] FFmpeg check failed: {}", stderr);
         return Err(format!("FFmpeg check failed: {}", stderr));
     }
-    
-    let result: FFmpegCheckResult = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse FFmpeg check result: {}. Output: {}", e, stdout))?;
-    
-    eprintln!("[INFO] FFmpeg check complete: installed={}", result.installed);
+
+    let result: FFmpegCheckResult = serde_json::from_str(&stdout).map_err(|e| {
+        format!(
+            "Failed to parse FFmpeg check result: {}. Output: {}",
+            e, stdout
+        )
+    })?;
+
+    eprintln!(
+        "[INFO] FFmpeg check complete: installed={}",
+        result.installed
+    );
     Ok(result)
 }
 
@@ -2906,7 +3359,7 @@ async fn check_models_status(app: AppHandle) -> Result<ModelCheckResult, String>
         .map(|p| p.to_path_buf())
         .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
     let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
-    
+
     eprintln!("[INFO] Checking models status...");
     eprintln!("[DEBUG] Models dir: {:?}", models_dir);
 
@@ -2919,7 +3372,7 @@ sys.path.insert(0, str(engine_dir))
 from environment_checks import check_models
 print(json.dumps(check_models(cache_dir)), flush=True)
 "#;
-    
+
     let output = create_hidden_command(&python_exe)
         .current_dir(&engine_dir)
         .arg("-c")
@@ -2931,19 +3384,26 @@ print(json.dumps(check_models(cache_dir)), flush=True)
         .output()
         .await
         .map_err(|e| format!("Failed to execute Python: {}", e))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    
+
     if !output.status.success() {
         eprintln!("[ERROR] Models check failed: {}", stderr);
         return Err(format!("Models check failed: {}", stderr));
     }
-    
-    let result: ModelCheckResult = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse models check result: {}. Output: {}", e, stdout))?;
-    
-    eprintln!("[INFO] Models check complete: has_required={}", result.has_required_model);
+
+    let result: ModelCheckResult = serde_json::from_str(&stdout).map_err(|e| {
+        format!(
+            "Failed to parse models check result: {}. Output: {}",
+            e, stdout
+        )
+    })?;
+
+    eprintln!(
+        "[INFO] Models check complete: has_required={}",
+        result.has_required_model
+    );
     Ok(result)
 }
 
@@ -2957,7 +3417,7 @@ async fn get_environment_status(app: AppHandle) -> Result<EnvironmentStatus, Str
         .map(|p| p.to_path_buf())
         .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
     let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
-    
+
     eprintln!("[INFO] Getting full environment status...");
 
     let check_code = r#"
@@ -2969,7 +3429,7 @@ sys.path.insert(0, str(engine_dir))
 from environment_checks import get_full_environment_status
 print(json.dumps(get_full_environment_status(cache_dir)), flush=True)
 "#;
-    
+
     let output = create_hidden_command(&python_exe)
         .current_dir(&engine_dir)
         .arg("-c")
@@ -2981,19 +3441,26 @@ print(json.dumps(get_full_environment_status(cache_dir)), flush=True)
         .output()
         .await
         .map_err(|e| format!("Failed to execute Python: {}", e))?;
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    
+
     if !output.status.success() {
         eprintln!("[ERROR] Environment check failed: {}", stderr);
         return Err(format!("Environment check failed: {}", stderr));
     }
-    
-    let result: EnvironmentStatus = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse environment status: {}. Output: {}", e, stdout))?;
-    
-    eprintln!("[INFO] Environment check complete: overall={}", result.overall_status);
+
+    let result: EnvironmentStatus = serde_json::from_str(&stdout).map_err(|e| {
+        format!(
+            "Failed to parse environment status: {}. Output: {}",
+            e, stdout
+        )
+    })?;
+
+    eprintln!(
+        "[INFO] Environment check complete: overall={}",
+        result.overall_status
+    );
     Ok(result)
 }
 
@@ -3001,12 +3468,16 @@ print(json.dumps(get_full_environment_status(cache_dir)), flush=True)
 /// Returns true if setup_state.json exists and runtime_ready=true with age < configured TTL
 /// Falls back to full is_setup_complete() check if cache is invalid/missing
 #[tauri::command]
-async fn is_setup_complete_fast(app: AppHandle, perf_config: State<'_, PerformanceConfigState>) -> Result<bool, String> {
+async fn is_setup_complete_fast(
+    app: AppHandle,
+    perf_config: State<'_, PerformanceConfigState>,
+) -> Result<bool, String> {
     // Check if fast setup check is enabled via performance config
-    let fast_check_enabled = perf_config.read()
+    let fast_check_enabled = perf_config
+        .read()
         .map(|cfg| cfg.fast_setup_check_enabled)
         .unwrap_or(true); // Default to true if lock fails
-    
+
     if !fast_check_enabled {
         eprintln!("[INFO] Fast setup check is disabled, falling back to full check");
         return is_setup_complete(app).await;
@@ -3020,8 +3491,13 @@ async fn is_setup_complete_fast(app: AppHandle, perf_config: State<'_, Performan
             if let Some(completed_at_str) = &state.completed_at {
                 if let Ok(completed_at) = chrono::DateTime::parse_from_rfc3339(completed_at_str) {
                     let now = chrono::Utc::now();
-                    let days_old = now.signed_duration_since(completed_at.with_timezone(&chrono::Utc)).num_days();
-                    eprintln!("[INFO] Fast setup check: setup completed {} days ago, wizard was finished", days_old);
+                    let days_old = now
+                        .signed_duration_since(completed_at.with_timezone(&chrono::Utc))
+                        .num_days();
+                    eprintln!(
+                        "[INFO] Fast setup check: setup completed {} days ago, wizard was finished",
+                        days_old
+                    );
                 }
             }
             eprintln!("[INFO] Fast setup check: completed_at exists, setup was completed");
@@ -3058,7 +3534,10 @@ async fn is_setup_complete(app: AppHandle) -> Result<bool, String> {
         readiness.python_executable.clone(),
         readiness.ffmpeg_path.clone(),
     )?;
-    eprintln!("[INFO] Setup complete status (runtime-ready): {}", readiness.readiness.ready);
+    eprintln!(
+        "[INFO] Setup complete status (runtime-ready): {}",
+        readiness.readiness.ready
+    );
     Ok(readiness.readiness.ready)
 }
 
@@ -3069,7 +3548,10 @@ async fn is_setup_complete(app: AppHandle) -> Result<bool, String> {
 #[tauri::command]
 async fn mark_setup_complete(app: AppHandle) -> Result<(), String> {
     let python_exe = get_python_executable(&app);
-    let ffmpeg_path = get_ffmpeg_path(&app).await.ok().map(|p| p.to_string_lossy().to_string());
+    let ffmpeg_path = get_ffmpeg_path(&app)
+        .await
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
 
     let readiness = RuntimeReadinessStatus {
         ready: true,
@@ -3170,12 +3652,15 @@ async fn load_model_rust(
     ensure_manager_initialized(&state, &app).await?;
 
     let manager_guard = state.lock().await;
-    let manager = manager_guard.as_ref()
+    let manager = manager_guard
+        .as_ref()
         .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
 
     #[cfg(feature = "rust-transcribe")]
     {
-        manager.load_model(&model_name).await
+        manager
+            .load_model(&model_name)
+            .await
             .map_err(|e| format!("Failed to load model: {}", e))
     }
 
@@ -3212,8 +3697,16 @@ async fn transcribe_rust(
     state: State<'_, TranscriptionManagerState>,
     rust_handles: State<'_, RustTaskHandles>,
 ) -> Result<TranscriptionResult, String> {
-    eprintln!("[INFO] transcribe_rust called: task_id={}, file={}, model={}",
-        task_id, file_path, options.language.as_ref().map(|s| s.as_str()).unwrap_or("auto"));
+    eprintln!(
+        "[INFO] transcribe_rust called: task_id={}, file={}, model={}",
+        task_id,
+        file_path,
+        options
+            .language
+            .as_ref()
+            .map(|s: &String| s.as_str())
+            .unwrap_or("auto")
+    );
 
     let total_start = std::time::Instant::now();
     let model_load_start = std::time::Instant::now();
@@ -3223,69 +3716,102 @@ async fn transcribe_rust(
     let model_load_ms = model_load_start.elapsed().as_millis() as u64;
 
     // Validate file path
-    let validated_path = validate_file_path(&file_path)
-        .map_err(|e| e.to_string())?;
+    let validated_path = validate_file_path(&file_path).map_err(|e| e.to_string())?;
 
     let decode_start = std::time::Instant::now();
 
-    // Always convert/preprocess audio to apply highpass and dynaudnorm filters
-    let needs_conversion = true;
+    // Check if file needs conversion to WAV for Rust transcription
+    // Symphonia supports: wav, flac, mp3, m4a/aac, ogg, alac
+    // FFmpeg conversion needed for: mp4, mov, mkv, avi, webm (video containers)
+    let needs_conversion = {
+        let ext = std::path::Path::new(&validated_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+        // Video containers and compressed audio that Symphonia struggles with (HE-AAC)
+        // must use FFmpeg to safely normalize sample-rates without dropping duration in half.
+        matches!(
+            ext.as_str(),
+            "mp4" | "mov" | "mkv" | "avi" | "webm" | "m4a" | "aac" | "flv" | "wmv"
+        )
+    };
 
     let audio_path = if needs_conversion {
-        eprintln!("[INFO] Preprocessing {} to WAV for transcription", validated_path.display());
+        // Convert to WAV using Rust audio module (with FFmpeg fallback)
+        eprintln!(
+            "[INFO] Converting {} to WAV for Rust transcription",
+            validated_path.display()
+        );
 
         // Create temp WAV file
         let temp_dir = std::env::temp_dir();
         let wav_path = temp_dir.join(format!("transcribe_video_{}.wav", task_id));
 
-        // Point 2: Try FFmpeg first to apply audio preprocessing filters
-        let ffmpeg_success = if let Ok(ffmpeg_path) = ffmpeg_manager::get_ffmpeg_path(&app).await {
-            let output = std::process::Command::new(&ffmpeg_path)
-                .args([
-                    "-y",  // Overwrite output
-                    "-i", validated_path.to_str().unwrap(),
-                    "-vn", // No video
-                    "-acodec", "pcm_s16le", // PCM codec
-                    "-ar", "16000", // 16kHz sample rate
-                    "-ac", "1", // Mono
-                    // Audio Preprocessing for better transcription quality
-                    "-af", "highpass=f=200,lowpass=f=3000,dynaudnorm",
-                    wav_path.to_str().unwrap(),
-                ])
-                .output();
-            
-            match output {
-                Ok(out) if out.status.success() => {
-                    eprintln!("[INFO] FFmpeg preprocessing complete: {}", wav_path.display());
-                    true
-                }
-                Ok(out) => {
-                    let stderr = String::from_utf8_lossy(&out.stderr);
-                    eprintln!("[WARN] FFmpeg conversion failed (status {}): {}", out.status, stderr);
-                    false
-                }
-                Err(e) => {
-                    eprintln!("[WARN] Failed to execute FFmpeg: {}", e);
-                    false
-                }
-            }
-        } else {
-            eprintln!("[WARN] FFmpeg not found, skipping audio preprocessing filters");
-            false
-        };
+        // Try FFmpeg First to ensure HE-AAC and video container streams decode correctly
+        // without dropping half the duration (which happens with rust Symphonia's AAC core fallback).
+        {
+            let ffmpeg_res = async {
+                let ffmpeg_path = ffmpeg_manager::get_ffmpeg_path(&app)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-        if ffmpeg_success {
-            wav_path
-        } else {
-            // Fallback to Rust audio conversion (no advanced filters)
-            eprintln!("[INFO] Falling back to Rust audio conversion");
-            match crate::audio::converter::convert_to_wav(&validated_path, &wav_path) {
+                let output = std::process::Command::new(&ffmpeg_path)
+                    .args([
+                        "-y", // Overwrite output
+                        "-i",
+                        &validated_path.to_string_lossy(),
+                        "-vn", // No video
+                        "-acodec",
+                        "pcm_s16le", // PCM codec
+                        "-ar",
+                        "16000", // 16kHz sample rate
+                        "-ac",
+                        "1", // Mono
+                        &wav_path.to_string_lossy(),
+                    ])
+                    .output()
+                    .map_err(|e| format!("Failed to run FFmpeg process: {}", e))?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(format!("FFmpeg conversion failed: {}", stderr));
+                }
+
+                Ok::<_, String>(())
+            }
+            .await;
+
+            match ffmpeg_res {
                 Ok(_) => {
-                    eprintln!("[INFO] Rust audio conversion complete: {}", wav_path.display());
+                    eprintln!(
+                        "[INFO] FFmpeg audio conversion complete: {}",
+                        wav_path.display()
+                    );
                     wav_path
                 }
                 Err(e) => {
-                    return Err(format!("Both FFmpeg and Rust audio conversion failed: {}", e));
+                    eprintln!(
+                        "[WARN] FFmpeg audio conversion failed: {}. Falling back to Rust Symphonia...",
+                        e
+                    );
+
+                    // Fallback to Rust audio module
+                    match crate::audio::converter::convert_to_wav(&validated_path, &wav_path) {
+                        Ok(_) => {
+                            eprintln!(
+                                "[WARN] Rust audio conversion (Symphonia fallback) complete: {}. Note: AAC/M4A duration may be halved!",
+                                wav_path.display()
+                            );
+                            wav_path
+                        }
+                        Err(rust_err) => {
+                            return Err(format!(
+                                "Both FFmpeg and Rust audio conversion failed.\nFFmpeg Error: {}\nRust Error: {}",
+                                e, rust_err
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -3302,33 +3828,41 @@ async fn transcribe_rust(
     // Validate manager is initialized (quick check before spawning)
     {
         let guard = state.lock().await;
-        guard.as_ref().ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
     }
 
     #[cfg(feature = "rust-transcribe")]
     {
         // Emit loading stage progress (0-10%)
-        let _ = app.emit("progress-update", serde_json::json!({
-            "taskId": task_id,
-            "progress": 0,
-            "stage": "loading",
-            "message": "Loading audio and model...",
-            "metrics": {
-                "modelLoadMs": model_load_ms,
-                "decodeMs": decode_ms,
-            },
-        }));
+        let _ = app.emit(
+            "progress-update",
+            serde_json::json!({
+                "taskId": task_id,
+                "progress": 0,
+                "stage": "loading",
+                "message": "Loading audio and model...",
+                "metrics": {
+                    "modelLoadMs": model_load_ms,
+                    "decodeMs": decode_ms,
+                },
+            }),
+        );
 
         // Get RTF estimate for this model
         let model_name = options.model.as_str();
         let rtf = model_rtf_estimate(model_name);
-        
+
         // Try to get audio duration for better progress estimation
         // We'll use a default estimate if we can't determine it easily
         let estimated_duration_secs = 60.0; // Default: assume 1 minute audio
         let expected_processing_secs = (estimated_duration_secs / rtf).max(5.0);
-        
-        eprintln!("[PROGRESS] Estimated RTF={}, expected processing time={:.1}s", rtf, expected_processing_secs);
+
+        eprintln!(
+            "[PROGRESS] Estimated RTF={}, expected processing time={:.1}s",
+            rtf, expected_processing_secs
+        );
 
         // Convert RustTranscriptionOptions to transcription_manager::TranscriptionOptions
         let tm_options = transcription_manager::TranscriptionOptions::from(options.clone());
@@ -3343,16 +3877,19 @@ async fn transcribe_rust(
         };
 
         // Emit loading complete, starting transcription
-        let _ = app.emit("progress-update", serde_json::json!({
-            "taskId": task_id,
-            "progress": 10,
-            "stage": "transcribing",
-            "message": "Transcribing audio...",
-            "metrics": {
-                "modelLoadMs": model_load_ms,
-                "decodeMs": decode_ms,
-            },
-        }));
+        let _ = app.emit(
+            "progress-update",
+            serde_json::json!({
+                "taskId": task_id,
+                "progress": 10,
+                "stage": "transcribing",
+                "message": "Transcribing audio...",
+                "metrics": {
+                    "modelLoadMs": model_load_ms,
+                    "decodeMs": decode_ms,
+                },
+            }),
+        );
 
         eprintln!("[PROGRESS] Starting transcription...");
 
@@ -3362,11 +3899,23 @@ async fn transcribe_rust(
         let enable_diarization = options.enable_diarization;
         let state_arc = Arc::clone(&*state);
         let audio_path_for_spawn = audio_path.clone();
+
+        // Create channel for stage updates
+        let (stage_tx, mut stage_rx) =
+            tokio::sync::mpsc::unbounded_channel::<transcription_manager::TranscriptionStage>();
+
         let mut join_handle = tokio::spawn(async move {
             let guard = state_arc.lock().await;
-            let manager = guard.as_ref()
+            let manager = guard
+                .as_ref()
                 .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
-            manager.transcribe_file(&audio_path_for_spawn, &tm_options, hf_token.as_deref())
+            manager
+                .transcribe_file(
+                    &audio_path_for_spawn,
+                    &tm_options,
+                    hf_token.as_deref(),
+                    Some(&stage_tx),
+                )
                 .await
                 .map_err(|e| e.to_string())
         });
@@ -3382,6 +3931,10 @@ async fn transcribe_rust(
         let mut heartbeat_timer = tokio::time::interval(tokio::time::Duration::from_secs(15));
         heartbeat_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+        // Track current stage and message for accurate progress reporting
+        let mut current_stage = "transcribing".to_string();
+        let mut current_message = "Transcribing audio...".to_string();
+
         let join_result = loop {
             tokio::select! {
                 result = &mut join_handle => {
@@ -3392,13 +3945,56 @@ async fn transcribe_rust(
                     let _ = app.emit("progress-update", serde_json::json!({
                         "taskId": task_id,
                         "progress": heartbeat_progress,
-                        "stage": "transcribing",
-                        "message": "Transcribing audio...",
+                        "stage": current_stage,
+                        "message": current_message,
                         "metrics": {
                             "modelLoadMs": model_load_ms,
                             "decodeMs": decode_ms,
                         }
                     }));
+                }
+                Some(stage) = stage_rx.recv() => {
+                    match stage {
+                        transcription_manager::TranscriptionStage::Transcribing => {
+                            current_stage = "transcribing".to_string();
+                            current_message = "Transcribing audio...".to_string();
+                            eprintln!("[PROGRESS] Stage changed to: transcribing");
+                        }
+                        transcription_manager::TranscriptionStage::Diarizing => {
+                            current_stage = "diarizing".to_string();
+                            current_message = "Running speaker diarization...".to_string();
+                            heartbeat_progress = 75; // Bump progress when diarization starts
+                            eprintln!("[PROGRESS] Stage changed to: diarizing");
+
+                            // Emit immediate UI update for stage change
+                            let _ = app.emit("progress-update", serde_json::json!({
+                                "taskId": task_id,
+                                "progress": heartbeat_progress,
+                                "stage": current_stage,
+                                "message": current_message,
+                                "metrics": {
+                                    "modelLoadMs": model_load_ms,
+                                    "decodeMs": decode_ms,
+                                }
+                            }));
+                        }
+                        transcription_manager::TranscriptionStage::DiarizingProgress(percent) => {
+                            current_stage = "diarizing".to_string();
+                            current_message = format!("Running speaker diarization... {}%", percent);
+                            heartbeat_progress = heartbeat_progress.max(75).max((75 + (percent / 4)).min(98));
+
+                            let _ = app.emit("progress-update", serde_json::json!({
+                                "taskId": task_id,
+                                "progress": heartbeat_progress,
+                                "stage": current_stage,
+                                "message": current_message,
+                                "metrics": {
+                                    "modelLoadMs": model_load_ms,
+                                    "decodeMs": decode_ms,
+                                }
+                            }));
+                        }
+                    }
                 }
             }
         };
@@ -3407,10 +4003,13 @@ async fn transcribe_rust(
             Ok(Ok(data)) => data,
             Ok(Err(e)) => {
                 eprintln!("[ERROR] Rust transcription failed: {}", e);
-                let _ = app.emit("transcription-error", serde_json::json!({
-                    "taskId": task_id,
-                    "error": e,
-                }));
+                let _ = app.emit(
+                    "transcription-error",
+                    serde_json::json!({
+                        "taskId": task_id,
+                        "error": e,
+                    }),
+                );
                 rust_handles.lock().await.remove(&task_id);
                 return Err(e);
             }
@@ -3435,8 +4034,11 @@ async fn transcribe_rust(
 
         // Transcription done - emit completion progress
         let audio_duration = result.duration;
-        eprintln!("[PROGRESS] Transcription done: audio_duration={:.1}s", audio_duration);
-        
+        eprintln!(
+            "[PROGRESS] Transcription done: audio_duration={:.1}s",
+            audio_duration
+        );
+
         // Emit progress - since we can't track real progress during transcription,
         // we'll show a reasonable completion percentage based on audio length
         let progress = if audio_duration > 300.0 {
@@ -3446,18 +4048,24 @@ async fn transcribe_rust(
         } else {
             30
         };
-        
-        let _ = app.emit("progress-update", serde_json::json!({
-            "taskId": task_id,
-            "progress": progress,
-            "stage": "transcribing",
-            "message": format!("Processed {:.0}s of audio...", audio_duration),
-            "metrics": merged_metrics,
-        }));
-        
+
+        let _ = app.emit(
+            "progress-update",
+            serde_json::json!({
+                "taskId": task_id,
+                "progress": progress,
+                "stage": "transcribing",
+                "message": format!("Processed {:.0}s of audio...", audio_duration),
+                "metrics": merged_metrics,
+            }),
+        );
+
         let final_duration = result.duration;
-        eprintln!("[PROGRESS] Transcription complete: duration={:.1}s", final_duration);
-        
+        eprintln!(
+            "[PROGRESS] Transcription complete: duration={:.1}s",
+            final_duration
+        );
+
         let _ = app.emit("progress-update", serde_json::json!({
             "taskId": task_id,
             "progress": 90,
@@ -3469,49 +4077,71 @@ async fn transcribe_rust(
         // Handle diarization if enabled
         if enable_diarization {
             eprintln!("[PROGRESS] Diarizing...");
-            
-            let _ = app.emit("progress-update", serde_json::json!({
-                "taskId": task_id,
-                "progress": 98,
-                "stage": "finalizing",
-                "message": "Preparing output...",
-                "metrics": merged_metrics,
-            }));
+
+            let _ = app.emit(
+                "progress-update",
+                serde_json::json!({
+                    "taskId": task_id,
+                    "progress": 98,
+                    "stage": "finalizing",
+                    "message": "Preparing output...",
+                    "metrics": merged_metrics,
+                }),
+            );
         }
 
-        eprintln!("[INFO] Rust transcription complete: {} segments", result.segments.len());
+        eprintln!(
+            "[INFO] Rust transcription complete: {} segments",
+            result.segments.len()
+        );
 
         // Convert transcription_manager::TranscriptionResult to crate::TranscriptionResult
         let lib_result: TranscriptionResult = TranscriptionResult {
-            segments: result.segments.into_iter().map(|s| TranscriptionSegment {
-                start: s.start,
-                end: s.end,
-                text: s.text,
-                speaker: s.speaker,
-                confidence: s.confidence,
-            }).collect(),
+            segments: result
+                .segments
+                .into_iter()
+                .map(|s| TranscriptionSegment {
+                    start: s.start,
+                    end: s.end,
+                    text: s.text,
+                    speaker: s.speaker,
+                    confidence: s.confidence,
+                })
+                .collect(),
             language: result.language,
             duration: result.duration,
-            speaker_turns: result.speaker_turns.map(|turns| turns.into_iter().map(|t| SpeakerTurn {
-                start: t.start,
-                end: t.end,
-                speaker: t.speaker,
-            }).collect()),
-            speaker_segments: result.speaker_segments.map(|segs| segs.into_iter().map(|s| TranscriptionSegment {
-                start: s.start,
-                end: s.end,
-                text: s.text,
-                speaker: s.speaker,
-                confidence: s.confidence,
-            }).collect()),
+            speaker_turns: result.speaker_turns.map(|turns| {
+                turns
+                    .into_iter()
+                    .map(|t| SpeakerTurn {
+                        start: t.start,
+                        end: t.end,
+                        speaker: t.speaker,
+                    })
+                    .collect()
+            }),
+            speaker_segments: result.speaker_segments.map(|segs| {
+                segs.into_iter()
+                    .map(|s| TranscriptionSegment {
+                        start: s.start,
+                        end: s.end,
+                        text: s.text,
+                        speaker: s.speaker,
+                        confidence: s.confidence,
+                    })
+                    .collect()
+            }),
             metrics: Some(merged_metrics),
         };
 
         // Emit completion
-        let _ = app.emit("transcription-complete", serde_json::json!({
-            "taskId": task_id,
-            "result": lib_result,
-        }));
+        let _ = app.emit(
+            "transcription-complete",
+            serde_json::json!({
+                "taskId": task_id,
+                "result": lib_result,
+            }),
+        );
 
         Ok(lib_result)
     }
@@ -3532,7 +4162,8 @@ async fn unload_model_rust(
     ensure_manager_initialized(&state, &app).await?;
 
     let manager_guard = state.lock().await;
-    let manager = manager_guard.as_ref()
+    let manager = manager_guard
+        .as_ref()
         .ok_or_else(|| "TranscriptionManager not initialized".to_string())?;
 
     #[cfg(feature = "rust-transcribe")]
@@ -3549,9 +4180,7 @@ async fn unload_model_rust(
 
 /// Check if a model is currently loaded
 #[tauri::command]
-async fn is_model_loaded_rust(
-    state: State<'_, TranscriptionManagerState>,
-) -> Result<bool, String> {
+async fn is_model_loaded_rust(state: State<'_, TranscriptionManagerState>) -> Result<bool, String> {
     let manager_guard = state.lock().await;
 
     // Return false if manager not initialized yet (lazy loading in progress)
@@ -3595,49 +4224,153 @@ async fn get_current_model_rust(
     }
 }
 
-/// Run Sherpa-ONNX diarization via Python subprocess
+/// Check whether Sherpa-ONNX diarization model files are present on disk.
+///
+/// Returns `Ok(())` when both segmentation and embedding directories exist,
+/// otherwise returns an actionable error message the UI can display.
+fn check_sherpa_models_present(models_dir: &Path) -> Result<(), String> {
+    let nested_seg_dir = models_dir
+        .join("sherpa-onnx-diarization")
+        .join("sherpa-onnx-reverb-diarization-v1");
+    let flat_seg_dir = models_dir.join("sherpa-onnx-reverb-diarization-v1");
+
+    let nested_emb = models_dir
+        .join("sherpa-onnx-diarization")
+        .join("sherpa-onnx-embedding")
+        .join("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx");
+    let flat_emb = models_dir
+        .join("sherpa-onnx-embedding")
+        .join("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx");
+
+    let nested_seg_ok = nested_seg_dir.join("model.onnx").exists()
+        || nested_seg_dir.join("model.int8.onnx").exists();
+    let flat_seg_ok = flat_seg_dir.join("model.onnx").exists() || flat_seg_dir.join("model.int8.onnx").exists();
+
+    let seg_ok = nested_seg_ok || flat_seg_ok;
+    let emb_ok = nested_emb.exists() || flat_emb.exists();
+
+    if seg_ok && emb_ok {
+        return Ok(());
+    }
+
+    let mut missing = Vec::new();
+    if !seg_ok {
+        missing.push("segmentation model");
+    }
+    if !emb_ok {
+        missing.push("embedding model");
+    }
+
+    Err(format!(
+        "Native diarization models not found (missing: {}). \
+         Please download the \"sherpa-onnx-diarization\" model first.",
+        missing.join(", ")
+    ))
+}
+
+/// Run native Sherpa-ONNX diarization directly in Rust.
+#[tauri::command]
+async fn diarize_native(
+    app: AppHandle,
+    task_id: String,
+    audio_path: String,
+    num_speakers: Option<i32>,
+) -> Result<Vec<crate::types::SpeakerSegment>, String> {
+    eprintln!(
+        "[INFO] diarize_native called: task_id={}, audio={}",
+        task_id, audio_path
+    );
+
+    // Validate file path
+    let validated_path = validate_file_path(&audio_path).map_err(|e| e.to_string())?;
+
+    // Pre-check: ensure diarization models are downloaded
+    let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
+    if let Err(msg) = check_sherpa_models_present(&models_dir) {
+        eprintln!("[ERROR] {}", msg);
+        let _ = app.emit(
+            "transcription-error",
+            serde_json::json!({
+                "taskId": task_id,
+                "error": msg,
+            }),
+        );
+        return Err(msg);
+    }
+
+    // Emit progress
+    let _ = app.emit(
+        "progress-update",
+        serde_json::json!({
+            "taskId": task_id,
+            "progress": 50,
+            "stage": "diarization",
+            "message": "Running native diarization...",
+        }),
+    );
+
+    let mut audio_buffer = crate::audio::loader::load(&validated_path)
+        .map_err(|e| format!("Failed to load audio for diarization: {e}"))?;
+
+    if audio_buffer.channels > 1 {
+        audio_buffer = audio_buffer.to_mono();
+    }
+    if audio_buffer.sample_rate != 16000 {
+        audio_buffer = audio_buffer.resample(16000);
+    }
+
+    let engine = crate::diarization::DiarizationEngine::new(&models_dir);
+    let mut config = crate::diarization::DiarizationConfig::default();
+    config.num_speakers = num_speakers.filter(|v| *v > 0);
+
+    let app_for_progress = app.clone();
+    let task_id_for_progress = task_id.clone();
+    let progress_callback: std::sync::Arc<dyn Fn(u8) + Send + Sync> = std::sync::Arc::new(move |pct| {
+        let _ = app_for_progress.emit(
+            "progress-update",
+            serde_json::json!({
+                "taskId": task_id_for_progress,
+                "progress": 50 + ((pct as u16 * 45) / 100),
+                "stage": "diarization",
+                "message": format!("Running native diarization... {}%", pct),
+            }),
+        );
+    });
+
+    let result = tokio::task::spawn_blocking(move || {
+        engine.diarize_adaptive(audio_buffer.samples, config, Some(progress_callback))
+    })
+    .await
+    .map_err(|e| format!("Native diarization task failed: {e}"))?
+    .map_err(|e| {
+        eprintln!("[ERROR] Native diarization failed: {}", e);
+
+        let _ = app.emit(
+            "transcription-error",
+            serde_json::json!({
+                "taskId": task_id,
+                "error": format!("Native diarization failed: {}", e),
+            }),
+        );
+        e
+    })?;
+
+    eprintln!(
+        "[INFO] Native diarization complete: {} segments",
+        result.len()
+    );
+    Ok(result)
+}
+
+/// Backward-compatible alias for older frontend calls.
 #[tauri::command]
 async fn diarize_sherpa(
     app: AppHandle,
     task_id: String,
     audio_path: String,
     num_speakers: Option<i32>,
-) -> Result<Vec<crate::python_bridge::SpeakerSegment>, String> {
-    eprintln!("[INFO] diarize_sherpa called: task_id={}, audio={}", task_id, audio_path);
-
-    // Validate file path
-    let validated_path = validate_file_path(&audio_path)
-        .map_err(|e| e.to_string())?;
-
-    // Get Python executable and engine path
-    let python_exe = get_python_executable(&app);
-    let engine_path = get_python_engine_path(&app);
-
-    // Emit progress
-    let _ = app.emit("progress-update", serde_json::json!({
-        "taskId": task_id,
-        "progress": 50,
-        "stage": "diarization",
-        "message": "Running Sherpa-ONNX diarization...",
-    }));
-
-    // Create Python bridge and run diarization
-    let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
-    let bridge = crate::python_bridge::PythonBridge::new(&python_exe, &engine_path, &models_dir);
-
-    let result = bridge.diarize_sherpa(&validated_path, num_speakers).await
-        .map_err(|e| {
-            eprintln!("[ERROR] Sherpa diarization failed: {}", e);
-
-            let _ = app.emit("transcription-error", serde_json::json!({
-                "taskId": task_id,
-                "error": format!("Sherpa diarization failed: {}", e),
-            }));
-            e.to_string()
-        })?;
-
-    eprintln!("[INFO] Sherpa diarization complete: {} segments", result.len());
-    Ok(result as Vec<crate::python_bridge::SpeakerSegment>)
+) -> Result<Vec<crate::types::SpeakerSegment>, String> {
+    diarize_native(app, task_id, audio_path, num_speakers).await
 }
 
 /// Read a file as Base64 encoded string
@@ -3646,15 +4379,14 @@ async fn diarize_sherpa(
 async fn read_file_as_base64(file_path: String) -> Result<String, AppError> {
     // Validate the file path for security
     let validated_path = validate_file_path(&file_path)?;
-    
+
     // Read the file
-    let bytes = std::fs::read(&validated_path)
-        .map_err(|e| AppError::IoError(e))?;
-    
+    let bytes = std::fs::read(&validated_path).map_err(|e| AppError::IoError(e))?;
+
     // Encode as Base64
-    use base64::{Engine as _, engine::general_purpose};
+    use base64::{engine::general_purpose, Engine as _};
     let base64_string = general_purpose::STANDARD.encode(&bytes);
-    
+
     Ok(base64_string)
 }
 
@@ -3662,8 +4394,7 @@ async fn read_file_as_base64(file_path: String) -> Result<String, AppError> {
 #[tauri::command]
 async fn get_file_size(path: String) -> Result<u64, AppError> {
     let validated_path = validate_file_path(&path)?;
-    let metadata = std::fs::metadata(&validated_path)
-        .map_err(|e| AppError::IoError(e))?;
+    let metadata = std::fs::metadata(&validated_path).map_err(|e| AppError::IoError(e))?;
     Ok(metadata.len())
 }
 
@@ -3671,8 +4402,7 @@ async fn get_file_size(path: String) -> Result<u64, AppError> {
 #[tauri::command]
 async fn delete_file(path: String) -> Result<(), AppError> {
     let validated_path = validate_file_path(&path)?;
-    std::fs::remove_file(&validated_path)
-        .map_err(|e| AppError::IoError(e))?;
+    std::fs::remove_file(&validated_path).map_err(|e| AppError::IoError(e))?;
     Ok(())
 }
 
@@ -3683,23 +4413,28 @@ async fn convert_to_mp3(
     input_path: String,
     output_path: String,
 ) -> Result<String, AppError> {
-    eprintln!("[DEBUG] convert_to_mp3 called: input={}, output={}", input_path, output_path);
-    
+    eprintln!(
+        "[DEBUG] convert_to_mp3 called: input={}, output={}",
+        input_path, output_path
+    );
+
     // Validate input file (must exist)
     let validated_input = validate_file_path(&input_path)?;
-    eprintln!("[DEBUG] validated input path: {}", validated_input.display());
-    
+    eprintln!(
+        "[DEBUG] validated input path: {}",
+        validated_input.display()
+    );
+
     // For output path, just ensure the parent directory exists and is writable
     let output_pathbuf = PathBuf::from(&output_path);
     if let Some(parent_dir) = output_pathbuf.parent() {
         if !parent_dir.exists() {
-            std::fs::create_dir_all(parent_dir)
-                .map_err(|e| AppError::IoError(e))?;
+            std::fs::create_dir_all(parent_dir).map_err(|e| AppError::IoError(e))?;
         }
     }
     let validated_output = output_pathbuf;
     eprintln!("[DEBUG] output path: {}", validated_output.display());
-    
+
     // Get FFmpeg path
     let ffmpeg_path = match crate::ffmpeg_manager::get_ffmpeg_path(&app).await {
         Ok(path) => {
@@ -3711,53 +4446,69 @@ async fn convert_to_mp3(
             return Err(AppError::Other(format!("FFmpeg not found: {}", e)));
         }
     };
-    
+
     // Run FFmpeg conversion
     eprintln!("[DEBUG] Running FFmpeg conversion...");
-    
+
     let status = std::process::Command::new(&ffmpeg_path)
         .args([
-            "-i", validated_input.to_str().unwrap_or(&input_path),
+            "-i",
+            validated_input.to_str().unwrap_or(&input_path),
             "-vn",
-            "-acodec", "libmp3lame",
-            "-q:a", "2",
+            "-acodec",
+            "libmp3lame",
+            "-q:a",
+            "2",
             "-y",
             validated_output.to_str().unwrap_or(&output_path),
         ])
         .output()
         .map_err(|e| AppError::IoError(e))?;
-    
+
     if !status.status.success() {
         let stderr = String::from_utf8_lossy(&status.stderr);
         let stdout = String::from_utf8_lossy(&status.stdout);
-        eprintln!("[ERROR] FFmpeg conversion failed: status={}, stderr={}", status.status, stderr);
+        eprintln!(
+            "[ERROR] FFmpeg conversion failed: status={}, stderr={}",
+            status.status, stderr
+        );
         eprintln!("[DEBUG] FFmpeg stdout: {}", stdout);
-        return Err(AppError::Other(format!("FFmpeg conversion failed: {}", stderr)));
+        return Err(AppError::Other(format!(
+            "FFmpeg conversion failed: {}",
+            stderr
+        )));
     }
-    
+
     // Verify output file exists
     if !validated_output.exists() {
-        eprintln!("[ERROR] Output file was not created: {}", validated_output.display());
+        eprintln!(
+            "[ERROR] Output file was not created: {}",
+            validated_output.display()
+        );
         return Err(AppError::Other("Output file was not created".to_string()));
     }
-    
-    eprintln!("[DEBUG] Conversion successful: {}", validated_output.display());
+
+    eprintln!(
+        "[DEBUG] Conversion successful: {}",
+        validated_output.display()
+    );
     Ok(output_path)
 }
 
 /// Get or create the archive directory
 #[tauri::command]
 async fn get_archive_dir(app: AppHandle) -> Result<String, AppError> {
-    let app_data_dir = app.path().app_data_dir()
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
         .map_err(|e| AppError::Other(e.to_string()))?;
-    
+
     let archive_dir = app_data_dir.join("archive");
-    
+
     if !archive_dir.exists() {
-        std::fs::create_dir_all(&archive_dir)
-            .map_err(|e| AppError::IoError(e))?;
+        std::fs::create_dir_all(&archive_dir).map_err(|e| AppError::IoError(e))?;
     }
-    
+
     Ok(archive_dir.to_string_lossy().to_string())
 }
 
@@ -3768,8 +4519,11 @@ async fn get_archive_dir(app: AppHandle) -> Result<String, AppError> {
 /// Get the current performance configuration
 #[tauri::command]
 #[allow(dead_code)]
-fn get_performance_config(perf_config: State<'_, PerformanceConfigState>) -> Result<PerformanceConfig, String> {
-    perf_config.read()
+fn get_performance_config(
+    perf_config: State<'_, PerformanceConfigState>,
+) -> Result<PerformanceConfig, String> {
+    perf_config
+        .read()
         .map(|cfg| cfg.clone())
         .map_err(|e| format!("Failed to read performance config: {}", e))
 }
@@ -3785,20 +4539,27 @@ async fn update_performance_config(
     config: PerformanceConfig,
     persist: bool,
 ) -> Result<PerformanceConfig, String> {
-    eprintln!("[INFO] Updating performance configuration: persist={}", persist);
+    eprintln!(
+        "[INFO] Updating performance configuration: persist={}",
+        persist
+    );
 
     // Update the in-memory configuration
     {
-        let mut config_guard = perf_config.write()
+        let mut config_guard = perf_config
+            .write()
             .map_err(|e| format!("Failed to acquire write lock: {}", e))?;
         *config_guard = config.clone();
     }
 
     if persist {
-        let app_data_dir = app.path().app_data_dir()
+        let app_data_dir = app
+            .path()
+            .app_data_dir()
             .map_err(|e| format!("Failed to get app data dir: {}", e))?;
 
-        config.save_to_file(&app_data_dir)
+        config
+            .save_to_file(&app_data_dir)
             .map_err(|e| format!("Failed to save performance config: {}", e))?;
 
         eprintln!("[INFO] Performance configuration saved to file");
@@ -3810,12 +4571,24 @@ async fn update_performance_config(
 /// Main entry point
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    ensure_windows_stdio_descriptors();
+
+    // Initialize ONNX Runtime with an explicit DLL path before transcribe-rs usage.
+    #[cfg(feature = "rust-transcribe")]
+    {
+        if let Err(e) = init_onnx_runtime() {
+            eprintln!("[ERROR] Failed to initialize ONNX Runtime: {}", e);
+        }
+    }
+
     let task_manager: TaskManagerState = Arc::new(Mutex::new(TaskManager::default()));
     let transcription_manager_state: TranscriptionManagerState = Arc::new(Mutex::new(None));
     let rust_task_handles: RustTaskHandles = Arc::new(Mutex::new(HashMap::new()));
     // Initialize performance config state early with defaults
     // This prevents "state not managed" errors when commands are called during startup
-    let performance_config_state: PerformanceConfigState = Arc::new(RwLock::new(PerformanceConfig::default()));
+    let performance_config_state: PerformanceConfigState =
+        Arc::new(RwLock::new(PerformanceConfig::default()));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -3892,6 +4665,7 @@ pub fn run() {
             get_models_dir_command,
             open_models_folder_command,
             open_archive_folder_command,
+            open_app_directory_command,
             download_model,
             cancel_model_download,
             get_local_models,
@@ -3907,6 +4681,7 @@ pub fn run() {
             get_huggingface_token_command,
             read_file_as_base64,
             // Audio processing commands (Rust-native)
+            generate_waveform_peaks,
             convert_audio_to_wav,
             get_audio_duration,
             extract_audio_segment,
@@ -3923,7 +4698,8 @@ pub fn run() {
             unload_model_rust,
             is_model_loaded_rust,
             get_current_model_rust,
-            // Python Diarization commands
+            // Native diarization commands
+            diarize_native,
             diarize_sherpa,
             // Setup Wizard commands
             check_python_environment,
@@ -3946,19 +4722,23 @@ pub fn run() {
 }
 
 /// Internal function to get local models from a directory (testable without Tauri)
-fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalModel>, std::io::Error> {
+fn get_local_models_internal(
+    models_dir: &std::path::Path,
+) -> Result<Vec<LocalModel>, std::io::Error> {
     let mut models: Vec<LocalModel> = Vec::new();
-    
+
     if !models_dir.exists() {
         return Ok(models);
     }
-    
+
     // Individual diarization components to skip - they're handled separately
-    let skip_individual: std::collections::HashSet<&str> = std::collections::HashSet::from([
-        "sherpa-onnx-segmentation",
-        "sherpa-onnx-embedding",
-    ]);
-    
+    let skip_individual: std::collections::HashSet<&str> =
+        std::collections::HashSet::from([
+            "sherpa-onnx-segmentation",
+            "sherpa-onnx-reverb-diarization-v1",
+            "sherpa-onnx-embedding",
+        ]);
+
     // First, check for GGML .bin files in models/ root (Whisper models for Rust whisper.cpp)
     // These are single files, not directories
     for entry in std::fs::read_dir(models_dir)? {
@@ -4001,12 +4781,12 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         }
 
         let model_name = entry.file_name().to_string_lossy().to_string();
-        
+
         // Skip individual diarization components - they're handled separately
         if skip_individual.contains(model_name.as_str()) {
             continue;
         }
-        
+
         let size_mb = if path.exists() {
             let mut total_size = 0u64;
             if let Ok(entries) = std::fs::read_dir(&path) {
@@ -4020,13 +4800,18 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         } else {
             0
         };
-        
+
         // Detect model type - handle both full names (whisper-tiny) and short names (tiny)
         let model_type = if model_name.starts_with("whisper-") {
             "whisper".to_string()
-        } else if model_name == "tiny" || model_name == "base" || model_name == "small"
-               || model_name == "medium" || model_name == "large" || model_name == "large-v2"
-               || model_name == "large-v3" {
+        } else if model_name == "tiny"
+            || model_name == "base"
+            || model_name == "small"
+            || model_name == "medium"
+            || model_name == "large"
+            || model_name == "large-v2"
+            || model_name == "large-v3"
+        {
             "whisper".to_string()
         } else if model_name.starts_with("distil-") {
             "whisper".to_string()
@@ -4035,7 +4820,7 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         } else {
             continue;
         };
-        
+
         // Check if required files exist for the model type
         let is_valid_model = if model_type == "whisper" {
             // Whisper models require model.bin file
@@ -4055,18 +4840,22 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
             // Other models - directory existence is enough
             true
         };
-        
+
         if !is_valid_model {
             continue;
         }
-        
+
         // Normalize model name for frontend - convert short names to full names
         // Note: distil-* models keep their original name (not whisper-distil-*)
         let display_name = match model_type.as_str() {
-            "whisper" if !model_name.starts_with("whisper-") && !model_name.starts_with("distil-") => format!("whisper-{}", model_name),
+            "whisper"
+                if !model_name.starts_with("whisper-") && !model_name.starts_with("distil-") =>
+            {
+                format!("whisper-{}", model_name)
+            }
             _ => model_name,
         };
-        
+
         models.push(LocalModel {
             name: display_name,
             size_mb,
@@ -4080,11 +4869,15 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
     // Sherpa-ONNX diarization - check both flat and nested structures
     // Nested: models/sherpa-onnx-diarization/sherpa-onnx-segmentation/
     // Flat: models/sherpa-onnx-segmentation/
-    let nested_seg_path = models_dir.join("sherpa-onnx-diarization").join("sherpa-onnx-segmentation");
-    let nested_emb_path = models_dir.join("sherpa-onnx-diarization").join("sherpa-onnx-embedding");
-    let flat_seg_path = models_dir.join("sherpa-onnx-segmentation");
+    let nested_seg_path = models_dir
+        .join("sherpa-onnx-diarization")
+        .join("sherpa-onnx-reverb-diarization-v1");
+    let nested_emb_path = models_dir
+        .join("sherpa-onnx-diarization")
+        .join("sherpa-onnx-embedding");
+    let flat_seg_path = models_dir.join("sherpa-onnx-reverb-diarization-v1");
     let flat_emb_path = models_dir.join("sherpa-onnx-embedding");
-    
+
     let (seg_path, emb_path) = if nested_seg_path.exists() && nested_emb_path.exists() {
         (nested_seg_path, nested_emb_path)
     } else if flat_seg_path.exists() && flat_emb_path.exists() {
@@ -4093,7 +4886,7 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
         // No sherpa-onnx-diarization found
         return Ok(models);
     };
-    
+
     if seg_path.exists() && emb_path.exists() {
         let mut total_size = 0u64;
         for p in [&seg_path, &emb_path] {
@@ -4114,88 +4907,98 @@ fn get_local_models_internal(models_dir: &std::path::Path) -> Result<Vec<LocalMo
             path: None, // No single path
         });
     }
-    
+
     Ok(models)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     /// Helper to create a temporary directory with model structure
     fn create_test_models_dir(temp_dir: &std::path::Path) {
         // Create whisper-base model
         let whisper_path = temp_dir.join("whisper-base");
         std::fs::create_dir_all(&whisper_path).unwrap();
         std::fs::write(whisper_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
-        
+
         // Create sherpa-onnx diarization components (nested structure)
         let diar_base = temp_dir.join("sherpa-onnx-diarization");
-        let seg_path = diar_base.join("sherpa-onnx-segmentation");
+        let seg_path = diar_base.join("sherpa-onnx-reverb-diarization-v1");
         std::fs::create_dir_all(&seg_path).unwrap();
         std::fs::write(seg_path.join("model.onnx"), vec![0u8; 1024 * 1024]).unwrap();
-        
+
         let emb_path = diar_base.join("sherpa-onnx-embedding");
         std::fs::create_dir_all(&emb_path).unwrap();
         std::fs::write(emb_path.join("model.onnx"), vec![0u8; 1024 * 1024]).unwrap();
     }
-    
+
     #[test]
     fn test_get_local_models_diarization() {
         let temp_dir = tempfile::tempdir().unwrap();
         create_test_models_dir(temp_dir.path());
-        
+
         // Test detection
         let models = get_local_models_internal(temp_dir.path()).unwrap();
-        
+
         // Should have whisper-base and sherpa-onnx-diarization
         assert_eq!(models.len(), 2, "Should detect 2 models");
-        
+
         // Check whisper model
         let whisper = models.iter().find(|m| m.name == "whisper-base");
         assert!(whisper.is_some(), "Should find whisper-base");
         let whisper = whisper.unwrap();
         assert_eq!(whisper.model_type, "whisper");
         assert!(whisper.path.is_some());
-        
+
         // Check diarization model
         let diarization = models.iter().find(|m| m.name == "sherpa-onnx-diarization");
         assert!(diarization.is_some(), "Should find sherpa-onnx-diarization");
         let diarization = diarization.unwrap();
         assert_eq!(diarization.model_type, "diarization");
-        assert!(diarization.path.is_none(), "Diarization should have no single path");
-        assert_eq!(diarization.size_mb, 2, "Diarization size should be 2MB (1+1)");
+        assert!(
+            diarization.path.is_none(),
+            "Diarization should have no single path"
+        );
+        assert_eq!(
+            diarization.size_mb, 2,
+            "Diarization size should be 2MB (1+1)"
+        );
     }
-    
+
     #[test]
     fn test_get_local_models_skips_individual_components() {
         let temp_dir = tempfile::tempdir().unwrap();
-        
+
         // Create only individual components (no complete diarization)
-        let seg_path = temp_dir.path().join("sherpa-onnx-segmentation");
+        let seg_path = temp_dir.path().join("sherpa-onnx-reverb-diarization-v1");
         std::fs::create_dir_all(&seg_path).unwrap();
         std::fs::File::create(seg_path.join("model.onnx")).unwrap();
-        
+
         // Should not detect any models (individual components are skipped)
         let models = get_local_models_internal(temp_dir.path()).unwrap();
         assert_eq!(models.len(), 0, "Should not detect individual components");
     }
-    
+
     #[test]
     fn test_get_local_models_sherpa_diarization() {
         let temp_dir = tempfile::tempdir().unwrap();
-        
+
         // Create sherpa diarization components
-        let seg_path = temp_dir.path().join("sherpa-onnx-segmentation");
+        let seg_path = temp_dir.path().join("sherpa-onnx-reverb-diarization-v1");
         std::fs::create_dir_all(&seg_path).unwrap();
-        std::fs::write(seg_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
-        
+        std::fs::write(seg_path.join("model.onnx"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
+
         let emb_path = temp_dir.path().join("sherpa-onnx-embedding");
         std::fs::create_dir_all(&emb_path).unwrap();
-        std::fs::write(emb_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap(); // 1MB
-        
+        std::fs::write(
+            emb_path.join("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"),
+            vec![0u8; 1024 * 1024],
+        )
+        .unwrap(); // 1MB
+
         let models = get_local_models_internal(temp_dir.path()).unwrap();
-        
+
         // Should detect sherpa-onnx-diarization
         assert_eq!(models.len(), 1);
         let diarization = &models[0];
@@ -4203,14 +5006,14 @@ mod tests {
         assert_eq!(diarization.model_type, "diarization");
         assert_eq!(diarization.size_mb, 2, "Size should be 2MB (1+1)");
     }
-    
+
     #[test]
     fn test_get_local_models_empty_dir() {
         let temp_dir = tempfile::tempdir().unwrap();
         let models = get_local_models_internal(temp_dir.path()).unwrap();
         assert_eq!(models.len(), 0, "Empty dir should return empty list");
     }
-    
+
     #[test]
     fn test_get_local_models_nonexistent_dir() {
         let models = get_local_models_internal(std::path::Path::new("/nonexistent/path")).unwrap();
@@ -4229,12 +5032,20 @@ mod tests {
 
         // Should not detect whisper model (incomplete - missing model.bin)
         let models = get_local_models_internal(models_path).unwrap();
-        assert_eq!(models.len(), 0, "Should not detect incomplete whisper model (missing model.bin)");
+        assert_eq!(
+            models.len(),
+            0,
+            "Should not detect incomplete whisper model (missing model.bin)"
+        );
 
         // Now create model.bin - should be detected
         std::fs::write(whisper_path.join("model.bin"), vec![0u8; 1024 * 1024]).unwrap();
         let models = get_local_models_internal(models_path).unwrap();
-        assert_eq!(models.len(), 1, "Should detect complete whisper model (has model.bin)");
+        assert_eq!(
+            models.len(),
+            1,
+            "Should detect complete whisper model (has model.bin)"
+        );
         let whisper = models.first().unwrap();
         assert_eq!(whisper.name, "whisper-base");
         assert_eq!(whisper.model_type, "whisper");
@@ -4266,7 +5077,11 @@ mod tests {
         let models_path = temp_dir.path();
 
         // Create GGML .bin file directly in models/ root (as downloaded by new downloader logic)
-        std::fs::write(models_path.join("ggml-small.bin"), vec![0u8; 100 * 1024 * 1024]).unwrap(); // 100MB
+        std::fs::write(
+            models_path.join("ggml-small.bin"),
+            vec![0u8; 100 * 1024 * 1024],
+        )
+        .unwrap(); // 100MB
 
         // Should detect whisper model from .bin file
         let models = get_local_models_internal(models_path).unwrap();
@@ -4285,7 +5100,11 @@ mod tests {
         let models_path = temp_dir.path();
 
         // Create GGML .bin file
-        std::fs::write(models_path.join("ggml-tiny.bin"), vec![0u8; 50 * 1024 * 1024]).unwrap(); // 50MB
+        std::fs::write(
+            models_path.join("ggml-tiny.bin"),
+            vec![0u8; 50 * 1024 * 1024],
+        )
+        .unwrap(); // 50MB
 
         // Create whisper-base directory
         let whisper_path = models_path.join("whisper-base");
@@ -4294,7 +5113,11 @@ mod tests {
 
         // Should detect both models
         let models = get_local_models_internal(models_path).unwrap();
-        assert_eq!(models.len(), 2, "Should detect both GGML and directory models");
+        assert_eq!(
+            models.len(),
+            2,
+            "Should detect both GGML and directory models"
+        );
 
         // Check GGML model
         let ggml_model = models.iter().find(|m| m.name == "whisper-tiny").unwrap();
@@ -4313,10 +5136,10 @@ mod tests {
 
         // Create GGML files for all model size variants
         let ggml_files = [
-            ("ggml-tiny.bin", 50 * 1024 * 1024),      // 50 MB
-            ("ggml-base.bin", 100 * 1024 * 1024),     // 100 MB
-            ("ggml-small.bin", 200 * 1024 * 1024),    // 200 MB
-            ("ggml-medium.bin", 500 * 1024 * 1024),   // 500 MB
+            ("ggml-tiny.bin", 50 * 1024 * 1024),       // 50 MB
+            ("ggml-base.bin", 100 * 1024 * 1024),      // 100 MB
+            ("ggml-small.bin", 200 * 1024 * 1024),     // 200 MB
+            ("ggml-medium.bin", 500 * 1024 * 1024),    // 500 MB
             ("ggml-large-v2.bin", 1000 * 1024 * 1024), // 1 GB
             ("ggml-large-v3.bin", 1000 * 1024 * 1024), // 1 GB
         ];
@@ -4341,7 +5164,11 @@ mod tests {
 
         for (name, expected_size_mb) in expected_models {
             let model = models.iter().find(|m| m.name == name).unwrap_or_else(|| {
-                panic!("Model {} not found. Available models: {:?}", name, models.iter().map(|m| &m.name).collect::<Vec<_>>());
+                panic!(
+                    "Model {} not found. Available models: {:?}",
+                    name,
+                    models.iter().map(|m| &m.name).collect::<Vec<_>>()
+                );
             });
             assert_eq!(model.model_type, "whisper");
             assert_eq!(model.size_mb, expected_size_mb);

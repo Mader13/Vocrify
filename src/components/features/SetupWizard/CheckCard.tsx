@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/hooks";
+import type { TranslateFn } from "@/i18n";
 import type { CheckStatus } from "@/types/setup";
 
 /**
@@ -65,22 +67,22 @@ function getStatusIcon(status: CheckStatus, progress?: number): React.ReactNode 
 }
 
 /**
- * Get status label in English
+ * Get status label using i18n
  */
-function getStatusLabel(status: CheckStatus): string {
+function getStatusLabel(status: CheckStatus, t: TranslateFn): string {
   switch (status) {
     case "pending":
-      return "Pending";
+      return t("setup.pending");
     case "checking":
-      return "Checking...";
+      return t("setup.checking");
     case "ok":
-      return "Ready";
+      return t("setup.ready");
     case "warning":
-      return "Warning";
+      return t("setup.warning");
     case "error":
-      return "Error";
+      return t("setup.error");
     case "installing":
-      return "Installing...";
+      return t("setup.installing");
     default:
       return "";
   }
@@ -100,7 +102,7 @@ function getStatusClasses(status: CheckStatus): string {
     case "warning":
       return "border-yellow-500/50 bg-yellow-500/5 text-yellow-600 dark:text-yellow-400";
     case "error":
-      return "border-red-500/50 bg-red-500/5 text-red-600 dark:text-red-400";
+      return "border-red-500/50 bg-red-500/5 text-red-700 dark:text-red-400";
     case "installing":
       return "border-primary/50 bg-primary/5 text-primary";
     default:
@@ -121,6 +123,7 @@ export function CheckCard({
   className,
   children,
 }: CheckCardProps) {
+  const { t } = useI18n();
   const isLoading = status === "checking" || status === "installing";
 
   return (
@@ -132,7 +135,7 @@ export function CheckCard({
       )}
       role="status"
       aria-live="polite"
-      aria-label={`${title}: ${getStatusLabel(status)}`}
+      aria-label={`${title}: ${getStatusLabel(status, t)}`}
     >
       {/* Header with icon and title */}
       <div className="flex items-start gap-3">
@@ -178,10 +181,10 @@ export function CheckCard({
               onClick={onRetry}
               disabled={isLoading}
               className="mt-3"
-              aria-label="Retry check"
+              aria-label={t("setup.retryCheck")}
             >
               <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
-              Retry
+              {t("common.retry")}
             </Button>
           )}
         </div>

@@ -103,7 +103,7 @@ def find_ffmpeg() -> tuple[str | None, list[str]]:
     Find ffmpeg on the system. Returns (ffmpeg_path, search_locations).
 
     Searches in order:
-    1. shutil.which() — standard PATH lookup
+    1. shutil.which() - standard PATH lookup
     2. Windows registry PATH (HKCU/HKLM)
     3. Winget links directory (%LOCALAPPDATA%\\Microsoft\\WinGet\\Links)
     4. App-managed FFmpeg directories (APPDATA / LOCALAPPDATA)

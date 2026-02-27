@@ -5,8 +5,7 @@ import { ModelCard } from "@/components/features/ModelCard";
 import type { AvailableModel } from "@/types";
 
 vi.mock("@/stores", () => ({
-  useTasks: (selector: (state: { settings: { huggingFaceToken: string } }) => unknown) =>
-    selector({ settings: { huggingFaceToken: "" } }),
+  useTasks: vi.fn((selector) => selector({ settings: {} })),
 }));
 
 const installedModel: AvailableModel = {

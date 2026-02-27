@@ -1,51 +1,63 @@
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { motion, AnimatePresence } from "framer-motion";
+import React from 'react';
+import { useI18n } from "@/hooks";
+
+// Forward ref to support Framer Motion layout animations on standard Button
+const MotionButton = motion.create(React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof Button>>((props, ref) => (
+  <Button ref={ref} {...props} />
+)));
 
 interface AddFilesButtonProps {
   onClick: () => void;
-  variant?: "full" | "icon" | "mobile";
+  variant?: "default" | "mobile";
+  isCollapsed?: boolean;
   className?: string;
 }
 
-export function AddFilesButton({ onClick, variant = "full", className }: AddFilesButtonProps) {
-  if (variant === "icon") {
-    return (
-      <Button
-        variant="default"
-        size="icon"
-        className={cn(
-          "h-11 w-11 rounded-xl transition-all duration-200 hover:scale-[1.02]",
-          className,
-        )}
-        onClick={onClick}
-        title="Add files"
-        aria-label="Add files"
-      >
-        <Plus className="h-5 w-5" />
-      </Button>
-    );
-  }
+export function AddFilesButton({ onClick, variant = "default", isCollapsed = false, className }: AddFilesButtonProps) {
+  const { t } = useI18n();
 
   if (variant === "mobile") {
     return (
       <Button onClick={onClick} size="sm" className={cn("h-9 rounded-lg px-3", className)}>
         <Plus className="mr-1.5 h-4 w-4" />
-        Add
+        {t("addFiles.add")}
       </Button>
     );
   }
 
   return (
-    <Button
+    <MotionButton
+      layout
       onClick={onClick}
       className={cn(
-        "h-10 w-full justify-start gap-2 rounded-xl text-sm font-medium transition-all duration-200 hover:-translate-y-px",
+        "h-11 rounded-xl font-medium transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] shadow-md",
+        isCollapsed ? "w-11 p-0 justify-center" : "w-full justify-start px-4",
         className,
       )}
+      title={t("addFiles.addFiles")}
+      aria-label={t("addFiles.addFiles")}
     >
-      <Plus className="h-4 w-4" />
-      Add media files
-    </Button>
+      <motion.div layout className="flex items-center justify-center shrink-0">
+        <Plus className="h-5 w-5" />
+      </motion.div>
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <motion.span
+            layout
+            initial={{ opacity: 0, width: 0, marginLeft: 0 }}
+            animate={{ opacity: 1, width: "auto", marginLeft: 8 }}
+            exit={{ opacity: 0, width: 0, marginLeft: 0 }}
+            transition={{ type: "spring", bounce: 0, duration: 0.3 }}
+            className="overflow-hidden whitespace-nowrap text-sm"
+          >
+            {t("addFiles.addMediaFiles")}
+          </motion.span>
+        )}
+      </AnimatePresence>
+    </MotionButton>
   );
 }

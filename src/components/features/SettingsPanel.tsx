@@ -1,196 +1,48 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  RotateCcw,
-  AlertTriangle,
-  Cpu,
-  Film,
-  FileCode,
-  Settings2,
-  Languages,
-  Layers,
-  HardDrive,
-  Sparkles,
-  RefreshCw,
-  Zap,
-} from "lucide-react";
-import {
-  Button,
-  Select,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
-  DialogDescription,
-  DialogClose,
-} from "@/components/ui";
-import { useUIStore, useTasks, useSetupStore } from "@/stores";
-import { clearCache } from "@/services/tauri";
-import { logger } from "@/lib/logger";
-import { DEVICE_NAMES, LANGUAGE_NAMES } from "@/types";
-import type { DeviceType, Language } from "@/types";
-
-interface SystemStatusCardProps {
-  title: string;
-  icon: React.ReactNode;
-  status: "ok" | "error" | "warning" | "pending";
-  details: string[];
-  onRetry?: () => void;
-  isLoading?: boolean;
-}
-
-function SystemStatusCard({ title, icon, status, details, onRetry, isLoading }: SystemStatusCardProps) {
-  const statusConfig = {
-    ok: {
-      bg: "bg-green-500/5",
-      border: "border-green-500/20",
-      label: "Ready",
-      color: "text-green-600 dark:text-green-400",
-      bgBadge: "bg-green-500/10",
-      dot: "bg-green-500",
-    },
-    error: {
-      bg: "bg-red-500/5",
-      border: "border-red-500/20",
-      label: "Error",
-      color: "text-red-600 dark:text-red-400",
-      bgBadge: "bg-red-500/10",
-      dot: "bg-red-500",
-    },
-    warning: {
-      bg: "bg-yellow-500/5",
-      border: "border-yellow-500/20",
-      label: "Warning",
-      color: "text-yellow-600 dark:text-yellow-400",
-      bgBadge: "bg-yellow-500/10",
-      dot: "bg-yellow-500",
-    },
-    pending: {
-      bg: "bg-muted/30",
-      border: "border-muted",
-      label: "...",
-      color: "text-muted-foreground",
-      bgBadge: "bg-muted",
-      dot: "bg-muted-foreground",
-    },
-  };
-
-  const config = statusConfig[status];
-
-  return (
-    <div className={`${config.bg} ${config.border} border rounded-xl p-4 transition-all hover:shadow-sm`}>
-      {/* Header: Title + Status Badge */}
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`p-2 rounded-lg ${config.bgBadge} ${config.color} shrink-0`}>
-            {icon}
-          </div>
-          <span className="font-semibold text-sm truncate">{title}</span>
-        </div>
-        <div className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-medium ${config.bgBadge} ${config.color} shrink-0`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-          <span>{config.label}</span>
-        </div>
-      </div>
-
-      {/* Details with better text handling */}
-      <div className="space-y-1.5">
-        {details.map((detail, idx) => (
-          <div key={idx} className="flex items-center gap-1.5">
-            <div className={`w-1 h-1 rounded-full ${status === "ok" ? "bg-green-500/50" : status === "error" ? "bg-red-500/50" : "bg-muted-foreground/30"}`} />
-            <p className="text-xs text-muted-foreground truncate" title={detail}>
-              {detail}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {onRetry && status !== "ok" && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onRetry}
-          disabled={isLoading}
-          className="mt-3 h-7 text-xs w-full"
-        >
-          <RefreshCw className={`h-3 w-3 mr-1.5 ${isLoading ? "animate-spin" : ""}`} />
-          Check
-        </Button>
-      )}
-    </div>
-  );
-}
+import { motion, AnimatePresence } from "framer-motion";
+import { Button, Dialog, DialogContent, DialogClose, DialogFooter } from "@/components/ui";
+import { useUIStore, useSetupStore } from "@/stores";
+import { SettingsNav } from "./settings/SettingsNav";
+import { TranscriptionTab } from "./settings/TranscriptionTab";
+import { SystemStatusTab } from "./settings/SystemStatusTab";
+import { AdvancedTab } from "./settings/AdvancedTab";
+import { AcknowledgmentsTab } from "./settings/AcknowledgmentsTab";
+import { AboutTab } from "./settings/AboutTab";
+import { RerunSetupDialog } from "./settings/RerunSetupDialog";
+import type { TabId } from "./settings/SettingsNav";
+import { useI18n } from "@/hooks";
 
 export function SettingsPanel() {
+  const [activeTab, setActiveTab] = useState<TabId>("transcription");
+  const [isRerunSetupDialogOpen, setIsRerunSetupDialogOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
   const isSettingsOpen = useUIStore((s) => s.isSettingsOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
+  const { checkAll, fetchDevices, ffmpegCheck, pythonCheck, resetSetupState } = useSetupStore();
+  const { t } = useI18n();
 
-  const settings = useTasks((s) => s.settings);
-  const updateSettings = useTasks((s) => s.updateSettings);
-  const resetSettings = useTasks((s) => s.resetSettings);
-
-  const resetSetupState = useSetupStore((s) => s.resetSetupState);
-
-  const setupStore = useSetupStore();
-  const { ffmpegCheck, pythonCheck, deviceCheck, isChecking, checkAll, fetchDevices } = setupStore;
-
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [isRerunSetupDialogOpen, setIsRerunSetupDialogOpen] = useState(false);
-
-  // Check Python/FFmpeg on settings open, and fetch devices on-demand
   useEffect(() => {
-    if (isSettingsOpen) {
-      if (!ffmpegCheck || !pythonCheck) {
-        checkAll();
-      }
-      // Always fetch devices when opening settings (uses cache)
-      fetchDevices(false);
-    }
+    if (!isSettingsOpen) return;
+    if (!ffmpegCheck || !pythonCheck) checkAll();
+    fetchDevices(false);
   }, [isSettingsOpen, ffmpegCheck, pythonCheck, checkAll, fetchDevices]);
 
   const handleClickOutside = useCallback(
     (event: MouseEvent) => {
-      // Don't close settings if confirmation dialog is open
       if (isRerunSetupDialogOpen) return;
-      
       if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
         setSettingsOpen(false);
       }
     },
-    [setSettingsOpen, isRerunSetupDialogOpen]
+    [setSettingsOpen, isRerunSetupDialogOpen],
   );
 
   useEffect(() => {
-    if (isSettingsOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
+    if (!isSettingsOpen) return;
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isSettingsOpen, handleClickOutside]);
-
-  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings({ defaultLanguage: e.target.value as Language });
-  };
-
-  const handleDeviceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings({ defaultDevice: e.target.value as DeviceType });
-  };
-
-  const handleMaxConcurrentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings({ maxConcurrentTasks: parseInt(e.target.value, 10) });
-  };
-
-  const handleReset = () => {
-    resetSettings();
-  };
-
-  const handleClearCache = async () => {
-    const result = await clearCache();
-    if (result.success) {
-      window.location.reload();
-    } else {
-      logger.error("Failed to clear cache", { error: result.error });
-    }
-  };
 
   const handleRerunSetup = async () => {
     await resetSetupState();
@@ -199,265 +51,59 @@ export function SettingsPanel() {
     window.location.reload();
   };
 
-  const handleRetryCheck = () => {
-    checkAll();
-  };
-
-  const ffmpegStatus = ffmpegCheck?.status === "ok" ? "ok" : ffmpegCheck?.status === "error" ? "error" : ffmpegCheck?.status === "warning" ? "warning" : "pending";
-  const pythonStatus = pythonCheck?.status === "ok" ? "ok" : pythonCheck?.status === "error" ? "error" : pythonCheck?.status === "warning" ? "warning" : "pending";
-  
-  const availableDevices = deviceCheck?.devices?.filter(d => d.available) || [];
-  const availableDevicesCount = availableDevices.length;
-  
-  const deviceStatus = !deviceCheck 
-    ? "pending" 
-    : deviceCheck.status === "error" 
-      ? "error" 
-      : deviceCheck.status === "warning"
-        ? "warning"
-        : availableDevicesCount === 0
-          ? "warning"
-          : "ok";
-
-  const ffmpegDetails = ffmpegCheck
-    ? [
-        ffmpegCheck.version ? `v${ffmpegCheck.version}` : "Not found",
-        ffmpegCheck.path || "Path not defined",
-      ]
-    : ["Checking..."];
-
-  const pythonDetails = pythonCheck
-    ? [
-        pythonCheck.version ? `Python ${pythonCheck.version}` : "Not found",
-        pythonCheck.pytorchInstalled
-          ? `PyTorch ${pythonCheck.pytorchVersion || ""} ${pythonCheck.cudaAvailable ? "(CUDA)" : pythonCheck.mpsAvailable ? "(MPS)" : ""}`.trim()
-          : "PyTorch not installed",
-      ]
-    : ["Checking..."];
-
-  const deviceDetails = deviceCheck
-    ? availableDevicesCount === 0
-      ? ["No acceleration available", "CPU will be used"]
-      : [
-          availableDevices.map(d => (d.deviceType || "cpu").toUpperCase()).join(", ") || "CPU",
-          deviceCheck.recommended ? `Recommended: ${deviceCheck.recommended.toUpperCase()}` : "",
-        ].filter(Boolean)
-    : ["Checking..."];
-
   return (
     <>
       <Dialog open={isSettingsOpen} onOpenChange={setSettingsOpen}>
-      <DialogContent ref={panelRef} className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Settings2 className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <DialogTitle>Settings</DialogTitle>
-              <DialogDescription>
-                Manage system parameters and status
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
+        <DialogContent
+          ref={panelRef}
+          className="max-w-4xl max-h-[90vh] overflow-hidden p-0 bg-background/90 dark:bg-background/40 backdrop-blur-[40px] border-border/50 dark:border-white/5 shadow-2xl shadow-black/40 sm:rounded-[2rem]"
+        >
+          <div className="flex h-[600px] sm:h-[700px] max-h-[85vh] w-full">
+            <SettingsNav activeTab={activeTab} onTabChange={setActiveTab} />
 
-        <DialogClose onClick={() => setSettingsOpen(false)} />
-
-        <div className="space-y-6 py-4">
-          {/* System Status Section - Prominent Status Cards */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <HardDrive className="h-4 w-4" />
-                System Status
-              </h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleRetryCheck}
-                disabled={isChecking}
-                className="h-7 text-xs"
-              >
-                <RefreshCw className={`h-3 w-3 mr-1 ${isChecking ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <SystemStatusCard
-                title="FFmpeg"
-                icon={<Film className="h-4 w-4 text-purple-500" />}
-                status={ffmpegStatus}
-                details={ffmpegDetails}
-                onRetry={handleRetryCheck}
-                isLoading={isChecking}
+            <div className="flex-1 relative overflow-hidden flex flex-col">
+              <DialogClose
+                className="absolute top-6 right-6 z-50 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 p-2 backdrop-blur-md border border-white/10 transition-colors"
+                onClick={() => setSettingsOpen(false)}
               />
-              <SystemStatusCard
-                title="Python"
-                icon={<FileCode className="h-4 w-4 text-yellow-500" />}
-                status={pythonStatus}
-                details={pythonDetails}
-                onRetry={handleRetryCheck}
-                isLoading={isChecking}
-              />
-              <SystemStatusCard
-                title="Devices"
-                icon={<Zap className="h-4 w-4 text-blue-500" />}
-                status={deviceStatus}
-                details={deviceDetails}
-                onRetry={handleRetryCheck}
-                isLoading={isChecking}
-              />
-            </div>
-          </div>
 
-          {/* Settings Section */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold flex items-center gap-2 pt-2 border-t">
-              <Settings2 className="h-4 w-4" />
-              Transcription Settings
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Device Section */}
-              <div className="space-y-2">
-                <label htmlFor="device" className="text-sm font-medium flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-muted-foreground" />
-                  Device
-                </label>
-                <Select
-                  id="device"
-                  value={settings.defaultDevice}
-                  onChange={handleDeviceChange}
-                >
-                  {Object.entries(DEVICE_NAMES).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
+              <div className="flex-1 overflow-y-auto px-8 py-8 my-4 mx-1 relative">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={activeTab}
+                    initial={{ opacity: 0, scale: 0.98, filter: "blur(8px)" }}
+                    animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                    exit={{ opacity: 0, scale: 0.98, filter: "blur(4px)" }}
+                    transition={{ duration: 0.3, ease: "easeInOut" }}
+                    className="space-y-8 h-full"
+                  >
+                    {activeTab === "transcription" && <TranscriptionTab />}
+                    {activeTab === "system" && <SystemStatusTab onRerunSetupClick={() => setIsRerunSetupDialogOpen(true)} />}
+                    {activeTab === "advanced" && <AdvancedTab />}
+                    {activeTab === "about" && <AboutTab />}
+                    {activeTab === "acknowledgments" && <AcknowledgmentsTab />}
+                  </motion.div>
+                </AnimatePresence>
               </div>
 
-              {/* Language Section */}
-              <div className="space-y-2">
-                <label htmlFor="language" className="text-sm font-medium flex items-center gap-2">
-                  <Languages className="h-4 w-4 text-muted-foreground" />
-                  Language
-                </label>
-                <Select
-                  id="language"
-                  value={settings.defaultLanguage}
-                  onChange={handleLanguageChange}
-                >
-                  {Object.entries(LANGUAGE_NAMES).map(([key, name]) => (
-                    <option key={key} value={key}>
-                      {name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-
-            {/* Max Concurrent Tasks */}
-            <div className="space-y-2">
-              <label htmlFor="max-concurrent" className="text-sm font-medium flex items-center gap-2">
-                <Layers className="h-4 w-4 text-muted-foreground" />
-                Concurrent Tasks
-              </label>
-              <Select
-                id="max-concurrent"
-                value={settings.maxConcurrentTasks.toString()}
-                onChange={handleMaxConcurrentChange}
-                className="w-32"
-              >
-                {[1, 2, 3, 4].map((num) => (
-                  <option key={num} value={num}>
-                    {num}
-                  </option>
-                ))}
-              </Select>
-            </div>
-
-          </div>
-
-          {/* Setup Wizard Section */}
-          <div className="pt-4 mt-2 border-t">
-            <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-yellow-500/10">
-                <Sparkles className="h-4 w-4 text-yellow-500" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-sm font-medium mb-1">Initial Setup</h3>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Run the setup wizard to check and configure the system
-                </p>
+              <DialogFooter className="px-8 py-4 border-t border-border/20 bg-background/20 backdrop-blur-lg">
                 <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsRerunSetupDialogOpen(true)}
+                  onClick={() => setSettingsOpen(false)}
+                  className="ml-auto shadow-[0_0_15px_rgba(var(--primary),0.3)] hover:shadow-[0_0_25px_rgba(var(--primary),0.5)] transition-shadow"
                 >
-                  <RotateCcw className="h-4 w-4 mr-2" />
-                  Run Wizard
+                  {t("common.saveAndClose")}
                 </Button>
-              </div>
+              </DialogFooter>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
 
-
-        </div>
-
-        <DialogFooter className="flex gap-2 flex-wrap">
-          <Button variant="destructive" onClick={handleClearCache} size="sm">
-            Clear Cache
-          </Button>
-          <Button variant="outline" onClick={handleReset} size="sm">
-            Reset
-          </Button>
-          <Button onClick={() => setSettingsOpen(false)} size="sm">
-            Done
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    {/* Rerun Setup Confirmation Dialog - rendered as overlay */}
-    {isRerunSetupDialogOpen && (
-      <div className="fixed inset-0 z-[60] flex items-center justify-center">
-        <div
-          className="absolute inset-0 bg-black/50"
-          onClick={() => setIsRerunSetupDialogOpen(false)}
-        />
-        <div className="relative bg-background border rounded-lg shadow-lg w-full max-w-md p-6 z-10">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="rounded-full bg-yellow-500/10 p-2">
-                <AlertTriangle className="h-5 w-5 text-yellow-500" />
-              </div>
-              <DialogTitle>Rerun Setup Wizard?</DialogTitle>
-            </div>
-          </DialogHeader>
-          <div className="py-4">
-            <p className="text-sm text-muted-foreground">
-              The initial setup wizard will run on the next app launch.
-              This will recheck the system status and reconfigure components.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsRerunSetupDialogOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleRerunSetup}>
-              <RotateCcw className="h-4 w-4 mr-2" />
-              Run
-            </Button>
-          </DialogFooter>
-        </div>
-      </div>
-    )}
+      <RerunSetupDialog
+        isOpen={isRerunSetupDialogOpen}
+        onCancel={() => setIsRerunSetupDialogOpen(false)}
+        onConfirm={handleRerunSetup}
+      />
     </>
   );
 }

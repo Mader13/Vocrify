@@ -1,32 +1,21 @@
 import * as React from "react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Rocket, X } from "lucide-react";
 import { ProgressBar } from "./ProgressBar";
 import { PythonStep, PythonStepFooter } from "./steps/PythonStep";
 import { FFmpegStep, FFmpegStepFooter } from "./steps/FFmpegStep";
 import { DeviceStep, DeviceStepFooter } from "./steps/DeviceStep";
-
-import { OptionalStep, OptionalStepFooter } from "./steps/OptionalStep";
+import { ModelStep, ModelStepFooter } from "./steps/ModelStep";
 import { SummaryStep, SummaryStepFooter } from "./steps/SummaryStep";
 import { useSetupStore } from "@/stores/setupStore";
+import { useI18n } from "@/hooks";
 import { cn } from "@/lib/utils";
 import type { SetupStep } from "@/types/setup";
 
 /**
- * Step names for progress bar
- */
-const STEP_NAMES: string[] = [
-  "Python",
-  "FFmpeg",
-  "Devices",
-  "Options",
-  "Start",
-];
-
-/**
  * Step order for navigation
  */
-const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "optional", "summary"];
+const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "model", "summary"];
 
 /**
  * Props for SetupWizard component
@@ -45,6 +34,7 @@ export interface SetupWizardProps {
  * Guides users through first-launch setup process
  */
 export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps) {
+  const { t } = useI18n();
   const {
     currentStep,
     error,
@@ -70,6 +60,14 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       void fetchDevices(false);
     }
   }, [pythonCheck, ffmpegCheck, modelCheck, deviceCheck, checkAll, fetchDevices]);
+
+  const stepNames = useMemo(() => [
+    t("setup.python"),
+    t("setup.ffmpeg"),
+    t("setup.devices"),
+    t("setup.modelsStep"),
+    t("setup.start"),
+  ], [t]);
 
 
   // Get current step index
@@ -114,8 +112,8 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
         return <FFmpegStep />;
       case "device":
         return <DeviceStep />;
-      case "optional":
-        return <OptionalStep />;
+      case "model":
+        return <ModelStep />;
       case "summary":
         return <SummaryStep />;
       default:
@@ -146,9 +144,9 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
             onNext={handleNext}
           />
         );
-      case "optional":
+      case "model":
         return (
-          <OptionalStepFooter
+          <ModelStepFooter
             onBack={handleBack}
             onNext={handleNext}
           />
@@ -168,7 +166,7 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   return (
     <div
       className={cn(
-        "flex flex-col min-h-[500px] max-w-2xl mx-auto",
+        "flex flex-col min-h-125 max-w-2xl mx-auto",
         "bg-background rounded-xl shadow-lg border",
         className
       )}
@@ -184,10 +182,10 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
           </div>
           <div>
             <h1 id="setup-wizard-title" className="text-lg font-semibold">
-              Initial Setup
+              {t("setup.initialSetup")}
             </h1>
             <p className="text-sm text-muted-foreground">
-              Step {currentStepIndex + 1} of {STEPS.length}
+              {t("setup.stepOf")} {currentStepIndex + 1} {t("common.of")} {STEPS.length}
             </p>
           </div>
         </div>
@@ -195,7 +193,7 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
           <button
             onClick={handleSkip}
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            aria-label="Skip setup"
+            aria-label={t("setup.skipSetup")}
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
@@ -207,7 +205,7 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
         <ProgressBar
           currentStepIndex={currentStepIndex}
           totalSteps={STEPS.length}
-          stepNames={STEP_NAMES}
+          stepNames={stepNames}
         />
       </div>
 

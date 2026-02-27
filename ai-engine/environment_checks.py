@@ -12,20 +12,15 @@ import subprocess
 import sys
 from typing import Any, Optional
 
-SUPPORTED_PYTHON_VERSIONS = [(3, 10), (3, 11), (3, 12)]
+from model_config import get_model_size_mb
+from utils.ffmpeg_utils import (
+    get_windows_path_from_registry as _get_windows_path_from_registry,
+    find_ffmpeg_in_paths as _find_ffmpeg_in_paths,
+    check_ffmpeg_executable as _check_ffmpeg_executable,
+    find_ffmpeg,
+)
 
-
-def get_model_size_mb(path: str) -> int:
-    """Get the size of a model directory in MB."""
-    total_size = 0
-    for dirpath, dirnames, filenames in os.walk(path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            try:
-                total_size += os.path.getsize(fp)
-            except (OSError, IOError):
-                pass
-    return total_size // (1024 * 1024)
+SUPPORTED_PYTHON_VERSIONS = [(3, 10), (3, 11), (3, 12), (3, 13), (3, 14)]
 
 
 def check_python_environment() -> dict[str, Any]:
@@ -40,53 +35,22 @@ def check_python_environment() -> dict[str, Any]:
         version_tuple = (sys.version_info.major, sys.version_info.minor)
         version_supported = version_tuple in SUPPORTED_PYTHON_VERSIONS
 
-        pytorch_installed = False
-        pytorch_version = None
-        cuda_available = False
-        mps_available = False
-
-        try:
-            import torch
-
-            pytorch_installed = True
-            pytorch_version = torch.__version__
-            cuda_available = torch.cuda.is_available()
-            if hasattr(torch.backends, "mps"):
-                mps_available = torch.backends.mps.is_available()
-        except ImportError:
-            pass
-
         if not version_supported:
-            if version_tuple >= (3, 13):
+            if version_tuple >= (3, 15):
                 status = "error"
-                message = f"Python {version} НЕ поддерживается. Требуется Python 3.10, 3.11 или 3.12."
+                message = f"Python {version} is not supported. Requires Python 3.10-3.14."
             else:
                 status = "warning"
-                message = f"Python {version} не тестировался. Рекомендуется 3.10, 3.11 или 3.12."
-        elif not pytorch_installed:
-            status = "error"
-            message = f"Python {version} OK, но PyTorch не установлен. Выполните: pip install torch"
+                message = f"Python {version} is not officially tested. Recommended 3.10-3.14."
         else:
-            acceleration = []
-            if cuda_available:
-                acceleration.append("CUDA")
-            if mps_available:
-                acceleration.append("MPS")
-            if not acceleration:
-                acceleration.append("только CPU")
-
             status = "ok"
-            message = f"Python {version}, PyTorch {pytorch_version} ({', '.join(acceleration)})"
+            message = f"Python {version} is installed."
 
         return {
             "status": status,
             "version": version,
             "executable": executable,
-            "inVenv": in_venv,
-            "pytorchInstalled": pytorch_installed,
-            "pytorchVersion": pytorch_version,
-            "cudaAvailable": cuda_available,
-            "mpsAvailable": mps_available,
+            "in_venv": in_venv,
             "message": message,
         }
 
@@ -95,174 +59,19 @@ def check_python_environment() -> dict[str, Any]:
             "status": "error",
             "version": None,
             "executable": None,
-            "inVenv": False,
-            "pytorchInstalled": False,
-            "pytorchVersion": None,
-            "cudaAvailable": False,
-            "mpsAvailable": False,
-            "message": f"Ошибка при проверке Python: {str(e)}",
+            "in_venv": False,
+            "message": f"Error while checking Python: {str(e)}",
         }
 
 
-def _get_windows_path_from_registry() -> list[str]:
-    """Read PATH from Windows registry (HKCU and HKLM)."""
-    import winreg
-
-    paths: list[str] = []
-
-    # Registry keys to check
-    keys_to_check = [
-        (winreg.HKEY_CURRENT_USER, r"Environment"),
-        (
-            winreg.HKEY_LOCAL_MACHINE,
-            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
-        ),
-    ]
-
-    for hkey, subkey in keys_to_check:
-        try:
-            with winreg.OpenKey(hkey, subkey, 0, winreg.KEY_READ) as key:
-                try:
-                    value, _ = winreg.QueryValueEx(key, "Path")
-                    if value:
-                        paths.extend(value.split(os.pathsep))
-                except FileNotFoundError:
-                    pass
-        except Exception:
-            pass
-
-    return paths
-
-
-def _find_ffmpeg_in_paths(paths: list[str]) -> str | None:
-    """Find ffmpeg.exe in a list of paths."""
-    for path in paths:
-        if not path:
-            continue
-        # Expand environment variables (e.g., %LOCALAPPDATA%)
-        try:
-            expanded = os.path.expandvars(path)
-        except Exception:
-            expanded = path
-
-        # Clean quotes
-        expanded = expanded.strip('"').strip("'")
-
-        if not os.path.isdir(expanded):
-            continue
-
-        # Check for ffmpeg.exe directly in this path
-        ffmpeg_candidate = os.path.join(expanded, "ffmpeg.exe")
-        if os.path.isfile(ffmpeg_candidate):
-            return ffmpeg_candidate
-
-        # Also check bin subdirectory (common for many installs)
-        bin_candidate = os.path.join(expanded, "bin", "ffmpeg.exe")
-        if os.path.isfile(bin_candidate):
-            return bin_candidate
-
-    return None
-
-
-def _check_ffmpeg_executable(ffmpeg_path: str) -> tuple[bool, str | None]:
-    """Check if ffmpeg is executable and get version. Returns (success, version)."""
-    try:
-        # Don't use shell=True - it's unreliable and hides errors
-        result = subprocess.run(
-            [ffmpeg_path, "-version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            shell=False,
-        )
-
-        if result.returncode != 0:
-            return False, None
-
-        version_line = result.stdout.split("\n")[0] if result.stdout else ""
-        parts = version_line.split()
-        version = None
-        if len(parts) >= 3 and "ffmpeg" in parts[0].lower():
-            version = parts[2]
-
-        return True, version
-    except subprocess.TimeoutExpired:
-        return True, None  # Found but timeout - treat as found
-    except FileNotFoundError:
-        return False, None  # Not executable
-    except Exception:
-        return True, None  # Found but error getting version
+# _get_windows_path_from_registry, _find_ffmpeg_in_paths, _check_ffmpeg_executable
+# are now imported from utils.ffmpeg_utils (see top of file).
 
 
 def check_ffmpeg() -> dict[str, Any]:
-    """Check FFmpeg installation for Setup Wizard.
-
-    Searches in order:
-    1. shutil.which() - standard PATH lookup
-    2. Windows registry PATH (HKCU/HKLM)
-    3. Winget links directory (%LOCALAPPDATA%\\Microsoft\\WinGet\\Links)
-    4. App-managed FFmpeg (downloaded by app)
-    """
+    """Check FFmpeg installation for Setup Wizard."""
     try:
-        ffmpeg_path: str | None = None
-        search_locations: list[str] = []
-
-        # 1. Try shutil.which first (handles most normal cases)
-        ffmpeg_path = shutil.which("ffmpeg")
-        if ffmpeg_path:
-            search_locations.append(f"shutil.which: {ffmpeg_path}")
-
-        # 2. On Windows, also check registry PATH and winget links
-        if not ffmpeg_path and platform.system() == "Windows":
-            # Check registry PATH
-            registry_paths = _get_windows_path_from_registry()
-            if registry_paths:
-                ffmpeg_path = _find_ffmpeg_in_paths(registry_paths)
-                if ffmpeg_path:
-                    search_locations.append(f"Windows Registry PATH: {ffmpeg_path}")
-
-            # Check winget links directory (where winget installs apps)
-            if not ffmpeg_path:
-                local_app_data = os.environ.get("LOCALAPPDATA", "")
-                if local_app_data:
-                    winget_links = os.path.join(
-                        local_app_data, "Microsoft", "WinGet", "Links"
-                    )
-                    if os.path.isdir(winget_links):
-                        winget_ffmpeg = os.path.join(winget_links, "ffmpeg.exe")
-                        if os.path.isfile(winget_ffmpeg):
-                            ffmpeg_path = winget_ffmpeg
-                            search_locations.append(f"Winget links: {winget_ffmpeg}")
-
-        # 3. Check app-managed FFmpeg (downloaded by this app)
-        if not ffmpeg_path:
-            app_data = os.environ.get("APPDATA", "")
-            if app_data:
-                downloaded_ffmpeg = os.path.join(
-                    app_data, "com.vocrify.app", "Vocrify", "ffmpeg", "ffmpeg.exe"
-                )
-                if os.path.exists(downloaded_ffmpeg):
-                    ffmpeg_path = downloaded_ffmpeg
-                    search_locations.append(
-                        f"App managed (APPDATA): {downloaded_ffmpeg}"
-                    )
-
-        # 4. Check LOCALAPPDATA as fallback (for development)
-        if not ffmpeg_path:
-            local_app_data = os.environ.get("LOCALAPPDATA", "")
-            if local_app_data:
-                downloaded_ffmpeg = os.path.join(
-                    local_app_data,
-                    "com.vocrify.app",
-                    "Vocrify",
-                    "ffmpeg",
-                    "ffmpeg.exe",
-                )
-                if os.path.exists(downloaded_ffmpeg):
-                    ffmpeg_path = downloaded_ffmpeg
-                    search_locations.append(
-                        f"App managed (LOCALAPPDATA): {downloaded_ffmpeg}"
-                    )
+        ffmpeg_path, search_locations = find_ffmpeg()
 
         if not ffmpeg_path:
             return {
@@ -270,7 +79,7 @@ def check_ffmpeg() -> dict[str, Any]:
                 "installed": False,
                 "path": None,
                 "version": None,
-                "message": "FFmpeg не найден. Установите FFmpeg для работы с видео/аудио.",
+                "message": "FFmpeg ÃƒÂÃ‚Â½ÃƒÂÃ‚Âµ ÃƒÂÃ‚Â½ÃƒÂÃ‚Â°ÃƒÂÃ‚Â¹ÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½. ÃƒÂÃ‚Â£Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Â°ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â²ÃƒÂÃ‚Â¸Ãƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Âµ FFmpeg ÃƒÂÃ‚Â´ÃƒÂÃ‚Â»Ãƒâ€˜Ã‚Â Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â°ÃƒÂÃ‚Â±ÃƒÂÃ‚Â¾Ãƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã¢â‚¬Â¹ Ãƒâ€˜Ã‚Â ÃƒÂÃ‚Â²ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â¾/ÃƒÂÃ‚Â°Ãƒâ€˜Ã†â€™ÃƒÂÃ‚Â´ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â¾.",
             }
 
         # Verify executable and get version
@@ -282,7 +91,7 @@ def check_ffmpeg() -> dict[str, Any]:
                 "installed": False,
                 "path": ffmpeg_path,
                 "version": None,
-                "message": f"FFmpeg найден ({ffmpeg_path}), но не запускается. Проверьте права доступа или переустановите.",
+                "message": f"FFmpeg ÃƒÂÃ‚Â½ÃƒÂÃ‚Â°ÃƒÂÃ‚Â¹ÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½ ({ffmpeg_path}), ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¾ ÃƒÂÃ‚Â½ÃƒÂÃ‚Âµ ÃƒÂÃ‚Â·ÃƒÂÃ‚Â°ÃƒÂÃ‚Â¿Ãƒâ€˜Ã†â€™Ãƒâ€˜Ã‚ÂÃƒÂÃ‚ÂºÃƒÂÃ‚Â°ÃƒÂÃ‚ÂµÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã‚Â. ÃƒÂÃ…Â¸Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â²ÃƒÂÃ‚ÂµÃƒâ€˜Ã¢â€šÂ¬Ãƒâ€˜Ã…â€™Ãƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Âµ ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â°ÃƒÂÃ‚Â²ÃƒÂÃ‚Â° ÃƒÂÃ‚Â´ÃƒÂÃ‚Â¾Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã†â€™ÃƒÂÃ‚Â¿ÃƒÂÃ‚Â° ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â»ÃƒÂÃ‚Â¸ ÃƒÂÃ‚Â¿ÃƒÂÃ‚ÂµÃƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂµÃƒâ€˜Ã†â€™Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Â°ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â²ÃƒÂÃ‚Â¸Ãƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Âµ.",
             }
 
         if version is None:
@@ -291,7 +100,7 @@ def check_ffmpeg() -> dict[str, Any]:
                 "installed": True,
                 "path": ffmpeg_path,
                 "version": None,
-                "message": f"FFmpeg найден ({ffmpeg_path}), но не удалось определить версию.",
+                "message": f"FFmpeg ÃƒÂÃ‚Â½ÃƒÂÃ‚Â°ÃƒÂÃ‚Â¹ÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½ ({ffmpeg_path}), ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¾ ÃƒÂÃ‚Â½ÃƒÂÃ‚Âµ Ãƒâ€˜Ã†â€™ÃƒÂÃ‚Â´ÃƒÂÃ‚Â°ÃƒÂÃ‚Â»ÃƒÂÃ‚Â¾Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã…â€™ ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂµÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â»ÃƒÂÃ‚Â¸Ãƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã…â€™ ÃƒÂÃ‚Â²ÃƒÂÃ‚ÂµÃƒâ€˜Ã¢â€šÂ¬Ãƒâ€˜Ã‚ÂÃƒÂÃ‚Â¸Ãƒâ€˜Ã…Â½.",
             }
 
         return {
@@ -299,7 +108,7 @@ def check_ffmpeg() -> dict[str, Any]:
             "installed": True,
             "path": ffmpeg_path,
             "version": version,
-            "message": f"FFmpeg {version} найден: {ffmpeg_path}",
+            "message": f"FFmpeg {version} ÃƒÂÃ‚Â½ÃƒÂÃ‚Â°ÃƒÂÃ‚Â¹ÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½: {ffmpeg_path}",
         }
 
     except Exception as e:
@@ -308,7 +117,7 @@ def check_ffmpeg() -> dict[str, Any]:
             "installed": False,
             "path": None,
             "version": None,
-            "message": f"Ошибка при проверке FFmpeg: {str(e)}",
+            "message": f"ÃƒÂÃ…Â¾Ãƒâ€˜Ã‹â€ ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â±ÃƒÂÃ‚ÂºÃƒÂÃ‚Â° ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¸ ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â²ÃƒÂÃ‚ÂµÃƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂºÃƒÂÃ‚Âµ FFmpeg: {str(e)}",
         }
 
 
@@ -327,7 +136,7 @@ def check_models(cache_dir: Optional[str] = None) -> dict[str, Any]:
                 "status": "warning",
                 "installedModels": [],
                 "hasRequiredModel": False,
-                "message": f"Директория моделей не существует: {cache_dir}",
+                "message": f"Models directory does not exist: {cache_dir}",
             }
 
         skip_individual = {
@@ -356,8 +165,8 @@ def check_models(cache_dir: Optional[str] = None) -> dict[str, Any]:
             installed_models.append(
                 {
                     "name": model_name,
-                    "size_mb": size_mb,
-                    "model_type": model_type,
+                    "sizeMb": size_mb,
+                    "modelType": model_type,
                     "installed": True,
                     "path": model_path,
                 }
@@ -370,30 +179,36 @@ def check_models(cache_dir: Optional[str] = None) -> dict[str, Any]:
             installed_models.append(
                 {
                     "name": "sherpa-onnx-diarization",
-                    "size_mb": total_size,
-                    "model_type": "diarization",
+                    "sizeMb": total_size,
+                    "modelType": "diarization",
                     "installed": True,
                     "path": None,
                 }
             )
 
         transcription_models = [
-            m for m in installed_models if m["model_type"] in ("whisper", "parakeet")
+            m for m in installed_models if m["modelType"] in ("whisper", "parakeet")
         ]
         has_required = len(transcription_models) > 0
 
         if not installed_models:
             status = "warning"
-            message = "Модели не установлены. Рекомендуется скачать whisper-base."
+            message = (
+                "No models are installed. "
+                "Install at least one transcription model (for example: whisper-base)."
+            )
         elif not has_required:
             status = "warning"
-            message = f"Установлено {len(installed_models)} моделей, но нет моделей транскрипции."
+            message = (
+                f"Installed models: {len(installed_models)}. "
+                "No transcription model was found."
+            )
         else:
             status = "ok"
             model_names = [m["name"] for m in transcription_models]
             suffix = "..." if len(model_names) > 3 else ""
             message = (
-                f"Установлено моделей: {len(installed_models)} "
+                f"Installed models: {len(installed_models)} "
                 f"({', '.join(model_names[:3])}{suffix})"
             )
 
@@ -409,7 +224,7 @@ def check_models(cache_dir: Optional[str] = None) -> dict[str, Any]:
             "status": "error",
             "installedModels": [],
             "hasRequiredModel": False,
-            "message": f"Ошибка при проверке моделей: {str(e)}",
+            "message": f"Error while checking models: {str(e)}",
         }
 
 
@@ -437,14 +252,14 @@ def get_full_environment_status(cache_dir: Optional[str] = None) -> dict[str, An
                 "status": "ok",
                 "devices": [asdict(d) for d in devices],
                 "recommended": asdict(recommended),
-                "message": f"Доступно устройств: {len(devices)}",
+                "message": f"ÃƒÂÃ¢â‚¬ÂÃƒÂÃ‚Â¾Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã†â€™ÃƒÂÃ‚Â¿ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¾ Ãƒâ€˜Ã†â€™Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â¹Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Â²: {len(devices)}",
             }
         except Exception as e:
             devices_result = {
                 "status": "error",
                 "devices": [],
                 "recommended": None,
-                "message": f"Ошибка определения устройств: {str(e)}",
+                "message": f"ÃƒÂÃ…Â¾Ãƒâ€˜Ã‹â€ ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â±ÃƒÂÃ‚ÂºÃƒÂÃ‚Â° ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂµÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â»ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½ÃƒÂÃ‚Â¸Ãƒâ€˜Ã‚Â Ãƒâ€˜Ã†â€™Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â¹Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Â²: {str(e)}",
             }
 
         statuses = [
@@ -457,13 +272,13 @@ def get_full_environment_status(cache_dir: Optional[str] = None) -> dict[str, An
         if "error" in statuses:
             overall_status = "error"
             error_count = statuses.count("error")
-            message = f"Обнаружено {error_count} проблем(ы). Требуется внимание."
+            message = f"ÃƒÂÃ…Â¾ÃƒÂÃ‚Â±ÃƒÂÃ‚Â½ÃƒÂÃ‚Â°Ãƒâ€˜Ã¢â€šÂ¬Ãƒâ€˜Ã†â€™ÃƒÂÃ‚Â¶ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½ÃƒÂÃ‚Â¾ {error_count} ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â±ÃƒÂÃ‚Â»ÃƒÂÃ‚ÂµÃƒÂÃ‚Â¼(Ãƒâ€˜Ã¢â‚¬Â¹). ÃƒÂÃ‚Â¢Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂµÃƒÂÃ‚Â±Ãƒâ€˜Ã†â€™ÃƒÂÃ‚ÂµÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã‚Â ÃƒÂÃ‚Â²ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â¼ÃƒÂÃ‚Â°ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¸ÃƒÂÃ‚Âµ."
         elif "warning" in statuses:
             overall_status = "warning"
-            message = "Среда настроена с предупреждениями."
+            message = "ÃƒÂÃ‚Â¡Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂµÃƒÂÃ‚Â´ÃƒÂÃ‚Â° ÃƒÂÃ‚Â½ÃƒÂÃ‚Â°Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½ÃƒÂÃ‚Â° Ãƒâ€˜Ã‚Â ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂµÃƒÂÃ‚Â´Ãƒâ€˜Ã†â€™ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂµÃƒÂÃ‚Â¶ÃƒÂÃ‚Â´ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½ÃƒÂÃ‚Â¸Ãƒâ€˜Ã‚ÂÃƒÂÃ‚Â¼ÃƒÂÃ‚Â¸."
         else:
             overall_status = "ok"
-            message = "Все компоненты установлены и настроены."
+            message = "ÃƒÂÃ¢â‚¬â„¢Ãƒâ€˜Ã‚ÂÃƒÂÃ‚Âµ ÃƒÂÃ‚ÂºÃƒÂÃ‚Â¾ÃƒÂÃ‚Â¼ÃƒÂÃ‚Â¿ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â½ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½Ãƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã¢â‚¬Â¹ Ãƒâ€˜Ã†â€™Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Â°ÃƒÂÃ‚Â½ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â²ÃƒÂÃ‚Â»ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½Ãƒâ€˜Ã¢â‚¬Â¹ ÃƒÂÃ‚Â¸ ÃƒÂÃ‚Â½ÃƒÂÃ‚Â°Ãƒâ€˜Ã‚ÂÃƒâ€˜Ã¢â‚¬Å¡Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½Ãƒâ€˜Ã¢â‚¬Â¹."
 
         return {
             "type": "environment_status",
@@ -487,27 +302,29 @@ def get_full_environment_status(cache_dir: Optional[str] = None) -> dict[str, An
                 "pytorchVersion": None,
                 "cudaAvailable": False,
                 "mpsAvailable": False,
-                "message": f"Ошибка: {str(e)}",
+                "message": f"ÃƒÂÃ…Â¾Ãƒâ€˜Ã‹â€ ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â±ÃƒÂÃ‚ÂºÃƒÂÃ‚Â°: {str(e)}",
             },
             "ffmpeg": {
                 "status": "error",
                 "installed": False,
                 "path": None,
                 "version": None,
-                "message": f"Ошибка: {str(e)}",
+                "message": f"ÃƒÂÃ…Â¾Ãƒâ€˜Ã‹â€ ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â±ÃƒÂÃ‚ÂºÃƒÂÃ‚Â°: {str(e)}",
             },
             "models": {
                 "status": "error",
                 "installedModels": [],
                 "hasRequiredModel": False,
-                "message": f"Ошибка: {str(e)}",
+                "message": f"ÃƒÂÃ…Â¾Ãƒâ€˜Ã‹â€ ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â±ÃƒÂÃ‚ÂºÃƒÂÃ‚Â°: {str(e)}",
             },
             "devices": {
                 "status": "error",
                 "devices": [],
                 "recommended": None,
-                "message": f"Ошибка: {str(e)}",
+                "message": f"ÃƒÂÃ…Â¾Ãƒâ€˜Ã‹â€ ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â±ÃƒÂÃ‚ÂºÃƒÂÃ‚Â°: {str(e)}",
             },
             "overallStatus": "error",
-            "message": f"Критическая ошибка при проверке окружения: {str(e)}",
+            "message": f"ÃƒÂÃ…Â¡Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¸Ãƒâ€˜Ã¢â‚¬Å¡ÃƒÂÃ‚Â¸Ãƒâ€˜Ã¢â‚¬Â¡ÃƒÂÃ‚ÂµÃƒâ€˜Ã‚ÂÃƒÂÃ‚ÂºÃƒÂÃ‚Â°Ãƒâ€˜Ã‚Â ÃƒÂÃ‚Â¾Ãƒâ€˜Ã‹â€ ÃƒÂÃ‚Â¸ÃƒÂÃ‚Â±ÃƒÂÃ‚ÂºÃƒÂÃ‚Â° ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¸ ÃƒÂÃ‚Â¿Ãƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚Â¾ÃƒÂÃ‚Â²ÃƒÂÃ‚ÂµÃƒâ€˜Ã¢â€šÂ¬ÃƒÂÃ‚ÂºÃƒÂÃ‚Âµ ÃƒÂÃ‚Â¾ÃƒÂÃ‚ÂºÃƒâ€˜Ã¢â€šÂ¬Ãƒâ€˜Ã†â€™ÃƒÂÃ‚Â¶ÃƒÂÃ‚ÂµÃƒÂÃ‚Â½ÃƒÂÃ‚Â¸Ãƒâ€˜Ã‚Â: {str(e)}",
         }
+
+

@@ -13,6 +13,10 @@ interface PlaybackState {
   // Позиция mini-player на экране
   miniPlayerPosition: MiniPlayerPosition;
 
+  // Single Source of Truth for which VideoPlayer is currently active on screen
+  activeForegroundPlayerId: string | null;
+  foregroundPlayerCounts: Record<string, number>;
+
   // Actions
   setPlaying: (taskId: string | null, fileName: string | null, isPlaying: boolean) => void;
   updateTime: (time: number) => void;
@@ -20,6 +24,8 @@ interface PlaybackState {
   togglePlayPause: () => void;
   stop: () => void;
   setPosition: (position: MiniPlayerPosition) => void;
+  registerForegroundPlayer: (taskId: string) => void;
+  unregisterForegroundPlayer: (taskId: string) => void;
 }
 
 export const usePlaybackStore = create<PlaybackState>((set, get) => ({
@@ -29,6 +35,8 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
   currentTime: 0,
   duration: 0,
   miniPlayerPosition: 'bottom-left',
+  activeForegroundPlayerId: null,
+  foregroundPlayerCounts: {},
 
   setPlaying: (taskId, fileName, isPlaying) => {
     const state = get();
@@ -60,12 +68,6 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
   },
 
   stop: () => {
-    // Pause any playing media before resetting
-    const videoEl = document.querySelector('video');
-    if (videoEl && !videoEl.paused) {
-      videoEl.pause();
-    }
-    
     set({
       playingTaskId: null,
       playingTaskFileName: null,
@@ -76,4 +78,30 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
   },
 
   setPosition: (position) => set({ miniPlayerPosition: position }),
+
+  registerForegroundPlayer: (taskId) => {
+    const state = get();
+    const count = (state.foregroundPlayerCounts[taskId] || 0) + 1;
+    set({
+      foregroundPlayerCounts: { ...state.foregroundPlayerCounts, [taskId]: count },
+      activeForegroundPlayerId: taskId,
+    });
+  },
+
+  unregisterForegroundPlayer: (taskId) => {
+    const state = get();
+    const count = Math.max((state.foregroundPlayerCounts[taskId] || 0) - 1, 0);
+    const newCounts = { ...state.foregroundPlayerCounts, [taskId]: count };
+    
+    // If no more players for this task, wipe it
+    if (count === 0 && state.activeForegroundPlayerId === taskId) {
+      set({
+        foregroundPlayerCounts: newCounts,
+        activeForegroundPlayerId: null,
+        isPlaying: state.playingTaskId === taskId ? false : state.isPlaying,
+      });
+    } else {
+      set({ foregroundPlayerCounts: newCounts });
+    }
+  },
 }));

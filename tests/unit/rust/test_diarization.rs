@@ -13,11 +13,11 @@ mod tests {
     #[test]
     fn test_diarization_provider_values() {
         // Test that diarization provider strings are correct
-        let providers = vec!["none", "sherpa-onnx"];
+        let providers = vec!["none", "native", "sherpa-onnx"];
 
         for provider in providers {
             match provider {
-                "none" | "sherpa-onnx" => (),
+                "none" | "native" | "sherpa-onnx" => (),
                 _ => panic!("Invalid diarization provider: {}", provider),
             }
         }
@@ -57,7 +57,7 @@ mod tests {
     fn test_diarization_command_args() {
         // Test that diarization arguments are formatted correctly
         let enable_diarization = true;
-        let diarization_provider = Some("sherpa-onnx");
+        let diarization_provider = Some("native");
         let num_speakers: i32 = 2;
 
         if enable_diarization {
@@ -65,7 +65,7 @@ mod tests {
 
             if let Some(provider) = diarization_provider {
                 match provider {
-                    "sherpa-onnx" => {
+                    "native" | "sherpa-onnx" => {
                         assert!(num_speakers == -1 || num_speakers >= 1);
                     }
                     "none" => panic!("Provider 'none' should not be used with diarization enabled"),

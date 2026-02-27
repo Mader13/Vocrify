@@ -1,10 +1,30 @@
-export type DiarizationProvider = "none" | "sherpa-onnx";
+export type DiarizationProvider = "none" | "native" | "sherpa-onnx";
 
 export type EnginePreference = "auto" | "rust" | "python";
+
+export type AppLocale = "en" | "ru";
+
+export const APP_LOCALE_NAMES: Record<AppLocale, string> = {
+  en: "English",
+  ru: "Русский",
+};
 
 export type ArchiveCompression = "none" | "light" | "medium" | "heavy";
 
 export type ArchiveMode = "keep_all" | "delete_video" | "text_only";
+
+export type AudioProfile = "standard" | "noisy";
+
+export const AUDIO_PROFILE_LABELS: Record<AudioProfile, { name: string; description: string }> = {
+  standard: {
+    name: "Standard",
+    description: "Balanced for clear recordings and general use",
+  },
+  noisy: {
+    name: "Noisy / Windy Environment",
+    description: "Filters wind rumble and suppresses background noise",
+  },
+};
 
 export const ARCHIVE_COMPRESSION_LABELS: Record<ArchiveCompression, string> = {
   none: "No compression",
@@ -17,24 +37,28 @@ export interface AppSettings {
   defaultModel: string;
   defaultDevice: string;
   defaultLanguage: string;
+  language: AppLocale;
   enableDiarization: boolean;
   diarizationProvider: DiarizationProvider;
   maxConcurrentTasks: number;
   outputDirectory: string;
   lastDiarizationProvider: DiarizationProvider;
   enginePreference: EnginePreference;
+  audioProfile: AudioProfile;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
   defaultModel: "whisper-base",
   defaultDevice: "auto",
   defaultLanguage: "auto",
+  language: "en",
   enableDiarization: true,
   diarizationProvider: "none",
   maxConcurrentTasks: 2,
   outputDirectory: "",
   lastDiarizationProvider: "none",
   enginePreference: "auto",
+  audioProfile: "standard",
 };
 
 export const ENGINE_PREFERENCES: Record<EnginePreference, { name: string; description: string }> = {
@@ -48,7 +72,7 @@ export const ENGINE_PREFERENCES: Record<EnginePreference, { name: string; descri
   },
   python: {
     name: "Python Only",
-    description: "Deprecated — kept for compatibility",
+    description: "Deprecated - kept for compatibility",
   },
 };
 
@@ -58,17 +82,17 @@ export const DIARIZATION_PROVIDERS: Record<DiarizationProvider, { name: string; 
     description: "No speaker diarization",
     requirements: "None",
   },
+  native: {
+    name: "Native (Rust)",
+    description: "Built-in sherpa-rs diarization",
+    requirements: "No Python required",
+  },
   "sherpa-onnx": {
-    name: "Sherpa-ONNX",
-    description: "Lightweight CPU-friendly diarization",
-    requirements: "No tokens, <2GB RAM, works on CPU (16kHz)",
+    name: "Sherpa-ONNX (legacy alias)",
+    description: "Mapped to native Rust diarization",
+    requirements: "Compatibility mode",
   },
 };
-
-export interface HuggingFaceToken {
-  token: string;
-  createdAt: number;
-}
 
 export interface ArchiveSettings {
   defaultMode: ArchiveMode;

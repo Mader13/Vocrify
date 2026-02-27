@@ -75,10 +75,6 @@ describe("setupStore", () => {
         version: "3.11.9",
         executable: "python",
         inVenv: true,
-        pytorchInstalled: true,
-        pytorchVersion: "2.5.1",
-        cudaAvailable: false,
-        mpsAvailable: false,
         message: "ok",
       },
     });
@@ -215,7 +211,7 @@ describe("setupStore", () => {
     expect(useSetupStore.getState().isComplete).toBe(true);
   });
 
-  it("completeSetup fails when runtime is not ready", async () => {
+  it("completeSetup allows completion when Python is unavailable", async () => {
     mockedCheckPythonEnvironment.mockResolvedValueOnce({
       success: true,
       data: {
@@ -223,10 +219,6 @@ describe("setupStore", () => {
         version: null,
         executable: null,
         inVenv: false,
-        pytorchInstalled: false,
-        pytorchVersion: null,
-        cudaAvailable: false,
-        mpsAvailable: false,
         message: "python missing",
       },
     });
@@ -237,9 +229,9 @@ describe("setupStore", () => {
     await useSetupStore.getState().completeSetup();
 
     const state = useSetupStore.getState();
-    expect(state.isComplete).toBe(false);
-    expect(state.error).toContain("Python check not completed or failed");
-    expect(mockedMarkSetupComplete).not.toHaveBeenCalled();
+    expect(state.isComplete).toBe(true);
+    expect(state.error).toBe(null);
+    expect(mockedMarkSetupComplete).toHaveBeenCalledTimes(1);
   });
 
   it("completeSetup fails when FFmpeg check is not ready", async () => {

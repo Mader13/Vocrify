@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import { MiniPlayer } from "@/components/features/MiniPlayer";
@@ -56,28 +56,18 @@ describe("MiniPlayer", () => {
     expect(screen.getByText("Episode.mp3")).toBeInTheDocument();
   });
 
-  it("dispatches pause event before stopping playback on close", () => {
+  it("clears playback state on close", () => {
     seedPlayingTask();
     useUIStore.setState({
       currentView: "models",
       selectedTaskId: "another-task",
     });
 
-    const pauseListener = vi.fn();
-    window.addEventListener("miniplayer-pause", pauseListener as EventListener);
+    render(<MiniPlayer />);
 
-    try {
-      render(<MiniPlayer />);
+    fireEvent.click(screen.getByTitle("Stop and close"));
 
-      fireEvent.click(screen.getByTitle("Stop and close"));
-
-      expect(pauseListener).toHaveBeenCalledTimes(1);
-      const event = pauseListener.mock.calls[0][0] as CustomEvent<{ taskId: string }>;
-      expect(event.detail.taskId).toBe("task-1");
-      expect(usePlaybackStore.getState().playingTaskId).toBeNull();
-      expect(usePlaybackStore.getState().isPlaying).toBe(false);
-    } finally {
-      window.removeEventListener("miniplayer-pause", pauseListener as EventListener);
-    }
+    expect(usePlaybackStore.getState().playingTaskId).toBeNull();
+    expect(usePlaybackStore.getState().isPlaying).toBe(false);
   });
 });

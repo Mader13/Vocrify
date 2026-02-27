@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TranscriptionOptions } from "@/types";
 import { logger } from "@/lib/logger";
+import { normalizeNumSpeakers } from "@/lib/speaker-utils";
 import type { CommandResult } from "./core";
 
 export async function startTranscription(
@@ -10,14 +11,13 @@ export async function startTranscription(
 ): Promise<CommandResult<void>> {
   logger.transcriptionInfo("Starting transcription", { taskId, fileName: filePath });
 
-  const numSpeakersAsNumber = typeof options.numSpeakers === "string"
-    ? options.numSpeakers === "auto" ? -1 : parseInt(options.numSpeakers, 10)
-    : options.numSpeakers;
+  const numSpeakersAsNumber = normalizeNumSpeakers(options.numSpeakers);
 
   logger.transcriptionDebug("Transcription options", {
     model: options.model,
     device: options.device,
     language: options.language,
+    audioProfile: options.audioProfile,
     enableDiarization: options.enableDiarization,
     diarizationProvider: options.diarizationProvider,
     numSpeakers: options.numSpeakers,
@@ -32,9 +32,10 @@ export async function startTranscription(
         model: options.model,
         device: options.device,
         language: options.language,
-        enable_diarization: options.enableDiarization,
-        diarization_provider: options.diarizationProvider,
-        num_speakers: numSpeakersAsNumber,
+        audioProfile: options.audioProfile,
+        enableDiarization: options.enableDiarization,
+        diarizationProvider: options.diarizationProvider,
+        numSpeakers: numSpeakersAsNumber,
       },
     });
     logger.transcriptionInfo("Transcription started successfully", { taskId });
@@ -91,6 +92,91 @@ export async function checkCudaAvailable(): Promise<CommandResult<boolean>> {
     const available = await invoke<boolean>("check_cuda_available");
     return { success: true, data: available };
   } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+export interface RustTranscriptionResult {
+  segments: Array<{
+    start: number;
+    end: number;
+    text: string;
+    speaker?: string;
+    confidence: number;
+  }>;
+  language: string;
+  duration: number;
+  speakerTurns?: Array<{
+    start: number;
+    end: number;
+    speaker: string;
+  }>;
+  speakerSegments?: Array<{
+    start: number;
+    end: number;
+    text: string;
+    speaker?: string;
+    confidence: number;
+  }>;
+  metrics?: {
+    modelLoadMs?: number;
+    decodeMs?: number;
+    inferenceMs?: number;
+    diarizationMs?: number;
+    totalMs?: number;
+  };
+}
+
+export interface RustTranscriptionOptions {
+  model: string;
+  device: string;
+  language: string;
+  enableDiarization: boolean;
+  diarizationProvider?: string;
+  numSpeakers: number;
+  audioProfile?: string;
+}
+
+export async function loadModelRust(
+  modelName: string,
+): Promise<CommandResult<void>> {
+  logger.transcriptionInfo("Loading model for Rust engine", { modelName });
+  try {
+    await invoke("load_model_rust", { modelName });
+    logger.transcriptionInfo("Model loaded successfully", { modelName });
+    return { success: true };
+  } catch (error) {
+    logger.transcriptionError("Failed to load model", { modelName, error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function transcribeRust(
+  taskId: string,
+  filePath: string,
+  options: RustTranscriptionOptions,
+): Promise<CommandResult<RustTranscriptionResult>> {
+  logger.transcriptionInfo("Calling transcribe_rust", { taskId, model: options.model });
+  try {
+    const result = await invoke<RustTranscriptionResult>("transcribe_rust", {
+      taskId,
+      filePath,
+      options,
+    });
+    return { success: true, data: result };
+  } catch (error) {
+    logger.transcriptionError("transcribe_rust failed", { taskId, error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function initTranscriptionManager(): Promise<CommandResult<void>> {
+  try {
+    await invoke("init_transcription_manager");
+    logger.info("TranscriptionManager initialized successfully");
+    return { success: true };
+  } catch (error) {
+    logger.warn("Failed to initialize TranscriptionManager", { error: String(error) });
     return { success: false, error: String(error) };
   }
 }

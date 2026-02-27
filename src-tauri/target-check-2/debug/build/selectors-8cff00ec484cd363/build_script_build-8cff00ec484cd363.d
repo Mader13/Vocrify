@@ -1,5 +1,0 @@
-E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\selectors-8cff00ec484cd363\build_script_build-8cff00ec484cd363.d: C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\selectors-0.24.0\build.rs
-
-E:\Dev\transcribe-video\src-tauri\target-check-2\debug\build\selectors-8cff00ec484cd363\build_script_build-8cff00ec484cd363.exe: C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\selectors-0.24.0\build.rs
-
-C:\Users\xcom9\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\selectors-0.24.0\build.rs:

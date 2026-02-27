@@ -144,6 +144,16 @@ export async function readFileAsBase64(filePath: string): Promise<CommandResult<
   }
 }
 
+export async function generateWaveformPeaks(filePath: string, targetPeaks: number): Promise<CommandResult<number[]>> {
+  try {
+    const peaks = await invoke<number[]>("generate_waveform_peaks", { filePath, targetPeaks });
+    return { success: true, data: peaks };
+  } catch (error) {
+    logger.error("Failed to generate waveform peaks backend", { filePath, error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
 export async function readFileAsArrayBuffer(filePath: string): Promise<CommandResult<ArrayBuffer>> {
   try {
     // First get as base64, then convert to ArrayBuffer

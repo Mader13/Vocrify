@@ -1,25 +1,21 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Upload, AlertCircle, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout";
-import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer, VideoPlayer, PlayerErrorBoundary } from "@/components/features";
-import { getTaskStatusById, useTasks, useUIStore, useSetupStore, usePlaybackStore } from "@/stores";
-import {
-  subscribeToTranscriptionRuntime,
-  transcribeWithFallback,
-} from "@/services/transcription";
-import { getQueuedTaskIdsToStart } from "@/services/transcription-queue";
-import { collectStaleProcessingTaskIds } from "@/services/transcription-heartbeat";
+import { TranscriptionView, SettingsPanel, ModelsManagement, DiarizationOptionsModal, SetupWizardGuard, ArchiveView, Sidebar, MiniPlayer } from "@/components/features";
+import { getTaskStatusById, useTasks, useUIStore, useSetupStore } from "@/stores";
+import { subscribeToTranscriptionRuntime } from "@/services/transcription";
+import { orchestrator } from "@/services/transcription-orchestrator";
 import { initializeModelsStore, useModelsStore } from "@/stores/modelsStore";
-import { initializeNotifications as initNotificationEmitter, getNotificationEmitter } from "@/services/notifications";
+import { initializeNotifications as initNotificationEmitter, destroyNotifications } from "@/services/notifications";
 import { Button } from "@/components/ui/button";
 import { NotificationProvider } from "@/components/ui/notifications";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
+import { normalizeNumSpeakers } from "@/lib/speaker-utils";
 import type { DiarizationProvider, AIModel, DeviceType, Language } from "@/types";
 import type { FileWithSettings } from "@/components/features/DiarizationOptionsModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { useModelValidation, useDropZone } from "@/hooks";
-import { hasBlockingTasksForModel } from "@/stores/utils/model-deletion";
+import { useModelValidation, useDropZone, useI18n } from "@/hooks";
 import "./index.css";
 
 interface SelectedFile {
@@ -28,73 +24,22 @@ interface SelectedFile {
   size: number;
 }
 
-/**
- * BackgroundPlayer keeps the audio/video element alive (in the DOM) when the user
- * navigates away from the playing task's page. Without this, the media element
- * is unmounted and audio stops. This hidden player maintains playback so MiniPlayer
- * controls (play/pause) still work across navigation.
- */
-function BackgroundPlayer() {
-  const playingTaskId = usePlaybackStore((s) => s.playingTaskId);
-  const selectedTaskId = useUIStore((s) => s.selectedTaskId);
-  const currentView = useUIStore((s) => s.currentView);
-  const tasks = useTasks((s) => s.tasks);
-
-  const isPlayingTaskVisible = currentView === "transcription" && selectedTaskId === playingTaskId;
-
-  // Render whenever the currently playing task is not visible on screen.
-  // This includes non-transcription views where selectedTaskId can still
-  // temporarily point at the playing task during view transitions.
-  const shouldRender = playingTaskId !== null && !isPlayingTaskVisible;
-  const task = shouldRender
-    ? tasks.find((t) => t.id === playingTaskId && t.status === "completed")
-    : undefined;
-
-  if (!task) return null;
-
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: "fixed",
-        // opacity:0 (not visibility:hidden) keeps the element geometrically
-        // present so IntersectionObserver fires and WaveSurfer initializes.
-        // audio/video playback continues normally while invisible to the user.
-        opacity: 0,
-        pointerEvents: "none",
-        // Give enough width so WaveSurfer can measure its container
-        width: "300px",
-        height: "100px",
-        zIndex: -1,
-        top: 0,
-        left: 0,
-        overflow: "hidden",
-      }}
-    >
-      <PlayerErrorBoundary>
-        <VideoPlayer
-          task={task}
-          colorMode="segments"
-          isVideoVisible
-        />
-      </PlayerErrorBoundary>
-    </div>
-  );
+interface LoadingScreenProps {
+  message: string;
 }
 
-function LoadingScreen() {
+function LoadingScreen({ message }: LoadingScreenProps) {
   return (
     <div className="flex h-screen items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-sm text-muted-foreground">Checking status...</p>
+        <p className="text-sm text-muted-foreground">{message}</p>
       </div>
     </div>
   );
 }
 
 function MainApplication() {
-  const tasks = useTasks((s) => s.tasks);
   const updateTaskProgress = useTasks((s) => s.updateTaskProgress);
   const updateTaskStatus = useTasks((s) => s.updateTaskStatus);
   const appendTaskSegment = useTasks((s) => s.appendTaskSegment);
@@ -107,19 +52,31 @@ function MainApplication() {
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
 
   const { validateModelSelection, modelError, setModelError, selectedModel } = useModelValidation();
-  const { availableModels, loadModels, pendingModelDeletions, reconcilePendingModelDeletions } = useModelsStore();
+  const { t, locale } = useI18n();
+  const { availableModels, loadModels } = useModelsStore();
   const {
     defaultDevice,
     defaultLanguage,
     diarizationProvider,
-    enginePreference,
     enableDiarization,
-    maxConcurrentTasks,
+    theme,
   } = useTasks((s) => s.settings);
 
   const [pendingFiles, setPendingFiles] = useState<SelectedFile[]>([]);
   const [isDiarizationModalOpen, setIsDiarizationModalOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove("light", "dark");
+    if (theme !== "system") {
+      root.classList.add(theme);
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    window.document.documentElement.lang = locale;
+  }, [locale]);
 
   const handleFilesDropped = useCallback((files: SelectedFile[]) => {
     setPendingFiles((prev) => [...prev, ...files]);
@@ -194,88 +151,19 @@ function MainApplication() {
       unlistenRuntime?.();
       // Clean up NotificationEmitter to prevent duplicate event handlers
       try {
-        const emitter = getNotificationEmitter();
         logger.info("Cleaning up NotificationEmitter in useEffect");
-        emitter.destroy();
+        destroyNotifications();
       } catch (error) {
         logger.error("Failed to destroy NotificationEmitter", { error });
       }
     };
   }, [updateTaskProgress, updateTaskStatus, appendTaskSegment, appendStreamingSegment]);
 
+  // Orchestrator handles: task queue processing, stale detection, pending deletion reconciliation
   useEffect(() => {
-    const STALE_THRESHOLD_MS = 2 * 60 * 1000;
-    const CHECK_INTERVAL_MS = 30 * 1000;
-
-    const checkStaleTasks = () => {
-      const now = Date.now();
-      const tasks = useTasks.getState().tasks;
-      const staleTaskIds = collectStaleProcessingTaskIds(tasks, now, STALE_THRESHOLD_MS);
-
-      staleTaskIds.forEach((taskId) => {
-        const task = tasks.find((item) => item.id === taskId);
-        const timeSinceLastUpdate = task?.lastProgressUpdate ? now - task.lastProgressUpdate : undefined;
-
-        logger.transcriptionWarn("Marking task as interrupted - no progress updates received", {
-          taskId,
-          timeSinceLastUpdate,
-        });
-        updateTaskStatus(taskId, "interrupted", undefined, "Transcription was interrupted: no progress received from backend. The task may have failed or been terminated.");
-      });
-    };
-
-    const intervalId = setInterval(checkStaleTasks, CHECK_INTERVAL_MS);
-    checkStaleTasks();
-
-    return () => clearInterval(intervalId);
-  }, [updateTaskStatus]);
-
-  useEffect(() => {
-    const pendingModels = Object.keys(pendingModelDeletions);
-    if (pendingModels.length === 0) {
-      return;
-    }
-
-    const hasReadyDeletion = pendingModels.some((modelName) => !hasBlockingTasksForModel(tasks, modelName));
-    if (!hasReadyDeletion) {
-      return;
-    }
-
-    void reconcilePendingModelDeletions();
-  }, [tasks, pendingModelDeletions, reconcilePendingModelDeletions]);
-
-  useEffect(() => {
-    const processedTasks = new Set<string>();
-    const startTaskIds = new Set(getQueuedTaskIdsToStart(tasks, maxConcurrentTasks));
-
-    logger.transcriptionDebug("Processing tasks", { total: tasks.length });
-    tasks.forEach((task) => {
-      logger.transcriptionDebug("Task status", { taskId: task.id, status: task.status });
-      if (task.status === "queued" && startTaskIds.has(task.id) && !processedTasks.has(task.id) && task.filePath) {
-        if (useModelsStore.getState().isModelPendingDeletion(task.options.model)) {
-          logger.transcriptionWarn("Skipping queued task: model scheduled for deletion", {
-            taskId: task.id,
-            modelName: task.options.model,
-          });
-          updateTaskStatus(
-            task.id,
-            "failed",
-            undefined,
-            `Model "${task.options.model}" is scheduled for deletion and cannot start new transcription tasks.`,
-          );
-          return;
-        }
-
-        logger.transcriptionInfo("Starting task", { taskId: task.id, fileName: task.filePath });
-        processedTasks.add(task.id);
-        updateTaskStatus(task.id, "processing");
-        transcribeWithFallback(task.id, task.filePath, task.options, enginePreference).catch((error) => {
-          logger.transcriptionError("Task failed", { taskId: task.id, error });
-          updateTaskStatus(task.id, "failed", undefined, error.message);
-        });
-      }
-    });
-  }, [tasks, updateTaskStatus, enginePreference, maxConcurrentTasks]);
+    orchestrator.start();
+    return () => orchestrator.stop();
+  }, []);
 
   const handleFilesFromDialog = useCallback((files: Array<{ path: string; name: string; size: number }>) => {
     if (!validateModelSelection()) {
@@ -294,7 +182,7 @@ function MainApplication() {
       (m) => m.name === "sherpa-onnx-diarization" && m.installed
     );
     if (sherpaInstalled) {
-      providers.push("sherpa-onnx");
+      providers.push("native");
     }
 
     return providers;
@@ -308,7 +196,7 @@ function MainApplication() {
       if (!diarizationProvider || diarizationProvider === "none") {
         return {
           valid: false,
-          error: "Diarization requires the Sherpa-ONNX diarization model to be installed."
+          error: t("app.invalidDiarizationMessage")
         };
       }
     }
@@ -327,8 +215,8 @@ function MainApplication() {
       if (!validation.valid) {
         setModelError({
           open: true,
-          title: "Invalid Diarization Configuration",
-          message: validation.error || "Unknown error"
+          title: t("app.invalidDiarizationTitle"),
+          message: validation.error || t("app.invalidDiarizationMessage")
         });
         logger.transcriptionError("Diarization validation failed", {
           fileName: file.name,
@@ -341,7 +229,7 @@ function MainApplication() {
     // Save settings if rememberChoice is true
     if (rememberChoice && filesWithSettings.length > 0) {
       const firstFile = filesWithSettings[0];
-      const numSpeakersValue = firstFile.numSpeakers === "auto" ? 2 : firstFile.numSpeakers;
+      const numSpeakersValue = normalizeNumSpeakers(firstFile.numSpeakers);
       logger.info("Saving diarization settings", {
         enableDiarization: firstFile.enableDiarization,
         provider: firstFile.diarizationProvider,
@@ -368,10 +256,11 @@ function MainApplication() {
       await addTask(file.path, file.name, file.size, {
         model: selectedModel as AIModel,
         device: defaultDevice as DeviceType,
-        language: defaultLanguage as Language,
+        language: (file.language ?? defaultLanguage) as Language,
         enableDiarization: file.enableDiarization,
         diarizationProvider: (file.enableDiarization ? file.diarizationProvider : "none") as DiarizationProvider,
-        numSpeakers: file.numSpeakers === "auto" ? -1 : file.numSpeakers,
+        numSpeakers: normalizeNumSpeakers(file.numSpeakers),
+        audioProfile: file.audioProfile,
       });
     }
 
@@ -383,24 +272,23 @@ function MainApplication() {
     <div className="flex h-screen flex-col bg-background">
       <Header />
       <MiniPlayer />
-      <BackgroundPlayer />
 
       <main
         ref={mainRef}
         className={cn(
-          "relative flex flex-1 flex-col overflow-hidden lg:flex-row",
+          "relative flex flex-1 flex-col lg:flex-row pt-22 px-4 pb-4 gap-4 overflow-hidden",
           isDraggingGlobal && "cursor-copy"
         )}
         {...dragHandlers}
       >
         {isDraggingGlobal && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 pointer-events-none">
-            <div className="bg-background/90 backdrop-blur-sm rounded-2xl border-2 border-dashed border-primary p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-primary/10 pointer-events-none rounded-2xl mx-4 mb-4">
+            <div className="bg-background/90 backdrop-blur-sm rounded-3xl border-2 border-dashed border-primary p-8 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
               <div className="flex flex-col items-center gap-4">
                 <div className="rounded-full bg-primary/10 p-4">
                   <Upload className="h-12 w-12 text-primary" />
                 </div>
-                <p className="text-lg font-medium text-primary">Drop files to add to queue</p>
+                <p className="text-lg font-medium text-primary">{t("app.dropOverlay")}</p>
               </div>
             </div>
           </div>
@@ -408,7 +296,7 @@ function MainApplication() {
 
         <Sidebar onFilesSelected={handleFilesFromDialog} />
 
-        <div className="min-h-0 flex-1 overflow-hidden p-4">
+        <div className="min-h-0 flex-1 overflow-hidden bg-background/60 backdrop-blur-xl border border-border/50 rounded-2xl lg:rounded-3xl shadow-2xl flex flex-col p-4 relative z-0">
           {mainContent}
         </div>
       </main>
@@ -426,6 +314,7 @@ function MainApplication() {
         availableDiarizationProviders={availableDiarizationProviders}
         lastUsedProvider={diarizationProvider as DiarizationProvider}
         lastUsedEnableDiarization={enableDiarization}
+        defaultLanguage={defaultLanguage as Language}
       />
 
       <Dialog open={modelError.open} onOpenChange={(open) => setModelError({ ...modelError, open })}>
@@ -443,7 +332,7 @@ function MainApplication() {
           </div>
           <DialogFooter>
             <Button onClick={() => setModelError({ ...modelError, open: false })}>
-              OK
+              {t("common.ok")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -455,6 +344,7 @@ function MainApplication() {
 function App() {
   const { initialize } = useSetupStore();
   const [isInitialized, setIsInitialized] = useState(false);
+  const { t } = useI18n();
 
   useEffect(() => {
     let mounted = true;
@@ -470,7 +360,7 @@ function App() {
   }, []);
 
   if (!isInitialized) {
-    return <LoadingScreen />;
+    return <LoadingScreen message={t("app.loadingStatus")} />;
   }
 
   return (

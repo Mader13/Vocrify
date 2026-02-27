@@ -1,4 +1,4 @@
-import { Settings2, HardDrive, AlertTriangle, Heart, Sun, Moon, Monitor } from "lucide-react";
+import { Settings2, HardDrive, AlertTriangle, Heart, Sun, Moon, Monitor, BadgeInfo } from "lucide-react";
 import { motion, LayoutGroup } from "framer-motion";
 import { DialogHeader, DialogTitle, DialogDescription, Select } from "@/components/ui";
 import { useTasks } from "@/stores";
@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/hooks";
 import { APP_LOCALE_NAMES, type AppLocale } from "@/types";
 
-export type TabId = "transcription" | "system" | "advanced" | "acknowledgments";
+export type TabId = "transcription" | "system" | "advanced" | "acknowledgments" | "about";
 
 const THEMES = ["light", "dark", "system"] as const;
 type Theme = (typeof THEMES)[number];
@@ -35,6 +35,7 @@ export function SettingsNav({ activeTab, onTabChange }: SettingsNavProps) {
     { id: "transcription", label: t("settings.navTranscription"), Icon: Settings2 },
     { id: "system", label: t("settings.navSystem"), Icon: HardDrive },
     { id: "advanced", label: t("settings.navAdvanced"), Icon: AlertTriangle },
+    { id: "about", label: t("settings.navAbout"), Icon: BadgeInfo },
     { id: "acknowledgments", label: t("settings.navAcknowledgments"), Icon: Heart },
   ];
 

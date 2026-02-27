@@ -5,10 +5,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::process::Command as StdCommand;
+use std::process::Stdio;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
-use std::process::Command as StdCommand;
 
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
@@ -20,34 +21,32 @@ const SUPPORTED_SYSTEM_PYTHON: &[(u32, u32)] = &[(3, 10), (3, 11), (3, 12)];
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TorchInstallTarget {
+/// Target for PyTorch installation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TorchInstallTarget {
     Cuda,
-    Mps,
     Cpu,
 }
 
-impl TorchInstallTarget {
-    fn label(self) -> &'static str {
-        match self {
-            TorchInstallTarget::Cuda => "CUDA",
-            TorchInstallTarget::Mps => "MPS",
-            TorchInstallTarget::Cpu => "CPU",
-        }
-    }
-}
-
-fn should_install_or_upgrade_torch(
+/// Returns true if torch should be installed or upgraded for the given target.
+///
+/// - `torch_installed`: whether any version of torch is currently installed
+/// - `has_cuda_build`: whether the currently installed torch is a CUDA build
+pub fn should_install_or_upgrade_torch(
     target: TorchInstallTarget,
     torch_installed: bool,
-    torch_has_cuda_build: bool,
+    has_cuda_build: bool,
 ) -> bool {
-    if !torch_installed {
-        return true;
+    match target {
+        TorchInstallTarget::Cuda => {
+            // Need to install/upgrade when torch is missing or the existing build lacks CUDA
+            !torch_installed || !has_cuda_build
+        }
+        TorchInstallTarget::Cpu => {
+            // For CPU-only we only install when torch is missing; no upgrade needed
+            !torch_installed
+        }
     }
-
-    matches!(target, TorchInstallTarget::Cuda) && !torch_has_cuda_build
 }
 
 #[allow(dead_code)]
@@ -55,13 +54,20 @@ fn should_install_or_upgrade_torch(
 pub fn create_hidden_command(program: &(impl AsRef<std::path::Path> + ?Sized)) -> Command {
     let mut cmd = Command::new(program.as_ref());
     cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
     cmd
 }
 
 #[allow(dead_code)]
 #[cfg(not(target_os = "windows"))]
 pub fn create_hidden_command(program: &(impl AsRef<std::path::Path> + ?Sized)) -> Command {
-    Command::new(program.as_ref())
+    let mut cmd = Command::new(program.as_ref());
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
+    cmd
 }
 
 #[allow(dead_code)]
@@ -69,13 +75,20 @@ pub fn create_hidden_command(program: &(impl AsRef<std::path::Path> + ?Sized)) -
 pub fn create_hidden_std_command(program: &(impl AsRef<std::path::Path> + ?Sized)) -> StdCommand {
     let mut cmd = StdCommand::new(program.as_ref());
     cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
     cmd
 }
 
 #[allow(dead_code)]
 #[cfg(not(target_os = "windows"))]
 pub fn create_hidden_std_command(program: &(impl AsRef<std::path::Path> + ?Sized)) -> StdCommand {
-    StdCommand::new(program.as_ref())
+    let mut cmd = StdCommand::new(program.as_ref());
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
+    cmd
 }
 
 fn parse_python_major_minor(version_text: &str) -> Option<(u32, u32)> {
@@ -116,7 +129,7 @@ pub enum InstallStage {
     DownloadingPython,
     ExtractingPython,
     InstallingPip,
-    InstallingPytorch,
+    InstallingDownloadDependencies,
     InstallingDependencies,
     Complete,
     Error,
@@ -164,7 +177,8 @@ impl PythonInstaller {
         };
         *self.progress.lock().unwrap() = progress.clone();
         let _ = self.app.emit("python-install-progress", &progress);
-        eprintln!("[PYTHON INSTALLER] {}: {}% - {}",
+        eprintln!(
+            "[PYTHON INSTALLER] {}: {}% - {}",
             format!("{:?}", stage),
             percent as i32,
             message
@@ -191,11 +205,12 @@ impl PythonInstaller {
 
     /// Get the Python installation directory
     fn get_python_dir(&self) -> PathBuf {
-        let app_data = self.app.path().app_data_dir()
-            .unwrap_or_else(|_| {
-                self.app.path().resource_dir()
-                    .unwrap_or_else(|_| PathBuf::from("."))
-            });
+        let app_data = self.app.path().app_data_dir().unwrap_or_else(|_| {
+            self.app
+                .path()
+                .resource_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+        });
         app_data.join("ai-engine").join("python")
     }
 
@@ -234,6 +249,7 @@ impl PythonInstaller {
         }
     }
 
+    #[allow(dead_code)]
     async fn python_code_succeeds(&self, code: &str) -> bool {
         let python_exe = self.get_python_exe();
         if !python_exe.exists() {
@@ -249,212 +265,6 @@ impl PythonInstaller {
             Ok(output) => output.status.success(),
             Err(_) => false,
         }
-    }
-
-    async fn python_torch_has_cuda_build(&self) -> bool {
-        self.python_code_succeeds(
-            "import torch,sys; sys.exit(0 if getattr(getattr(torch,'version',None),'cuda',None) else 1)",
-        )
-        .await
-    }
-
-    async fn system_python_torch_has_cuda_build(&self, python_cmd: &str) -> bool {
-        match create_hidden_command(python_cmd)
-            .arg("-c")
-            .arg("import torch,sys; sys.exit(0 if getattr(getattr(torch,'version',None),'cuda',None) else 1)")
-            .output()
-            .await
-        {
-            Ok(output) => output.status.success(),
-            Err(_) => false,
-        }
-    }
-
-    fn nvidia_smi_candidates() -> Vec<PathBuf> {
-        let mut candidates = vec![PathBuf::from("nvidia-smi")];
-
-        #[cfg(target_os = "windows")]
-        {
-            // Check NVIDIA_NVSMI_PATH env var first (set by some NVIDIA driver installs)
-            if let Ok(nvsmi_path) = std::env::var("NVIDIA_NVSMI_PATH") {
-                candidates.push(PathBuf::from(&nvsmi_path).join("nvidia-smi.exe"));
-                candidates.push(PathBuf::from(nvsmi_path));
-            }
-
-            if let Ok(program_files) = std::env::var("ProgramFiles") {
-                candidates.push(
-                    PathBuf::from(&program_files)
-                        .join("NVIDIA Corporation")
-                        .join("NVSMI")
-                        .join("nvidia-smi.exe"),
-                );
-            }
-
-            if let Ok(program_files_x86) = std::env::var("ProgramFiles(x86)") {
-                candidates.push(
-                    PathBuf::from(program_files_x86)
-                        .join("NVIDIA Corporation")
-                        .join("NVSMI")
-                        .join("nvidia-smi.exe"),
-                );
-            }
-
-            candidates.push(
-                PathBuf::from("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"),
-            );
-            // Modern NVIDIA drivers install nvidia-smi.exe directly to System32
-            candidates.push(PathBuf::from("C:\\Windows\\System32\\nvidia-smi.exe"));
-            // Some driver versions use SysWOW64
-            candidates.push(PathBuf::from("C:\\Windows\\SysWOW64\\nvidia-smi.exe"));
-        }
-
-        candidates
-    }
-
-    /// Check for nvcuda.dll — present on any system with NVIDIA CUDA-capable driver
-    #[cfg(target_os = "windows")]
-    fn has_nvcuda_dll() -> bool {
-        let candidates = [
-            "C:\\Windows\\System32\\nvcuda.dll",
-            "C:\\Windows\\SysWOW64\\nvcuda.dll",
-        ];
-        candidates.iter().any(|p| std::path::Path::new(p).exists())
-    }
-
-    /// PowerShell-based GPU detection (works on Windows 11 where wmic is deprecated)
-    #[cfg(target_os = "windows")]
-    async fn has_nvidia_gpu_via_powershell(&self) -> bool {
-        let script = "Get-WmiObject Win32_VideoController | \
-            Select-Object -ExpandProperty Name | \
-            Where-Object { $_ -match 'NVIDIA' }";
-
-        let output = create_hidden_command("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .output()
-            .await;
-
-        if let Ok(output) = output {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if !stdout.trim().is_empty() {
-                    eprintln!(
-                        "[PYTHON INSTALLER] NVIDIA GPU detected via PowerShell: {}",
-                        stdout.trim()
-                    );
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    async fn has_nvidia_gpu(&self) -> bool {
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        {
-            for candidate in Self::nvidia_smi_candidates() {
-                let output = create_hidden_command(&candidate)
-                    .arg("--query-gpu=name")
-                    .arg("--format=csv,noheader")
-                    .output()
-                    .await;
-
-                if let Ok(output) = output {
-                    if output.status.success() {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        if !stdout.trim().is_empty() {
-                            eprintln!(
-                                "[PYTHON INSTALLER] NVIDIA GPU detected via {:?}",
-                                candidate
-                            );
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            // nvcuda.dll check — lightweight, no process spawn (Windows only)
-            #[cfg(target_os = "windows")]
-            if Self::has_nvcuda_dll() {
-                eprintln!("[PYTHON INSTALLER] NVIDIA GPU detected via nvcuda.dll presence");
-                return true;
-            }
-
-            // wmic fallback — deprecated in Windows 11 22H2+, try anyway
-            if let Ok(output) = create_hidden_command("wmic")
-                .arg("path")
-                .arg("win32_VideoController")
-                .arg("get")
-                .arg("name")
-                .output()
-                .await
-            {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let lowered = stdout.to_lowercase();
-                    if lowered.contains("nvidia") {
-                        eprintln!("[PYTHON INSTALLER] NVIDIA GPU detected via WMIC fallback");
-                        return true;
-                    }
-                }
-            }
-
-            // PowerShell fallback — always available on Windows 10/11 (Windows only)
-            #[cfg(target_os = "windows")]
-            if self.has_nvidia_gpu_via_powershell().await {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    async fn detect_torch_install_target(&self) -> TorchInstallTarget {
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        {
-            return TorchInstallTarget::Mps;
-        }
-
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        {
-            if self.has_nvidia_gpu().await {
-                return TorchInstallTarget::Cuda;
-            }
-        }
-
-        TorchInstallTarget::Cpu
-    }
-
-    /// Build pip install args for PyTorch.
-    ///
-    /// `is_upgrade`: when true (replacing CPU→CUDA), adds `--force-reinstall` so pip
-    /// actually replaces the existing wheels. For fresh installs this flag is omitted
-    /// to avoid the overhead of redownloading when nothing is installed yet.
-    ///
-    /// NOTE: for CUDA we only pass `--index-url` (PyTorch WHL index already contains
-    /// torchvision/torchaudio CUDA builds). Adding `--extra-index-url pypi.org/simple`
-    /// is unnecessary and can cause pip to pick CPU wheels from PyPI over CUDA ones.
-    fn torch_install_args(&self, target: TorchInstallTarget, is_upgrade: bool) -> Vec<String> {
-        let mut args = vec![
-            "install".to_string(),
-            "--no-warn-script-location".to_string(),
-        ];
-
-        if is_upgrade {
-            // Force pip to replace existing CPU wheels with CUDA wheels.
-            args.push("--upgrade".to_string());
-            args.push("--force-reinstall".to_string());
-            args.push("--no-cache-dir".to_string());
-        }
-
-        args.extend(["torch".to_string(), "torchvision".to_string(), "torchaudio".to_string()]);
-
-        if target == TorchInstallTarget::Cuda {
-            args.push("--index-url".to_string());
-            args.push("https://download.pytorch.org/whl/cu121".to_string());
-        }
-
-        args
     }
 
     fn enable_embeddable_site(&self, python_dir: &Path) -> Result<(), String> {
@@ -500,15 +310,9 @@ impl PythonInstaller {
     /// Check if system Python is available and has torch
     pub async fn check_system_python(&self) -> Result<Option<PathBuf>, String> {
         self.emit_progress(InstallStage::Checking, 0.0, "Проверка системы...");
-        let target = self.detect_torch_install_target().await;
 
         // Try to find system Python
-        let python_candidates = vec![
-            "python",
-            "python3",
-            "python12",
-            "py",
-        ];
+        let python_candidates = vec!["python", "python3", "python12", "py"];
 
         for python_cmd in python_candidates {
             let result = create_hidden_command(python_cmd)
@@ -523,8 +327,7 @@ impl PythonInstaller {
                     let version_str = format!("{} {}", stdout.trim(), stderr.trim());
                     eprintln!(
                         "[PYTHON INSTALLER] Found system Python ({}): {}",
-                        python_cmd,
-                        version_str
+                        python_cmd, version_str
                     );
 
                     if !is_supported_system_python_version(&version_str) {
@@ -535,33 +338,7 @@ impl PythonInstaller {
                         continue;
                     }
 
-                    // Check if torch is available
-                    let torch_check = create_hidden_command(python_cmd)
-                        .arg("-c")
-                        .arg("import torch; print(torch.__version__)")
-                        .output()
-                        .await;
-
-                    if let Ok(torch_output) = torch_check {
-                        if torch_output.status.success() {
-                            let torch_version = String::from_utf8_lossy(&torch_output.stdout);
-                            if matches!(target, TorchInstallTarget::Cuda)
-                                && !self.system_python_torch_has_cuda_build(python_cmd).await
-                            {
-                                eprintln!(
-                                    "[PYTHON INSTALLER] System Python torch is CPU-only, skipping for CUDA target: {}",
-                                    python_cmd
-                                );
-                                continue;
-                            }
-
-                            eprintln!(
-                                "[PYTHON INSTALLER] System Python has torch: {}",
-                                torch_version
-                            );
-                            return Ok(Some(PathBuf::from(python_cmd)));
-                        }
-                    }
+                    return Ok(Some(PathBuf::from(python_cmd)));
                 }
             }
         }
@@ -592,31 +369,11 @@ impl PythonInstaller {
             }
 
             if !self.python_has_module("pip").await {
-                return Err(
-                    "Python is installed, but pip is unavailable after repair".to_string(),
-                );
+                return Err("Python is installed, but pip is unavailable after repair".to_string());
             }
 
-            let target = self.detect_torch_install_target().await;
-            let torch_installed = self.python_has_module("torch").await;
-            let torch_has_cuda_build = if torch_installed {
-                self.python_torch_has_cuda_build().await
-            } else {
-                false
-            };
-
-            if should_install_or_upgrade_torch(target, torch_installed, torch_has_cuda_build) {
-                // is_upgrade = torch was already installed but wrong build (CPU→CUDA)
-                let is_upgrade = torch_installed;
-                if is_upgrade {
-                    self.emit_progress(
-                        InstallStage::InstallingPytorch,
-                        64.0,
-                        "Detected CPU-only PyTorch on NVIDIA system, upgrading to CUDA build...",
-                    );
-                }
-                self.install_pytorch(&python_dir, is_upgrade).await?;
-            }
+            self.install_download_dependencies(&self.get_python_exe())
+                .await?;
 
             self.install_dependencies(&python_dir).await?;
             self.emit_progress(InstallStage::Complete, 100.0, "Python environment is ready");
@@ -625,9 +382,14 @@ impl PythonInstaller {
 
         // Check system Python first
         if let Ok(Some(system_python)) = self.check_system_python().await {
-            // Still install ai-engine dependencies into the system Python env
-            self.install_dependencies_for(&system_python, &python_dir).await?;
-            self.emit_progress(InstallStage::Complete, 100.0, "Используется системный Python");
+            self.install_download_dependencies(&system_python).await?;
+            self.install_dependencies_for(&system_python, &python_dir)
+                .await?;
+            self.emit_progress(
+                InstallStage::Complete,
+                100.0,
+                "Используется системный Python",
+            );
             return Ok(());
         }
 
@@ -637,29 +399,39 @@ impl PythonInstaller {
         // Install pip
         self.install_pip(&python_dir).await?;
 
-        // Install PyTorch (fresh install — no force-reinstall needed)
-        self.install_pytorch(&python_dir, false).await?;
+        // Install download dependencies
+        self.install_download_dependencies(&self.get_python_exe())
+            .await?;
 
         // Install dependencies
-        self.install_dependencies_for(&self.get_python_exe(), &python_dir).await?;
+        self.install_dependencies_for(&self.get_python_exe(), &python_dir)
+            .await?;
 
         self.emit_progress(InstallStage::Complete, 100.0, "Установка завершена");
         Ok(())
     }
 
     async fn install_embeddable_python(&self, python_dir: &PathBuf) -> Result<(), String> {
-        self.emit_progress(InstallStage::DownloadingPython, 10.0, "Скачивание Python...");
+        self.emit_progress(
+            InstallStage::DownloadingPython,
+            10.0,
+            "Скачивание Python...",
+        );
 
         // Determine URL based on platform
         let url = if cfg!(target_os = "windows") {
-            format!("https://www.python.org/ftp/python/{}/python-{}-embed-amd64.zip", 
-                PYTHON_VERSION, PYTHON_VERSION)
+            format!(
+                "https://www.python.org/ftp/python/{}/python-{}-embed-amd64.zip",
+                PYTHON_VERSION, PYTHON_VERSION
+            )
         } else if cfg!(target_os = "macos") {
             // For macOS, we'll use system Python or Homebrew
             // Embeddable macOS is not commonly available
             return Err("macOS требует установки Python через Homebrew или системы".to_string());
         } else {
-            return Err("Linux требует установки Python через системный пакетный менеджер".to_string());
+            return Err(
+                "Linux требует установки Python через системный пакетный менеджер".to_string(),
+            );
         };
 
         eprintln!("[PYTHON INSTALLER] Downloading from: {}", url);
@@ -670,19 +442,27 @@ impl PythonInstaller {
             .build()
             .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-        let response = client.get(&url)
+        let response = client
+            .get(&url)
             .send()
             .await
             .map_err(|e| format!("Failed to download: {}", e))?;
 
         if !response.status().is_success() {
-            return Err(format!("Download failed with status: {}", response.status()));
+            return Err(format!(
+                "Download failed with status: {}",
+                response.status()
+            ));
         }
 
         let total_size = response.content_length().unwrap_or(0);
-        eprintln!("[PYTHON INSTALLER] Download size: {} MB", total_size / 1024 / 1024);
+        eprintln!(
+            "[PYTHON INSTALLER] Download size: {} MB",
+            total_size / 1024 / 1024
+        );
 
-        let bytes = response.bytes()
+        let bytes = response
+            .bytes()
             .await
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
@@ -700,11 +480,12 @@ impl PythonInstaller {
         // Extract zip
         let zip_file = std::fs::File::open(&archive_path)
             .map_err(|e| format!("Failed to open archive: {}", e))?;
-        let mut archive = zip::ZipArchive::new(zip_file)
-            .map_err(|e| format!("Failed to read zip: {}", e))?;
+        let mut archive =
+            zip::ZipArchive::new(zip_file).map_err(|e| format!("Failed to read zip: {}", e))?;
 
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i)
+            let mut file = archive
+                .by_index(i)
                 .map_err(|e| format!("Failed to read zip entry: {}", e))?;
             let outpath = python_dir.join(file.mangled_name());
 
@@ -749,12 +530,14 @@ impl PythonInstaller {
             .build()
             .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-        let response = client.get(GET_PIP_URL)
+        let response = client
+            .get(GET_PIP_URL)
             .send()
             .await
             .map_err(|e| format!("Failed to download get-pip.py: {}", e))?;
 
-        let get_pip_content = response.bytes()
+        let get_pip_content = response
+            .bytes()
             .await
             .map_err(|e| format!("Failed to read get-pip.py: {}", e))?;
 
@@ -788,10 +571,7 @@ impl PythonInstaller {
 
             if !ensure_output.status.success() {
                 let ensure_stderr = String::from_utf8_lossy(&ensure_output.stderr);
-                eprintln!(
-                    "[PYTHON INSTALLER] ensurepip stderr: {}",
-                    ensure_stderr
-                );
+                eprintln!("[PYTHON INSTALLER] ensurepip stderr: {}", ensure_stderr);
                 return Err(format!(
                     "Failed to install pip (get-pip + ensurepip). get-pip: {} | ensurepip: {}",
                     stderr.trim(),
@@ -800,137 +580,29 @@ impl PythonInstaller {
             }
         }
         if !self.python_has_module("pip").await {
-            return Err("pip installation completed, but module 'pip' is still unavailable".to_string());
+            return Err(
+                "pip installation completed, but module 'pip' is still unavailable".to_string(),
+            );
         }
 
         self.emit_progress(InstallStage::InstallingPip, 60.0, "pip установлен");
         Ok(())
     }
 
-    async fn install_pytorch(&self, _python_dir: &PathBuf, is_upgrade: bool) -> Result<(), String> {
-        self.emit_progress(InstallStage::InstallingPytorch, 65.0, "Installing PyTorch...");
-
-        let python_exe = self.get_python_exe();
-        if !self.python_has_module("pip").await {
-            self.emit_progress(
-                InstallStage::InstallingPip,
-                62.0,
-                "pip missing before PyTorch install, repairing...",
-            );
-            self.install_pip(&self.get_python_dir()).await?;
-        }
-
-        // First, upgrade pip
-        let output = create_hidden_command(&python_exe)
-            .arg("-m")
-            .arg("pip")
-            .arg("install")
-            .arg("--upgrade")
-            .arg("pip")
-            .arg("--no-warn-script-location")
-            .output()
-            .await
-            .map_err(|e| format!("Failed to upgrade pip: {}", e))?;
-
-        if !output.status.success() {
-            eprintln!(
-                "[PYTHON INSTALLER] pip upgrade warning: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        // Flexible target selection:
-        // - NVIDIA GPU => CUDA wheels
-        // - Apple Silicon => standard wheels (MPS runtime)
-        // - AMD/Intel/no GPU => CPU wheels
-        let target = self.detect_torch_install_target().await;
-        let target_message = format!(
-            "Installing PyTorch for {} (this can take a while)...",
-            target.label()
-        );
-        self.emit_progress(InstallStage::InstallingPytorch, 70.0, &target_message);
-
-        let mut args = self.torch_install_args(target, is_upgrade);
-        let mut output = create_hidden_command(&python_exe)
-            .arg("-m")
-            .arg("pip")
-            .args(&args)
-            .output()
-            .await
-            .map_err(|e| format!("Failed to install PyTorch: {}", e))?;
-
-        let mut first_error: Option<String> = None;
-        if !output.status.success() && target == TorchInstallTarget::Cuda {
-            let cuda_stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            first_error = Some(cuda_stderr.clone());
-            eprintln!(
-                "[PYTHON INSTALLER] CUDA PyTorch install failed, falling back to CPU: {}",
-                cuda_stderr
-            );
-
-            self.emit_progress(
-                InstallStage::InstallingPytorch,
-                74.0,
-                "CUDA install failed, falling back to CPU build...",
-            );
-
-            args = self.torch_install_args(TorchInstallTarget::Cpu, is_upgrade);
-            output = create_hidden_command(&python_exe)
-                .arg("-m")
-                .arg("pip")
-                .args(&args)
-                .output()
-                .await
-                .map_err(|e| format!("Failed to install CPU PyTorch fallback: {}", e))?;
-        }
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[PYTHON INSTALLER] PyTorch install stderr: {}", stderr);
-            if let Some(first) = first_error {
-                return Err(format!(
-                    "Failed to install PyTorch (CUDA attempt + fallback). CUDA error: {} | Final error: {}",
-                    first.trim(),
-                    stderr.trim()
-                ));
-            }
-            return Err(format!("Failed to install PyTorch: {}", stderr));
-        }
-
-        let cuda_available = self
-            .python_code_succeeds("import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)")
-            .await;
-        let mps_available = self
-            .python_code_succeeds(
-                "import torch,sys; sys.exit(0 if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() else 1)",
-            )
-            .await;
-
-        let effective_backend = if cuda_available {
-            "CUDA"
-        } else if mps_available {
-            "MPS"
-        } else {
-            "CPU"
-        };
-
-        let done_message = format!("PyTorch installed ({})", effective_backend);
-        self.emit_progress(InstallStage::InstallingPytorch, 80.0, &done_message);
-
-        // Install required download dependencies (requests, tenacity, huggingface_hub)
-        // These are needed for model downloads even when using Rust transcribe-rs
-        // because Python backend is still used for diarization and model management.
-        self.install_download_dependencies(&self.get_python_exe()).await?;
-
-        Ok(())
-    }
-
     /// Install dependencies required for model downloads (requests, tenacity, huggingface_hub).
     /// These are always needed even if transcription is handled by Rust.
     async fn install_download_dependencies(&self, python_exe: &Path) -> Result<(), String> {
-        self.emit_progress(InstallStage::InstallingPytorch, 82.0, "Installing download dependencies...");
+        self.emit_progress(
+            InstallStage::InstallingDownloadDependencies,
+            82.0,
+            "Installing download dependencies...",
+        );
 
-        let packages = ["requests==2.31.0", "tenacity==8.5.0", "huggingface_hub==0.23.4"];
+        let packages = [
+            "requests==2.31.0",
+            "tenacity==8.5.0",
+            "huggingface_hub==0.23.4",
+        ];
 
         for package in packages {
             let output = create_hidden_command(python_exe)
@@ -949,12 +621,17 @@ impl PythonInstaller {
             }
         }
 
-        self.emit_progress(InstallStage::InstallingPytorch, 85.0, "Download dependencies ready");
+        self.emit_progress(
+            InstallStage::InstallingDownloadDependencies,
+            85.0,
+            "Download dependencies ready",
+        );
         Ok(())
     }
 
     async fn install_dependencies(&self, python_dir: &PathBuf) -> Result<(), String> {
-        self.install_dependencies_for(&self.get_python_exe(), python_dir).await
+        self.install_dependencies_for(&self.get_python_exe(), python_dir)
+            .await
     }
 
     /// Install ai-engine dependencies using an explicit Python executable.
@@ -965,7 +642,11 @@ impl PythonInstaller {
         python_exe: &Path,
         python_dir: &PathBuf,
     ) -> Result<(), String> {
-        self.emit_progress(InstallStage::InstallingDependencies, 85.0, "Installing dependencies...");
+        self.emit_progress(
+            InstallStage::InstallingDependencies,
+            85.0,
+            "Installing dependencies...",
+        );
 
         if !python_exe.exists() && python_exe.components().count() > 1 {
             return Err(format!("Python executable not found: {:?}", python_exe));
@@ -1019,10 +700,17 @@ impl PythonInstaller {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[PYTHON INSTALLER] Dependencies install warning: {}", stderr);
+            eprintln!(
+                "[PYTHON INSTALLER] Dependencies install warning: {}",
+                stderr
+            );
         }
 
-        self.emit_progress(InstallStage::InstallingDependencies, 95.0, "Dependencies installed");
+        self.emit_progress(
+            InstallStage::InstallingDependencies,
+            95.0,
+            "Dependencies installed",
+        );
         Ok(())
     }
 }
@@ -1074,33 +762,21 @@ mod tests {
 
     #[test]
     fn cuda_target_upgrades_cpu_only_torch() {
-        let should_upgrade = should_install_or_upgrade_torch(
-            TorchInstallTarget::Cuda,
-            true,
-            false,
-        );
+        let should_upgrade = should_install_or_upgrade_torch(TorchInstallTarget::Cuda, true, false);
 
         assert!(should_upgrade);
     }
 
     #[test]
     fn cuda_target_skips_upgrade_when_cuda_build_present() {
-        let should_upgrade = should_install_or_upgrade_torch(
-            TorchInstallTarget::Cuda,
-            true,
-            true,
-        );
+        let should_upgrade = should_install_or_upgrade_torch(TorchInstallTarget::Cuda, true, true);
 
         assert!(!should_upgrade);
     }
 
     #[test]
     fn cpu_target_keeps_existing_torch() {
-        let should_upgrade = should_install_or_upgrade_torch(
-            TorchInstallTarget::Cpu,
-            true,
-            false,
-        );
+        let should_upgrade = should_install_or_upgrade_torch(TorchInstallTarget::Cpu, true, false);
 
         assert!(!should_upgrade);
     }

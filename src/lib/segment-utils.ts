@@ -5,7 +5,15 @@ export function sanitizeSegments(
 ): TranscriptionSegment[] {
   if (!segments || segments.length === 0) return [];
 
-  const valid = segments.filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start);
+  const valid = segments
+    .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
+    .map((s) => ({
+      ...s,
+      start: Math.max(0, s.start),
+      end: Math.max(0, s.end),
+    }))
+    .sort((a, b) => (a.start - b.start) || (a.end - b.end));
+
   if (valid.length <= 1) return valid;
 
   const epsilon = 0.05;

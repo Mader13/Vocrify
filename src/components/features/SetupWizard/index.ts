@@ -25,7 +25,7 @@ export type { FFmpegStepFooterProps } from "./steps/FFmpegStep";
 export { DeviceStep, DeviceStepFooter } from "./steps/DeviceStep";
 export type { DeviceStepFooterProps } from "./steps/DeviceStep";
 
-export { OptionalStep, OptionalStepFooter, useOptionalStep } from "./steps/OptionalStep";
+export { OptionalStep, OptionalStepFooter } from "./steps/OptionalStep";
 export type { OptionalStepFooterProps } from "./steps/OptionalStep";
 
 // Default export

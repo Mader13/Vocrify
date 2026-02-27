@@ -17,6 +17,7 @@ export const acknowledgments: AcknowledgmentItem[] = [
   { name: "Parakeet", description: "Speech recognition by NVIDIA", url: "https://github.com/NVIDIA/NeMo", Icon: Mic, category: "core" },
   { name: "whisper.cpp", description: "C/C++ Whisper implementation", url: "https://github.com/ggerganov/whisper.cpp", Icon: Mic, category: "core" },
   { name: "sherpa-onnx", description: "ONNX exports for speech recognition", url: "https://github.com/k2-fsa/sherpa-onnx", Icon: Users, category: "diarization" },
+  { name: "sherpa-rs", description: "Rust bindings for sherpa-onnx", url: "https://github.com/k2-fsa/sherpa-rs", Icon: Users, category: "diarization" },
   { name: "ONNX Runtime", description: "Inference engine", url: "https://github.com/microsoft/onnxruntime", Icon: Cpu, category: "framework" },
   { name: "Tauri", description: "Desktop framework", url: "https://github.com/tauri-apps/tauri", Icon: Code, category: "framework" },
   { name: "React", description: "UI framework", url: "https://github.com/facebook/react", Icon: Code, category: "ui" },
@@ -29,14 +30,14 @@ export const acknowledgments: AcknowledgmentItem[] = [
 ];
 
 export const categoryColors: Record<AcknowledgmentCategory, { bg: string; border: string; text: string }> = {
-  core: { bg: "bg-red-500/10", border: "border-red-500/20", text: "text-red-500 dark:text-red-400" },
+  core: { bg: "bg-destructive/10", border: "border-destructive/35", text: "text-destructive dark:text-destructive/85" },
   diarization: { bg: "bg-purple-500/10", border: "border-purple-500/20", text: "text-purple-500 dark:text-purple-400" },
   framework: { bg: "bg-green-500/10", border: "border-green-500/20", text: "text-green-500 dark:text-green-400" },
   ui: { bg: "bg-orange-500/10", border: "border-orange-500/20", text: "text-orange-500 dark:text-orange-400" },
 };
 
 export const categoryHoverColors: Record<AcknowledgmentCategory, string> = {
-  core: "hover:bg-red-500/20 hover:border-red-500/30",
+  core: "hover:bg-destructive/20 hover:border-destructive/55",
   diarization: "hover:bg-purple-500/20 hover:border-purple-500/30",
   framework: "hover:bg-green-500/20 hover:border-green-500/30",
   ui: "hover:bg-orange-500/20 hover:border-orange-500/30",

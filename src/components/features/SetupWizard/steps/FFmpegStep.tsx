@@ -7,8 +7,10 @@ import { ExternalLink, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckCard, CheckItem } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
+import { useI18n } from "@/hooks";
 
 export function FFmpegStep() {
+  const { t } = useI18n();
   const { ffmpegCheck, checkFFmpeg, installFFmpeg, isChecking, ffmpegProgress, ffmpegInstallStatus } = useSetupStore();
 
   useEffect(() => {
@@ -24,16 +26,16 @@ export function FFmpegStep() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">FFmpeg</h3>
+        <h3 className="text-lg font-semibold">{t("setup.ffmpegTitle")}</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          FFmpeg is required for audio/video preprocessing.
+          {t("setup.ffmpegDesc")}
         </p>
       </div>
 
       <CheckCard
-        title="FFmpeg"
+        title={t("setup.ffmpegTitle")}
         status={ffmpegCheck?.status ?? "pending"}
-        message={ffmpegCheck?.message ?? "Checking FFmpeg..."}
+        message={ffmpegCheck?.message ?? t("setup.checkingFfmpeg")}
         onRetry={checkFFmpeg}
       >
         {ffmpegCheck && (
@@ -42,7 +44,7 @@ export function FFmpegStep() {
               label={
                 ffmpegCheck.installed
                   ? `FFmpeg ${ffmpegCheck.version ?? "installed"}`
-                  : "FFmpeg not found"
+                  : t("setup.ffmpegNotFound")
               }
               sublabel={ffmpegCheck.path ?? undefined}
               status={ffmpegCheck.installed ? "ok" : "error"}
@@ -53,17 +55,17 @@ export function FFmpegStep() {
 
       {ffmpegCheck?.status === "error" && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-3">
-          <h4 className="font-medium text-red-600 dark:text-red-400">
-            FFmpeg installation required
+          <h4 className="font-medium text-red-700 dark:text-red-400">
+            {t("setup.ffmpegInstallRequired")}
           </h4>
           <div className="text-sm space-y-2 text-muted-foreground">
-            <p>FFmpeg is required for audio/video preprocessing.</p>
+            <p>{t("setup.ffmpegDesc")}</p>
 
             {/* Progress bar during installation */}
             {ffmpegInstallStatus === "downloading" && ffmpegProgress && (
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-foreground">Downloading FFmpeg...</span>
+                  <span className="text-foreground">{t("setup.downloadingFfmpeg")}</span>
                   <span className="font-medium text-primary">
                     {ffmpegProgress.percent.toFixed(1)}%
                   </span>
@@ -86,7 +88,7 @@ export function FFmpegStep() {
                 <div className="flex items-center justify-center py-4">
                   <div className="flex items-center gap-3">
                     <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent" />
-                    <span className="text-sm text-foreground">Extracting FFmpeg...</span>
+                    <span className="text-sm text-foreground">{t("setup.extractingFfmpeg")}</span>
                   </div>
                 </div>
               </div>
@@ -100,10 +102,10 @@ export function FFmpegStep() {
                   className="gap-2"
                 >
                   <Download className="h-4 w-4" />
-                  Install automatically
+                  {t("setup.installAutomatically")}
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  ~150MB download
+                  {t("setup.downloadSize")}
                 </span>
               </div>
             )}
@@ -114,17 +116,17 @@ export function FFmpegStep() {
                   onClick={handleAutoInstall}
                   disabled={isChecking}
                   variant="outline"
-                  className="gap-2 border-red-500/50 text-red-600 hover:bg-red-500/10"
+                  className="gap-2 border-red-500/50 text-red-700 hover:bg-red-500/10"
                 >
                   <Download className="h-4 w-4" />
-                  Retry installation
+                  {t("setup.retryInstallation")}
                 </Button>
               </div>
             )}
 
             <details className="mt-3">
               <summary className="cursor-pointer text-sm text-primary hover:underline">
-                Manual installation instructions
+                {t("setup.manualInstructions")}
               </summary>
               <div className="mt-3 space-y-4">
                 {/* Windows - Winget (recommended) */}
@@ -186,7 +188,7 @@ export function FFmpegStep() {
 
       {isChecking && !ffmpegCheck && ffmpegInstallStatus === "idle" && (
         <div className="flex items-center justify-center py-8">
-          <div className="animate-pulse text-muted-foreground">Checking FFmpeg...</div>
+          <div className="animate-pulse text-muted-foreground">{t("setup.checkingFfmpeg")}</div>
         </div>
       )}
     </div>
@@ -199,6 +201,7 @@ export interface FFmpegStepFooterProps {
 }
 
 export function FFmpegStepFooter({ onBack, onNext }: FFmpegStepFooterProps) {
+  const { t } = useI18n();
   const { ffmpegCheck, installFFmpeg, isChecking, ffmpegInstallStatus, ffmpegProgress } = useSetupStore();
 
   const hasError = ffmpegCheck?.status === "error";
@@ -213,7 +216,7 @@ export function FFmpegStepFooter({ onBack, onNext }: FFmpegStepFooterProps) {
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onBack} disabled={isInstalling}>
-          Back
+          {t("setup.back")}
         </Button>
         {hasError && ffmpegInstallStatus === "idle" && (
           <Button
@@ -223,7 +226,7 @@ export function FFmpegStepFooter({ onBack, onNext }: FFmpegStepFooterProps) {
             className="gap-2"
           >
             <Download className="h-4 w-4" />
-            Install automatically
+            {t("setup.installAutomatically")}
           </Button>
         )}
         {hasError && ffmpegInstallStatus === "failed" && (
@@ -231,10 +234,10 @@ export function FFmpegStepFooter({ onBack, onNext }: FFmpegStepFooterProps) {
             variant="outline"
             onClick={handleAutoInstall}
             disabled={isChecking}
-            className="gap-2 border-red-500/50 text-red-600 hover:bg-red-500/10"
+            className="gap-2 border-red-500/50 text-red-700 hover:bg-red-500/10"
           >
             <Download className="h-4 w-4" />
-            Retry
+            {t("setup.retry")}
           </Button>
         )}
         {isInstalling && (
@@ -242,17 +245,17 @@ export function FFmpegStepFooter({ onBack, onNext }: FFmpegStepFooterProps) {
             <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary border-t-transparent" />
             <span>
               {ffmpegInstallStatus === "downloading" && ffmpegProgress
-                ? `Downloading ${ffmpegProgress.percent.toFixed(0)}%`
+                ? `${t("setup.downloading")} ${ffmpegProgress.percent.toFixed(0)}%`
                 : ffmpegInstallStatus === "extracting"
-                ? "Extracting..."
-                : "Installing..."}
+                ? t("setup.extracting")
+                : t("setup.installing")}
             </span>
           </div>
         )}
       </div>
       <div className="flex items-center gap-2">
         <Button onClick={onNext} disabled={isChecking || !canProceed || isInstalling}>
-          Continue
+          {t("setup.continue")}
         </Button>
       </div>
     </div>

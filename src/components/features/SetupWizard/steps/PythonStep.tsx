@@ -3,6 +3,7 @@ import { Download, X, RefreshCw, CheckCircle, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CheckCard, CheckItem } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
+import { useI18n } from "@/hooks";
 import { 
   installPythonFull, 
   onPythonInstallProgress, 
@@ -11,6 +12,7 @@ import {
 } from "@/services/tauri/setup-commands";
 
 export function PythonStep() {
+  const { t } = useI18n();
   const { pythonCheck, checkPython, isChecking } = useSetupStore();
   
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
@@ -75,7 +77,6 @@ export function PythonStep() {
   }, [handleInstall]);
 
   const pythonStatus = pythonCheck?.version ? "ok" : pythonCheck ? "error" : "pending";
-  const pytorchStatus = pythonCheck?.pytorchInstalled ? "ok" : pythonCheck ? "error" : "pending";
   const venvStatus = pythonCheck?.inVenv ? "ok" : pythonCheck ? "warning" : "pending";
 
   const needsInstall = pythonCheck?.status === "error" || !pythonCheck?.version;
@@ -83,16 +84,16 @@ export function PythonStep() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Python Environment</h3>
+        <h3 className="text-lg font-semibold">{t("setup.pythonTitle")}</h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Checking Python and required dependencies
+          {t("setup.pythonDesc")}
         </p>
       </div>
 
       {isInstalling || installProgress ? (
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h4 className="font-medium">Installing Python</h4>
+            <h4 className="font-medium">{t("setup.installingPython")}</h4>
             <Button
               variant="ghost"
               size="sm"
@@ -100,13 +101,13 @@ export function PythonStep() {
               className="text-muted-foreground hover:text-destructive"
             >
               <X className="h-4 w-4 mr-1" />
-              Cancel
+              {t("common.cancel")}
             </Button>
           </div>
 
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
-              <span>{installProgress?.message || "Preparing..."}</span>
+              <span>{installProgress?.message || t("setup.preparing")}</span>
               <span>{Math.round(installProgress?.percent || 0)}%</span>
             </div>
             <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -127,42 +128,28 @@ export function PythonStep() {
           {installProgress?.stage === "complete" && (
             <div className="flex items-center gap-2 text-green-600 text-sm">
               <CheckCircle className="h-4 w-4" />
-              <span>Python successfully installed!</span>
+              <span>{t("setup.pythonInstalled")}</span>
             </div>
           )}
         </div>
       ) : (
         <CheckCard
-          title="Python Environment"
+          title={t("setup.pythonTitle")}
           status={pythonCheck?.status ?? "pending"}
-          message={pythonCheck?.message ?? "Checking Python..."}
+          message={pythonCheck?.message ?? t("setup.checkingPython")}
           onRetry={checkPython}
         >
           {pythonCheck && (
             <div className="space-y-1">
               <CheckItem
-                label={`Python ${pythonCheck.version ?? "not found"}`}
+                label={`Python ${pythonCheck.version ?? t("setup.notFound")}`}
                 sublabel={pythonCheck.executable ?? undefined}
                 status={pythonStatus}
               />
 
               <CheckItem
-                label={
-                  pythonCheck.pytorchInstalled
-                    ? `PyTorch ${pythonCheck.pytorchVersion ?? "installed"}`
-                    : "PyTorch not installed"
-                }
-                sublabel={
-                  pythonCheck.pytorchInstalled
-                    ? `${pythonCheck.cudaAvailable ? "CUDA" : ""} ${pythonCheck.mpsAvailable ? "MPS" : ""} ${!pythonCheck.cudaAvailable && !pythonCheck.mpsAvailable ? "CPU only" : ""}`.trim()
-                    : undefined
-                }
-                status={pytorchStatus}
-              />
-
-              <CheckItem
-                label="Virtual Environment"
-                sublabel={pythonCheck.inVenv ? "Activated" : "Not detected (recommended)"}
+                label={t("setup.virtualEnv")}
+                sublabel={pythonCheck.inVenv ? t("setup.activated") : t("setup.notDetected")}
                 status={venvStatus}
               />
             </div>
@@ -172,15 +159,15 @@ export function PythonStep() {
 
       {needsInstall && !isInstalling && !installProgress && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-3">
-          <h4 className="font-medium text-red-600 dark:text-red-400">
-            Installation required
+          <h4 className="font-medium text-red-700 dark:text-red-400">
+            {t("setup.installRequired")}
           </h4>
           <p className="text-sm text-muted-foreground">
-            The application will install Python and all required dependencies automatically.
+            {t("setup.installRequiredDesc")}
           </p>
           <Button onClick={handleInstall} className="w-full">
             <Download className="h-4 w-4 mr-2" />
-            Install Python
+            {t("setup.installPython")}
           </Button>
         </div>
       )}
@@ -189,7 +176,7 @@ export function PythonStep() {
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleRetry} className="flex-1">
             <RefreshCw className="h-4 w-4 mr-2" />
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       )}
@@ -197,7 +184,7 @@ export function PythonStep() {
       {isChecking && !pythonCheck && (
         <div className="flex items-center justify-center py-8">
           <div className="animate-pulse text-muted-foreground">
-            Checking Python environment...
+            {t("setup.checkingPythonEnv")}
           </div>
         </div>
       )}
@@ -210,9 +197,12 @@ export interface PythonStepFooterProps {
 }
 
 export function PythonStepFooter({ onNext }: PythonStepFooterProps) {
+  const { t } = useI18n();
   const { pythonCheck, checkPython, isChecking } = useSetupStore();
   
-  const canProceed = pythonCheck?.status === "ok";
+  // Python is optional for transcription (only needed for diarization)
+  // So we allow proceeding even if there's an error
+  const canProceed = true;
   const hasError = pythonCheck?.status === "error";
 
   return (
@@ -224,13 +214,18 @@ export function PythonStepFooter({ onNext }: PythonStepFooterProps) {
             onClick={() => checkPython()}
             disabled={isChecking}
           >
-            Retry
+            {t("common.retry")}
           </Button>
         )}
       </div>
       <div className="flex items-center gap-2">
+        {hasError && (
+          <span className="text-xs text-muted-foreground mr-2">
+            Optional (needed for speaker detection only)
+          </span>
+        )}
         <Button onClick={onNext} disabled={!canProceed || isChecking}>
-          Continue
+          {hasError ? "Skip" : t("common.continue")}
         </Button>
       </div>
     </div>

@@ -7,7 +7,6 @@ export { CompletedView } from "./CompletedView";
 export { SettingsPanel } from "./SettingsPanel";
 export { ModelsManagement } from "./ModelsManagement";
 export { ArchiveView } from "./ArchiveView";
-export { HuggingFaceTokenCard } from "./HuggingFaceTokenCard";
 export { VideoPlayer } from "./VideoPlayer";
 export { TranscriptionSegments } from "./TranscriptionSegments";
 export { ExportMenu } from "./ExportMenu";
@@ -24,3 +23,5 @@ export { PlayerErrorBoundary } from "./PlayerErrorBoundary";
 // Setup Wizard
 export { SetupWizard, SetupWizardGuard } from "./SetupWizard";
 export type { SetupWizardProps, SetupWizardGuardProps } from "./SetupWizard";
+
+// Background Audio

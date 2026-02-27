@@ -26,10 +26,6 @@ function setHappyPathState() {
       version: "3.12.0",
       executable: "python",
       inVenv: true,
-      pytorchInstalled: true,
-      pytorchVersion: "2.5.1",
-      cudaAvailable: false,
-      mpsAvailable: false,
       message: "ok",
     },
     ffmpegCheck: {
@@ -88,11 +84,11 @@ describe("SetupWizard flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
     expect(screen.getByRole("heading", { name: "Devices" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByRole("heading", { name: "Optional settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /skip setup|continue/i }));
+    expect(screen.getByRole("heading", { level: 3, name: "AI Models" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByRole("heading", { name: /you're almost ready/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /skip setup|continue/i }));
+    expect(screen.getByRole("heading", { name: /almost ready/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /finish setup/i }));
 
@@ -114,10 +110,6 @@ describe("SetupWizard flow", () => {
         version: null,
         executable: null,
         inVenv: false,
-        pytorchInstalled: false,
-        pytorchVersion: null,
-        cudaAvailable: false,
-        mpsAvailable: false,
         message: "Python not ready",
       },
       ffmpegCheck: {
@@ -149,8 +141,8 @@ describe("SetupWizard flow", () => {
 
     render(<SetupWizard />);
 
-    const continueButton = screen.getByRole("button", { name: /continue/i });
-    expect(continueButton).toBeDisabled();
+    const continueButton = screen.getByRole("button", { name: /skip|continue/i });
+    expect(continueButton).toBeEnabled();
 
     act(() => {
       useSetupStore.setState({
@@ -159,17 +151,9 @@ describe("SetupWizard flow", () => {
           version: "3.12.0",
           executable: "python",
           inVenv: true,
-          pytorchInstalled: true,
-          pytorchVersion: "2.5.1",
-          cudaAvailable: false,
-          mpsAvailable: false,
           message: "ok",
         },
       });
-    });
-
-    await waitFor(() => {
-      expect(continueButton).toBeEnabled();
     });
 
     fireEvent.click(continueButton);
@@ -201,10 +185,6 @@ describe("SetupWizard flow", () => {
         version: "3.12.0",
         executable: "python",
         inVenv: true,
-        pytorchInstalled: true,
-        pytorchVersion: "2.5.1",
-        cudaAvailable: false,
-        mpsAvailable: false,
         message: "ok",
       },
       ffmpegCheck: {

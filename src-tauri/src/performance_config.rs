@@ -13,8 +13,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 use std::time::Duration;
 
 /// Configuration for performance optimizations
@@ -88,13 +88,16 @@ impl PerformanceConfig {
     }
 
     /// Apply environment variable overrides to the config
-    fn with_env_overrides(mut self) -> Self {
+    pub fn with_env_overrides(mut self) -> Self {
         // Parse boolean from environment variable
         let parse_bool = |key: &str, default: bool| -> bool {
             match env::var(key) {
                 Ok(val) => {
                     let val_lower = val.to_lowercase();
-                    val_lower == "true" || val_lower == "1" || val_lower == "yes" || val_lower == "on"
+                    val_lower == "true"
+                        || val_lower == "1"
+                        || val_lower == "yes"
+                        || val_lower == "on"
                 }
                 Err(_) => default,
             }
@@ -108,9 +111,14 @@ impl PerformanceConfig {
             }
         };
 
-        self.fast_setup_check_enabled = parse_bool("TV_FAST_SETUP_CHECK", self.fast_setup_check_enabled);
-        self.lazy_manager_init_enabled = parse_bool("TV_LAZY_MANAGER_INIT", self.lazy_manager_init_enabled);
-        self.defer_device_detection_enabled = parse_bool("TV_DEFER_DEVICE_DETECTION", self.defer_device_detection_enabled);
+        self.fast_setup_check_enabled =
+            parse_bool("TV_FAST_SETUP_CHECK", self.fast_setup_check_enabled);
+        self.lazy_manager_init_enabled =
+            parse_bool("TV_LAZY_MANAGER_INIT", self.lazy_manager_init_enabled);
+        self.defer_device_detection_enabled = parse_bool(
+            "TV_DEFER_DEVICE_DETECTION",
+            self.defer_device_detection_enabled,
+        );
         self.setup_cache_ttl_days = parse_int("TV_SETUP_CACHE_TTL_DAYS", self.setup_cache_ttl_days);
 
         self
@@ -124,10 +132,22 @@ impl PerformanceConfig {
     /// Log the current configuration status
     pub fn log_status(&self) {
         eprintln!("[PERF] Performance Configuration:");
-        eprintln!("[PERF]   fast_setup_check_enabled = {}", self.fast_setup_check_enabled);
-        eprintln!("[PERF]   lazy_manager_init_enabled = {}", self.lazy_manager_init_enabled);
-        eprintln!("[PERF]   defer_device_detection_enabled = {}", self.defer_device_detection_enabled);
-        eprintln!("[PERF]   setup_cache_ttl_days = {}", self.setup_cache_ttl_days);
+        eprintln!(
+            "[PERF]   fast_setup_check_enabled = {}",
+            self.fast_setup_check_enabled
+        );
+        eprintln!(
+            "[PERF]   lazy_manager_init_enabled = {}",
+            self.lazy_manager_init_enabled
+        );
+        eprintln!(
+            "[PERF]   defer_device_detection_enabled = {}",
+            self.defer_device_detection_enabled
+        );
+        eprintln!(
+            "[PERF]   setup_cache_ttl_days = {}",
+            self.setup_cache_ttl_days
+        );
     }
 }
 

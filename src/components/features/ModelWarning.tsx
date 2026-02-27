@@ -2,6 +2,7 @@ import { AlertTriangle, Settings } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/hooks";
 
 interface ModelWarningProps {
   onGoToModels?: () => void;
@@ -9,16 +10,18 @@ interface ModelWarningProps {
 }
 
 export function ModelWarning({ onGoToModels, className }: ModelWarningProps) {
+  const { t } = useI18n();
+
   return (
     <Alert variant="destructive" className={cn("border-amber-500/50 bg-amber-50/50 dark:bg-amber-950/20", className)}>
       <AlertTriangle className="h-4 w-4 text-amber-600" />
       <div className="flex flex-col gap-3">
         <div className="space-y-1">
           <AlertTitle className="text-amber-800 dark:text-amber-200">
-            No Model Selected
+            {t("modelWarning.title")}
           </AlertTitle>
           <AlertDescription className="text-amber-700 dark:text-amber-300">
-            Select a model in the "Models" section to start transcription
+            {t("modelWarning.description")}
           </AlertDescription>
         </div>
         {onGoToModels && (
@@ -29,7 +32,7 @@ export function ModelWarning({ onGoToModels, className }: ModelWarningProps) {
             className="w-full border-amber-500/50 hover:bg-amber-100 dark:hover:bg-amber-900/30"
           >
             <Settings className="h-4 w-4 mr-2" />
-            Go to Models
+            {t("modelWarning.goToModels")}
           </Button>
         )}
       </div>

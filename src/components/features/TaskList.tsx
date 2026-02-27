@@ -6,57 +6,60 @@ import {
   AlertTriangle,
   Trash2,
   X,
+  RefreshCw,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ProgressEnhanced } from "@/components/ui/progress-enhanced";
 import { cn, formatFileSize, formatDateTime } from "@/lib/utils";
 import { useTasks, useTasksByView, useUIStore } from "@/stores";
 import { canArchiveTask } from "@/stores/utils/archive-eligibility";
 import type { TranscriptionTask, TaskStatus } from "@/types";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useId } from "react";
 import { createPortal } from "react-dom";
 import { ArchiveButton } from "./ArchiveButton";
+import { DeleteTaskDialog } from "@/components/features/DeleteTaskDialog";
+import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
+import { useI18n } from "@/hooks";
 
 const statusConfig: Record<
   TaskStatus,
-  { icon: React.ElementType; borderColor: string; color: string; label: string }
+  { icon: React.ElementType; borderColor: string; color: string; labelKey: string }
 > = {
   queued: {
     icon: Clock,
-    borderColor: "border-slate-400",
+    borderColor: "border-slate-400/50",
     color: "text-amber-500",
-    label: "In queue",
+    labelKey: "taskList.inQueue",
   },
   processing: {
     icon: Loader2,
-    borderColor: "border-blue-500",
+    borderColor: "border-blue-500/50",
     color: "text-blue-500",
-    label: "Processing",
+    labelKey: "taskList.processing",
   },
   completed: {
     icon: Check,
-    borderColor: "border-emerald-500",
+    borderColor: "border-emerald-500/50",
     color: "text-emerald-500",
-    label: "Completed",
+    labelKey: "taskList.completed",
   },
   failed: {
     icon: X,
-    borderColor: "border-red-500",
+    borderColor: "border-red-500/50",
     color: "text-red-500",
-    label: "Failed",
+    labelKey: "taskList.failed",
   },
   cancelled: {
     icon: X,
-    borderColor: "border-gray-400",
+    borderColor: "border-gray-400/50",
     color: "text-gray-500",
-    label: "Cancelled",
+    labelKey: "taskList.cancelled",
   },
   interrupted: {
     icon: AlertTriangle,
-    borderColor: "border-orange-500",
+    borderColor: "border-orange-500/50",
     color: "text-orange-500",
-    label: "Interrupted",
+    labelKey: "taskList.interrupted",
   },
 };
 
@@ -96,8 +99,12 @@ function TaskItemTooltip({ fileName, targetRef }: TaskItemTooltipProps) {
   if (!targetRef.current) return null;
 
   return createPortal(
-    <div
-      className="pointer-events-none fixed z-[100] max-w-[200px] truncate whitespace-nowrap rounded-md bg-popover px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-md border border-border/50"
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.15 }}
+      className="pointer-events-none fixed z-[100] max-w-[200px] truncate whitespace-nowrap rounded-md bg-popover/90 backdrop-blur-md px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-lg border border-border/50"
       style={{
         top: position.top,
         left: position.left,
@@ -105,7 +112,7 @@ function TaskItemTooltip({ fileName, targetRef }: TaskItemTooltipProps) {
       }}
     >
       {fileName}
-    </div>,
+    </motion.div>,
     document.body
   );
 }
@@ -115,11 +122,13 @@ interface TaskItemProps {
   compact?: boolean;
   onHoverStart?: () => void;
   onHoverEnd?: () => void;
+  onRequestDelete: (task: TranscriptionTask) => void;
 }
 
-function TaskItem({ task, compact, onHoverStart, onHoverEnd }: TaskItemProps) {
-  const removeTask = useTasks((s) => s.removeTask);
+function TaskItem({ task, compact, onHoverStart, onHoverEnd, onRequestDelete }: TaskItemProps) {
+  const { t } = useI18n();
   const cancelTask = useTasks((s) => s.cancelTask);
+  const retryTask = useTasks((s) => s.retryTask);
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
   const setSelectedTask = useUIStore((s) => s.setSelectedTask);
   const setCurrentView = useUIStore((s) => s.setCurrentView);
@@ -136,225 +145,297 @@ function TaskItem({ task, compact, onHoverStart, onHoverEnd }: TaskItemProps) {
     setCurrentView("transcription");
   };
 
-  if (compact) {
-    return (
-      <>
-        <div
-          ref={itemRef}
-          className="group cursor-pointer rounded-lg p-2 transition-all hover:bg-muted relative"
-          onClick={handleSelectTask}
-          onMouseEnter={() => {
-            setShowTooltip(true);
-            onHoverStart?.();
-          }}
-          onMouseLeave={() => {
-            setShowTooltip(false);
-            onHoverEnd?.();
-          }}
-        >
-          {isSelected && (
-            <div className="absolute left-0 top-2 bottom-2 w-1 bg-primary rounded-full" />
-          )}
-          <div className="relative w-full aspect-square flex items-center justify-center">
-            {task.status === "processing" ? (
-              <div className="relative">
-                <div className="w-10 h-10 rounded-full border-2 border-border/50 bg-transparent" />
-                <svg
-                  className="absolute inset-0 w-10 h-10 -rotate-90"
-                  viewBox="0 0 40 40"
-                >
-                  <circle
-                    cx="20"
-                    cy="20"
-                    r="17"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    className="text-primary"
-                    strokeDasharray={`${task.progress * 1.07} 107`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-[9px] font-bold text-foreground">
-                    {Math.round(task.progress)}%
-                  </span>
-                </div>
-              </div>
-            ) : task.status === "queued" ? (
-              <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
-                <StatusIcon className={cn("h-4 w-4 animate-pulse", config.color)} />
-              </div>
-            ) : task.status === "completed" ? (
-              <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
-                <StatusIcon className={cn("h-4 w-4", config.color)} />
-              </div>
-            ) : task.status === "failed" || task.status === "interrupted" ? (
-              <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
-                <StatusIcon className={cn("h-4 w-4", config.color)} />
-              </div>
-            ) : (
-              <div className={cn("w-9 h-9 rounded-full border-2 flex items-center justify-center", config.borderColor)}>
-                <StatusIcon className={cn("h-4 w-4", config.color)} />
-              </div>
-            )}
-          </div>
-        </div>
-        {showTooltip && (
-          <TaskItemTooltip fileName={task.fileName} targetRef={itemRef} />
-        )}
-      </>
-    );
-  }
+  const itemVariants = {
+    hidden: { opacity: 0, y: -15, scale: 0.95 },
+    visible: { opacity: 1, y: 0, scale: 1 },
+    exit: { opacity: 0, scale: 0.95, filter: "blur(4px)", transition: { duration: 0.2, ease: "easeOut" as const } },
+  };
 
   return (
-    <div
+    <motion.div
+      layout
+      variants={itemVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      transition={{
+        layout: { type: "spring", bounce: 0, duration: 0.4 },
+        opacity: { duration: 0.2 }
+      }}
       className={cn(
-        "w-full rounded-lg border-2 bg-card text-card-foreground shadow-sm cursor-pointer transition-all hover:shadow-md overflow-hidden relative",
-        config.borderColor
+        "relative group cursor-pointer overflow-hidden transition-[background-color,border-color,box-shadow] duration-300",
+        compact 
+          ? "flex items-center justify-center p-1.5 rounded-xl border-transparent"
+          : "w-full rounded-xl border bg-card/40 backdrop-blur-md text-card-foreground shadow-sm hover:shadow-[0_4px_20px_-4px_rgba(0,0,0,0.1)] dark:hover:shadow-[0_4px_20px_-4px_rgba(255,255,255,0.05)]",
+        !compact && (isSelected ? "border-primary/50 bg-primary/5" : config.borderColor)
       )}
       onClick={handleSelectTask}
-      title={config.label}
+      onMouseEnter={() => {
+        if (compact) {
+          setShowTooltip(true);
+          onHoverStart?.();
+        }
+      }}
+      onMouseLeave={() => {
+        if (compact) {
+          setShowTooltip(false);
+          onHoverEnd?.();
+        }
+      }}
+      title={compact ? undefined : t(config.labelKey as Parameters<typeof t>[0])}
     >
+      {/* Active Indicator */}
       {isSelected && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />
+        <motion.div 
+          layoutId="unified-active-indicator"
+          transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+          className={cn(
+            "absolute bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)] z-20",
+            compact ? "left-[3px] inset-y-1 my-auto h-7 w-1 rounded-full" : "left-0 top-0 bottom-0 w-1 rounded-l-xl shadow-[0_0_12px_rgba(var(--primary),0.8)]"
+          )} 
+        />
       )}
-      <div className="p-3 sm:p-4">
-        <div className="grid grid-cols-[1fr_auto] gap-2 items-start">
-          <div className="min-w-0 overflow-hidden">
-            <p className="font-medium truncate text-sm" title={task.fileName}>
-              {task.fileName}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {formatFileSize(task.fileSize)} · {formatDateTime(task.createdAt)}
-            </p>
-            {task.status === "queued" && (
-              <div className="mt-1 inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
-                <Clock3 className="h-3 w-3" />
-                In queue
-              </div>
-            )}
-          </div>
 
-          <div className="flex items-center gap-1 shrink-0">
-            {task.status === "processing" && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cancelTask(task.id);
-                }}
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            )}
-
-            {task.status === "queued" && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
-                title="Remove from queue"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTask(task.id);
-                }}
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            )}
-
-            {canArchiveTask(task) && (
-              <>
-                <ArchiveButton task={task} iconOnly />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    removeTask(task.id);
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-
-        {task.status === "processing" && (
-          <ProgressEnhanced
-            value={task.progress}
-            stage={task.stage === "downloading" ? "loading" : task.stage || "transcribing"}
-            className="mt-2 h-1.5"
+      {/* Hover backdrop for compact */}
+      <AnimatePresence>
+        {compact && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="absolute inset-x-2 inset-y-0.5 rounded-full bg-transparent group-hover:bg-white/5 dark:group-hover:bg-white/5 transition-colors duration-200 z-0" 
           />
         )}
+      </AnimatePresence>
+      
+      {/* Background glow for expanded */}
+      <AnimatePresence>
+        {!compact && (
+           <motion.div 
+             initial={{ opacity: 0 }} 
+             animate={{ opacity: 1 }} 
+             exit={{ opacity: 0 }} 
+             className="absolute inset-0 bg-gradient-to-tr from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none z-0" 
+           />
+        )}
+      </AnimatePresence>
+
+      <div ref={itemRef} className={cn("relative z-10 flex", compact ? "w-9 h-9 items-center justify-center shrink-0" : "flex-col w-full p-3 sm:p-4")}>
+        <div className={cn("grid w-full", compact ? "block" : "grid-cols-[1fr_auto] gap-2 items-start")}>
+          <div className={cn("flex items-center", compact ? "justify-center w-full h-full" : "min-w-0 overflow-hidden gap-3")}>
+             
+            {/* Status Icon (Shared) */}
+            <motion.div layout className={cn("shrink-0", compact ? "w-9 h-9" : "w-10 h-10")}>
+              {task.status === "processing" ? (
+                <div className="relative flex items-center justify-center w-full h-full">
+                  <div className="absolute inset-0 rounded-full border border-border/40 bg-transparent" />
+                  <svg
+                    className={cn("absolute inset-0 w-full h-full -rotate-90", !compact && "drop-shadow-[0_0_3px_rgba(var(--primary),0.5)]")}
+                    viewBox="0 0 40 40"
+                  >
+                    <circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-primary" strokeDasharray={`${task.progress * 1.13} 113`} strokeLinecap="round" />
+                  </svg>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                     <span className={cn("font-bold text-foreground", compact ? "text-[10px]" : "text-[11px]")}>{Math.round(task.progress)}%</span>
+                  </div>
+                </div>
+              ) : (
+                <div className={cn("w-full h-full rounded-full border flex items-center justify-center bg-background/50 backdrop-blur-sm", config.borderColor, !compact && "border-border/40")}>
+                  <StatusIcon className={cn("h-4 w-4", config.color, task.status === 'queued' && "animate-pulse", !compact && "h-5 w-5")} />
+                </div>
+              )}
+            </motion.div>
+
+            {/* Expanded Text Content */}
+            <AnimatePresence initial={false}>
+              {!compact && (
+                <motion.div 
+                  initial={{ opacity: 0, width: 0 }} 
+                  animate={{ opacity: 1, width: "auto" }} 
+                  exit={{ opacity: 0, width: 0 }} 
+                  className="min-w-0 flex-1 overflow-hidden whitespace-nowrap flex flex-col justify-center"
+                >
+                  <p className="font-medium truncate text-sm transition-colors group-hover:text-primary" title={task.fileName}>
+                    {task.fileName}
+                  </p>
+                  <p className="text-xs text-muted-foreground/80 font-medium">
+                    {formatFileSize(task.fileSize)}
+                  </p>
+                  <p className="text-xs text-muted-foreground/60 font-medium">
+                    {formatDateTime(task.createdAt)}
+                  </p>
+                  {task.status === "queued" && (
+                    <div className="mt-1.5 self-start inline-flex items-center gap-1 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+                      <Clock3 className="h-3 w-3" />
+                      {t("taskList.inQueue")}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          
+          {/* Action Buttons for Expanded */}
+          <AnimatePresence>
+            {!compact && (
+              <motion.div initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: "auto" }} exit={{ opacity: 0, width: 0 }} className="flex gap-1 items-start shrink-0 opacity-80 group-hover:opacity-100 transition-opacity whitespace-nowrap overflow-hidden">
+                {task.status === "processing" && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 rounded-full hover:bg-destructive/10 hover:text-destructive"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cancelTask(task.id);
+                    }}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+
+                {task.status === "queued" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 rounded-full hover:bg-muted"
+                      title={t("taskList.removeFromQueue")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRequestDelete(task);
+                      }}
+                    >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+
+                {(task.status === "cancelled" || task.status === "failed") && (
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 rounded-full hover:bg-primary/10 hover:text-primary"
+                      title={t("taskList.retryTask")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        retryTask(task.id);
+                      }}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 rounded-full hover:bg-destructive/10 hover:text-destructive"
+                      title={t("taskList.deleteTask")}
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         onRequestDelete(task);
+                       }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+
+                {canArchiveTask(task) && (
+                  <div className="flex items-center gap-1">
+                    <ArchiveButton task={task} iconOnly />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 sm:h-8 sm:w-8 shrink-0 rounded-full hover:bg-destructive/10 hover:text-destructive"
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         onRequestDelete(task);
+                       }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        
       </div>
-    </div>
+
+      <AnimatePresence>
+        {compact && showTooltip && (
+          <TaskItemTooltip fileName={task.fileName} targetRef={itemRef} />
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }
 
 interface TaskListProps {
   compact?: boolean;
-  queuedCount?: number;
-  activeCount?: number;
-  completedCount?: number;
 }
 
-export function TaskList({ compact, queuedCount, activeCount, completedCount }: TaskListProps) {
+export function TaskList({ compact }: TaskListProps) {
   const tasks = useTasksByView("transcription");
+  const removeTask = useTasks((s) => s.removeTask);
   const [_hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<TranscriptionTask | null>(null);
+  const layoutIdPrefix = useId();
+
+  const requestDeleteTask = useCallback((task: TranscriptionTask) => {
+    setPendingDeleteTask(task);
+  }, []);
+
+  const handleDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setPendingDeleteTask(null);
+    }
+  }, []);
+
+  const handleConfirmDeleteTask = useCallback(() => {
+    if (!pendingDeleteTask) {
+      return;
+    }
+
+    removeTask(pendingDeleteTask.id);
+    setPendingDeleteTask(null);
+  }, [pendingDeleteTask, removeTask]);
 
   if (tasks.length === 0) {
     return null;
   }
 
-  if (compact) {
-    return (
-      <div className="flex-1 w-full min-w-0">
-        <div className="text-[10px] text-center text-muted-foreground mb-1">
-          {tasks.length}
-        </div>
-        <div className="space-y-1.5">
-          {tasks.map((task) => (
-            <TaskItem
-              key={task.id}
-              task={task}
-              compact
-              onHoverStart={() => setHoveredTaskId(task.id)}
-              onHoverEnd={() => setHoveredTaskId(null)}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="w-full space-y-3 min-w-0">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Transcriptions ({tasks.length})</h2>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="inline-flex items-center rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-          Queue {queuedCount}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-          <span className={cn("h-1.5 w-1.5 rounded-full", activeCount && activeCount > 0 ? "bg-primary" : "bg-muted-foreground/40")} />
-          Running {activeCount}
-        </span>
-        <span className="inline-flex items-center rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-          Done {completedCount}
-        </span>
-      </div>
-      <div className="w-full space-y-2 min-w-0">
-        {tasks.map((task) => (
-          <TaskItem key={task.id} task={task} />
-        ))}
-      </div>
+    <div className={cn("w-full min-w-0 transition-all duration-300", compact ? "flex-1" : "space-y-4")}>
+
+      <motion.div 
+        layout 
+        variants={{
+          hidden: {},
+          visible: { transition: { staggerChildren: 0.05 } }
+        }}
+        initial="hidden"
+        animate="visible"
+        className={cn("w-full min-w-0 transition-all duration-300", compact ? "space-y-2" : "space-y-3 pt-2 pb-16")}
+      >
+        <LayoutGroup id={layoutIdPrefix}>
+          <AnimatePresence mode="popLayout">
+            {tasks.map((task) => (
+              <TaskItem
+                key={task.id}
+                task={task}
+                compact={compact}
+                onHoverStart={() => setHoveredTaskId(task.id)}
+                onHoverEnd={() => setHoveredTaskId(null)}
+                onRequestDelete={requestDeleteTask}
+              />
+            ))}
+          </AnimatePresence>
+        </LayoutGroup>
+      </motion.div>
+      <DeleteTaskDialog
+        open={Boolean(pendingDeleteTask)}
+        onOpenChange={handleDialogOpenChange}
+        onConfirm={handleConfirmDeleteTask}
+      />
     </div>
   );
 }

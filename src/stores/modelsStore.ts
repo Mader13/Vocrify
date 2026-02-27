@@ -25,7 +25,7 @@ import {
   onModelDownloadStageComplete,
 } from "@/services/tauri";
 import { AVAILABLE_MODELS } from "@/types";
-import { useSettingsStore } from "./index";
+import { useSettingsStore } from "./_store";
 import { logger } from "@/lib/logger";
 import { countBlockingTasksForModel } from "./utils/model-deletion";
 
@@ -301,7 +301,6 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
   },
 
   downloadModel: async (name: string, modelType: ModelType) => {
-    const { huggingFaceToken } = useSettingsStore.getState().settings;
     const sizeMb = getModelSizeMb(name);
 
     set((state) => ({
@@ -321,7 +320,7 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
     }));
 
     try {
-      const result = await downloadModel(name, modelType, huggingFaceToken);
+      const result = await downloadModel(name, modelType);
       if (!result.success) {
         throw new Error(result.error || "Download failed");
       }
@@ -906,7 +905,7 @@ export async function initializeModelsStore() {
       modelName = result.data.replace('diarization:', '');
       modelCategory = 'diarization';
     } else {
-      // Legacy format — assume transcription model
+      // Legacy format - assume transcription model
       modelName = result.data;
       modelCategory = 'transcription';
     }

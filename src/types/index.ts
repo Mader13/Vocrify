@@ -16,7 +16,7 @@ export type {
   SetupWizardState,
 } from "./setup";
 
-export type WaveformColorMode = "segments" | "speakers";
+export type WaveformColorMode = "clean" | "speakers";
 
 export type ExportFormat = "txt" | "srt" | "vtt" | "json" | "md";
 

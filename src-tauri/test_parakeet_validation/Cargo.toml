@@ -1,9 +1,0 @@
-[package]
-name = "test_parakeet_validation"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-flate2 = "1.1.9"
-tar = "0.4.44"
-walkdir = "2.5.0"

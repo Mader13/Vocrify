@@ -7,7 +7,7 @@
 //!
 //! | `model_type`  | `model_name`               | Source                          |
 //! |---------------|----------------------------|---------------------------------|
-//! | `"whisper"`   | `whisper-tiny` … `large-v3`| HuggingFace CDN (redirect)      |
+//! | `"whisper"`   | `whisper-tiny` … `large-v3-turbo`| HuggingFace CDN (redirect) |
 //! | `"parakeet"`  | `parakeet-tdt-0.6b-v3` etc.| HuggingFace CDN (nvidia repos)  |
 //! | `"diarization"` | `sherpa-onnx-diarization`| GitHub Releases (2 files)       |
 //!
@@ -57,16 +57,16 @@ struct SherpaRegistry {
 
 const SHERPA_REGISTRY: SherpaRegistry = SherpaRegistry {
     model_name: "sherpa-onnx-diarization",
-    segmentation_dir: "sherpa-onnx-segmentation",
+    segmentation_dir: "sherpa-onnx-reverb-diarization-v1",
     embedding_dir: "sherpa-onnx-embedding",
-    segmentation_archive_name: "segmentation.tar.bz2",
-    segmentation_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
-    segmentation_required_file: "model.int8.onnx",
+    segmentation_archive_name: "sherpa-onnx-reverb-diarization-v1.tar.bz2",
+    segmentation_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-reverb-diarization-v1.tar.bz2",
+    segmentation_required_file: "model.onnx",
     embedding_filename: "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
     embedding_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
 };
 
-const WHISPER_GGML_MODELS: [(&str, &str); 8] = [
+const WHISPER_GGML_MODELS: [(&str, &str); 9] = [
     ("tiny", "ggml-tiny.bin"),
     ("base", "ggml-base.bin"),
     ("small", "ggml-small.bin"),
@@ -75,6 +75,7 @@ const WHISPER_GGML_MODELS: [(&str, &str); 8] = [
     ("large-v1", "ggml-large-v1.bin"),
     ("large-v2", "ggml-large-v2.bin"),
     ("large-v3", "ggml-large-v3.bin"),
+    ("large-v3-turbo", "ggml-large-v3-turbo.bin"),
 ];
 
 // ============================================================================
@@ -122,7 +123,7 @@ pub struct ModelDownloader {
 impl ModelDownloader {
     /// Create a new downloader targeting `models_dir`.
     pub fn new(app: AppHandle, models_dir: PathBuf) -> Self {
-        // Policy::limited(10) follows up to 10 redirects — needed for HuggingFace CDN.
+        // Policy::limited(10) follows up to 10 redirects - needed for HuggingFace CDN.
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::limited(10))
             .user_agent("Mozilla/5.0 transcribe-video/1.0")
@@ -184,7 +185,7 @@ impl ModelDownloader {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     last_error_msg = Some(e.to_string());
-                    
+
                     // Check if error is retryable (network-related)
                     let is_retryable = matches!(e, DownloadError::Http(_))
                         || matches!(e, DownloadError::Io(ref io_err) 
@@ -199,7 +200,7 @@ impl ModelDownloader {
                             "[ModelDownloader] Retryable error on attempt {}/{}, retrying in {}s...",
                             attempt, Self::MAX_RETRIES, delay
                         );
-                        
+
                         // Emit retrying event for UI
                         let _ = self.app.emit("model-download-retrying", serde_json::json!({
                             "modelName": model_name,
@@ -241,7 +242,7 @@ impl ModelDownloader {
         if dest.exists() {
             std::fs::remove_file(&dest).map_err(DownloadError::Io)?;
         }
-        
+
         // Also clean up any .tmp files for this model
         let tmp_file = dest.with_extension("tmp");
         if tmp_file.exists() {
@@ -300,6 +301,31 @@ impl ModelDownloader {
 
             flatten_single_subdir(&tmp_extract_dir)?;
 
+            // Migrate .int8.onnx files to expected .onnx filenames
+            let files_to_migrate = [
+                ("encoder-model.int8.onnx", "encoder-model.onnx"),
+                ("decoder_joint-model.int8.onnx", "decoder_joint-model.onnx"),
+                ("model.int8.onnx", "model.onnx"), // fallback if named differently
+            ];
+
+            for (src_name, dst_name) in files_to_migrate.iter() {
+                let src_path = tmp_extract_dir.join(src_name);
+                let dst_path = tmp_extract_dir.join(dst_name);
+
+                if src_path.exists() && !dst_path.exists() {
+                    eprintln!(
+                        "[ModelDownloader] Migrating Parakeet file {:?} to {:?}",
+                        src_name, dst_name
+                    );
+                    if let Err(e) = std::fs::rename(&src_path, &dst_path) {
+                        eprintln!(
+                            "[WARN] Failed to rename {:?} to {:?}: {}",
+                            src_path, dst_path, e
+                        );
+                    }
+                }
+            }
+
             if !has_parakeet_required_files(&tmp_extract_dir) {
                 return Err(DownloadError::Other(format!(
                     "Parakeet ONNX validation failed: missing encoder*/decoder*.onnx in {:?}. Found: {:?}",
@@ -320,7 +346,7 @@ impl ModelDownloader {
         std::fs::rename(&tmp_extract_dir, &target_dir).map_err(DownloadError::Io)?;
 
         let size_mb = dir_size_mb(&target_dir);
-        eprintln!("[ModelDownloader] Parakeet ONNX done — {} MB", size_mb);
+        eprintln!("[ModelDownloader] Parakeet ONNX done - {} MB", size_mb);
         self.emit_complete(model_name, size_mb, &target_dir);
         Ok(())
     }
@@ -333,9 +359,9 @@ impl ModelDownloader {
         let file = std::fs::File::open(archive).map_err(DownloadError::Io)?;
         let decoder = GzDecoder::new(file);
         let mut tarball = Archive::new(decoder);
-        tarball.unpack(dest_dir).map_err(|e| {
-            DownloadError::Other(format!("Failed to extract tar.gz: {}", e))
-        })?;
+        tarball
+            .unpack(dest_dir)
+            .map_err(|e| DownloadError::Other(format!("Failed to extract tar.gz: {}", e)))?;
         Ok(())
     }
 
@@ -343,9 +369,9 @@ impl ModelDownloader {
 
     /// Downloads two files that make up the Sherpa-ONNX diarization model:
     ///
-    /// 1. Segmentation — `.tar.bz2` from GitHub Releases, extracted to
-    ///    `sherpa-onnx-diarization/sherpa-onnx-segmentation/`
-    /// 2. Embedding — single `.onnx` from GitHub Releases, saved to
+    /// 1. Segmentation - `.tar.bz2` from GitHub Releases, extracted to
+    ///    `sherpa-onnx-diarization/sherpa-onnx-reverb-diarization-v1/`
+    /// 2. Embedding - single `.onnx` from GitHub Releases, saved to
     ///    `sherpa-onnx-diarization/sherpa-onnx-embedding/`
     async fn download_sherpa_onnx(&self, cancel: &Arc<AtomicBool>) -> Result<(), DownloadError> {
         let base_dir = self.models_dir.join(SHERPA_REGISTRY.model_name);
@@ -357,7 +383,10 @@ impl ModelDownloader {
         std::fs::create_dir_all(&base_dir)?;
         std::fs::create_dir_all(&emb_dir)?;
 
-        if !has_required_file(&seg_dir, SHERPA_REGISTRY.segmentation_required_file) {
+        if !has_any_required_files(
+            &seg_dir,
+            &[SHERPA_REGISTRY.segmentation_required_file, "model.int8.onnx"],
+        ) {
             if cancel.load(Ordering::Relaxed) {
                 return Err(DownloadError::Cancelled);
             }
@@ -394,14 +423,23 @@ impl ModelDownloader {
 
             flatten_single_subdir(&seg_tmp_extract)?;
 
-            if !has_required_file(&seg_tmp_extract, SHERPA_REGISTRY.segmentation_required_file) {
+            if !has_any_required_files(
+                &seg_tmp_extract,
+                &[SHERPA_REGISTRY.segmentation_required_file, "model.int8.onnx"],
+            ) {
                 let _ = std::fs::remove_dir_all(&seg_tmp_extract);
                 return Err(DownloadError::Other(format!(
-                    "Sherpa segmentation validation failed: missing '{}' in {:?}. Found: {:?}",
-                    SHERPA_REGISTRY.segmentation_required_file,
+                    "Sherpa segmentation validation failed: missing model.onnx/model.int8.onnx in {:?}. Found: {:?}",
                     seg_tmp_extract,
                     list_model_files(&seg_tmp_extract)
                 )));
+            }
+
+            if !validate_non_empty_files(&seg_tmp_extract, &["model.onnx", "model.int8.onnx"]) {
+                let _ = std::fs::remove_dir_all(&seg_tmp_extract);
+                return Err(DownloadError::Other(
+                    "Sherpa segmentation validation failed: model file size is zero".to_string(),
+                ));
             }
 
             cleanup_dir_if_exists(&seg_dir)?;
@@ -428,14 +466,22 @@ impl ModelDownloader {
                 SHERPA_REGISTRY.model_name,
                 cancel,
             )
-                .await?;
+            .await?;
+
+            if !validate_non_empty_file(&emb_dest) {
+                return Err(DownloadError::Other(format!(
+                    "Sherpa embedding validation failed: file is empty ({})",
+                    emb_dest.display()
+                )));
+            }
+
             self.emit_stage_complete(SHERPA_REGISTRY.model_name, "embedding");
         } else {
             eprintln!("[ModelDownloader] Sherpa embedding already present, skipping.");
         }
 
         let size_mb = dir_size_mb(&base_dir);
-        eprintln!("[ModelDownloader] Sherpa-ONNX done — {} MB", size_mb);
+        eprintln!("[ModelDownloader] Sherpa-ONNX done - {} MB", size_mb);
         self.emit_complete(SHERPA_REGISTRY.model_name, size_mb, &base_dir);
         Ok(())
     }
@@ -521,10 +567,17 @@ impl ModelDownloader {
 
         // Emit 100% on successful completion.
         let final_mb = downloaded as f64 / (1024.0 * 1024.0);
-        let avg_speed = downloaded as f64
-            / start_time.elapsed().as_secs_f64().max(0.001)
-            / (1024.0 * 1024.0);
-        self.emit_progress(model_name, final_mb, final_mb, 100.0, avg_speed, Some(0.0), false);
+        let avg_speed =
+            downloaded as f64 / start_time.elapsed().as_secs_f64().max(0.001) / (1024.0 * 1024.0);
+        self.emit_progress(
+            model_name,
+            final_mb,
+            final_mb,
+            100.0,
+            avg_speed,
+            Some(0.0),
+            false,
+        );
 
         Ok(downloaded)
     }
@@ -569,7 +622,14 @@ impl ModelDownloader {
 
     /// Emit a stage-progress event so the UI can show per-stage progress bars
     /// (used by Sherpa-ONNX which has segmentation + embedding stages).
-    fn emit_stage(&self, model_name: &str, stage: &str, percent: f64, current_mb: f64, total_mb: f64) {
+    fn emit_stage(
+        &self,
+        model_name: &str,
+        stage: &str,
+        percent: f64,
+        current_mb: f64,
+        total_mb: f64,
+    ) {
         let _ = self.app.emit(
             "model-download-stage",
             serde_json::json!({
@@ -596,7 +656,7 @@ impl ModelDownloader {
 }
 
 // ============================================================================
-// Static helpers — model metadata
+// Static helpers - model metadata
 // ============================================================================
 
 /// Map a Whisper model name (with or without the `whisper-` prefix) to the
@@ -628,16 +688,16 @@ fn extract_tar_bz2(archive: &Path, dest_dir: &Path) -> Result<(), DownloadError>
 /// contents up into `dir` and remove the now-empty subdirectory.
 ///
 /// This normalises tarballs that wrap everything in a top-level folder (e.g.
-/// `sherpa-onnx-pyannote-segmentation-3-0/`) so downstream code sees files
+/// `sherpa-onnx-reverb-diarization-v1/`) so downstream code sees files
 /// directly inside `seg_dir`.
-///
-/// NOTE: The tarball folder name still contains "pyannote" because that's the
-/// upstream archive naming from k2-fsa/sherpa-onnx. This is purely a filename
-/// concern and does not mean we depend on the pyannote Python library.
 fn flatten_single_subdir(dir: &Path) -> Result<(), DownloadError> {
     let entries: Vec<_> = std::fs::read_dir(dir)
         .map_err(DownloadError::Io)?
         .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            !name.starts_with("._") && !name.starts_with(".DS_Store")
+        })
         .collect();
 
     if entries.len() != 1 {
@@ -648,7 +708,10 @@ fn flatten_single_subdir(dir: &Path) -> Result<(), DownloadError> {
         return Ok(());
     }
 
-    for sub_entry in std::fs::read_dir(&subdir).map_err(DownloadError::Io)?.flatten() {
+    for sub_entry in std::fs::read_dir(&subdir)
+        .map_err(DownloadError::Io)?
+        .flatten()
+    {
         let src = sub_entry.path();
         let dst = dir.join(src.file_name().expect("DirEntry has a filename"));
         std::fs::rename(&src, &dst).map_err(DownloadError::Io)?;
@@ -680,8 +743,22 @@ fn has_parakeet_required_files(dir: &Path) -> bool {
     has_onnx_with_prefix(dir, "encoder") && has_onnx_with_prefix(dir, "decoder")
 }
 
-fn has_required_file(dir: &Path, file_name: &str) -> bool {
-    dir.join(file_name).exists()
+fn has_any_required_files(dir: &Path, file_names: &[&str]) -> bool {
+    file_names.iter().any(|name| dir.join(name).exists())
+}
+
+fn validate_non_empty_file(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false)
+}
+
+fn validate_non_empty_files(dir: &Path, candidates: &[&str]) -> bool {
+    candidates
+        .iter()
+        .map(|name| dir.join(name))
+        .filter(|path| path.exists())
+        .any(|path| validate_non_empty_file(&path))
 }
 
 fn cleanup_dir_if_exists(dir: &Path) -> Result<(), DownloadError> {

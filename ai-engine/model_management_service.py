@@ -3,25 +3,12 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 from typing import Optional
 
 from ipc_events import emit_delete_complete, emit_error, emit_models_list, emit_validation_results
+from model_config import get_model_size_mb
 from model_registry import ModelRegistry
-
-
-def get_model_size_mb(path: str) -> int:
-    """Get the size of a model directory in MB."""
-    total_size = 0
-    for dirpath, dirnames, filenames in os.walk(path):
-        for f in filenames:
-            fp = os.path.join(dirpath, f)
-            try:
-                total_size += os.path.getsize(fp)
-            except (OSError, IOError):
-                pass
-    return total_size // (1024 * 1024)
 
 
 def list_models(cache_dir: str, logger) -> None:
@@ -49,7 +36,7 @@ def list_models(cache_dir: str, logger) -> None:
             logger.debug(f"Skipping individual diarization component: {model_name}")
             continue
 
-
+        if model_name == "sherpa-onnx-diarization":
             seg_path = os.path.join(model_path, "sherpa-onnx-segmentation")
             emb_path = os.path.join(model_path, "sherpa-onnx-embedding")
             if not os.path.exists(seg_path) or not os.path.exists(emb_path):
@@ -180,20 +167,13 @@ def validate_models(cache_dir: str, logger, model_name: Optional[str] = None) ->
     emit_validation_results(results, cache_dir)
 
 
-def delete_model(model_name: str, cache_dir: str, logger, model_pool) -> bool:
+def delete_model(model_name: str, cache_dir: str, logger) -> bool:
     """Delete a model from cache and emit protocol events.
 
     Returns:
         True on success, False on failure.
     """
     logger.info(f"Deleting model: {model_name} from cache: {cache_dir}")
-
-    try:
-        model_pool.clear()
-        logger.info(f"Cleared model pool before deleting {model_name}")
-        time.sleep(0.5)
-    except Exception as e:
-        logger.warning(f"Error clearing model pool: {e}")
 
     registry = ModelRegistry(cache_dir)
     result = registry.delete_model(model_name)

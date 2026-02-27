@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useEffect, useRef, useCallback, useState, useMemo } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo, useImperativeHandle, forwardRef } from "react";
 import { List } from "react-window";
 
 import { cn } from "@/lib/utils";
@@ -28,6 +28,13 @@ function highlightText(text: string, query: string): React.ReactNode {
     }
     return part;
   });
+}
+
+/**
+ * Imperative handle exposed via ref
+ */
+export interface TranscriptionSegmentsHandle {
+  scrollToActive: () => void;
 }
 
 /**
@@ -87,23 +94,25 @@ function SegmentItem({ segment, isActive, onClick, searchQuery, isHighlighted, m
     <div
       onClick={onClick}
       className={cn(
-        "cursor-pointer border-b border-border/70 px-3 py-2.5 transition-colors duration-200 hover:bg-muted/45 sm:px-4 sm:py-3",
-        "flex gap-2 sm:gap-4 last:border-b-0",
-        isActive && [
-          "border-l-2 border-l-primary bg-primary/10",
-          "shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--primary)_18%,transparent)]"
-        ],
-        isHighlighted && !isActive && [
-          "border-l-2 border-l-foreground/20 bg-accent/60"
-        ]
+        "group relative cursor-pointer px-3 py-3 transition-colors duration-200 sm:px-5 sm:py-4",
+        "flex gap-3 sm:gap-6",
+        !isActive && "hover:bg-muted/40",
+        isHighlighted && !isActive && "bg-accent/60"
       )}
     >
-      <div className="shrink-0 flex flex-col items-start gap-1">
+      {isActive && (
+        <div
+          className="absolute inset-0 bg-primary/10 sm:rounded-lg"
+          aria-hidden
+        />
+      )}
+
+      <div className="relative shrink-0 flex flex-col items-start gap-1 z-10 w-[50px] sm:w-[65px]">
         <div className={cn(
-          "min-w-[50px] font-mono transition-colors duration-200 sm:min-w-[60px]",
+          "font-mono transition-colors duration-200 mt-0.5",
           isActive
-            ? "text-primary text-[13px] font-semibold sm:text-base"
-            : "text-muted-foreground text-[11px] sm:text-sm"
+            ? "text-primary text-[13px] font-bold sm:text-[15px]"
+            : "text-muted-foreground/80 text-[12px] sm:text-sm font-medium"
         )}>
           {formatTime(segment.start)}
         </div>
@@ -113,22 +122,23 @@ function SegmentItem({ segment, isActive, onClick, searchQuery, isHighlighted, m
           </span>
         )}
       </div>
-      <div className="flex-1 min-w-0">
+
+      <div className="relative flex-1 min-w-0 z-10">
         {segment.speaker && (
           <span className={cn(
-            "mb-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium transition-colors duration-200 sm:px-2",
+            "mb-1.5 inline-block rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase transition-colors duration-200",
             isActive
               ? "bg-primary/20 text-primary"
-              : "bg-muted text-foreground/75"
+              : "bg-muted/60 text-muted-foreground"
           )}>
             {searchQuery ? highlightText(segment.speaker, searchQuery) : segment.speaker}
           </span>
         )}
         <p className={cn(
-          "break-words leading-relaxed transition-colors duration-200",
+          "break-words leading-[1.7] transition-colors duration-200",
           isActive
             ? "text-foreground text-[14px] font-medium sm:text-base"
-            : "text-[14px] sm:text-sm"
+            : "text-foreground/75 text-[14px] sm:text-[15px]"
         )}>
           {searchQuery ? highlightText(segment.text, searchQuery) : segment.text}
         </p>
@@ -213,7 +223,8 @@ function VirtualizedSegmentRow(
  * @param highlightedSearchIndex - Index of the currently highlighted search result
  * @param onScrollToSegment - Callback to scroll to a specific segment
  */
-export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
+export const TranscriptionSegments = React.memo(
+  forwardRef<TranscriptionSegmentsHandle, TranscriptionSegmentsProps>(
   ({
     segments,
     currentTime,
@@ -224,7 +235,7 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
     searchQuery = "",
     highlightedSearchIndex,
     onScrollToSegment,
-  }): React.JSX.Element => {
+  }, ref): React.JSX.Element => {
     const scrollElementToCenter = useCallback((container: HTMLElement, element: HTMLElement) => {
       const containerRect = container.getBoundingClientRect();
       const elementRect = element.getBoundingClientRect();
@@ -274,6 +285,19 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
     // Ref to track if user is manually scrolling (to pause auto-scroll temporarily)
     const isUserScrollingRef = useRef(false);
     const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Expose scrollToActive via ref so parent can trigger scroll to active segment
+    useImperativeHandle(ref, () => ({
+      scrollToActive: () => {
+        if (activeIndex === -1) return;
+        const container = containerRef.current;
+        if (!container) return;
+        const segmentEl = segmentRefs.current[activeIndex];
+        if (segmentEl) {
+          scrollElementToCenter(container, segmentEl);
+        }
+      },
+    }), [activeIndex, scrollElementToCenter]);
     /**
      * Update active segment index based on current playback time
      */
@@ -285,20 +309,46 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
         return;
       }
 
-      const lastIndex = segments.length - 1;
-      const newActiveIndex = segments.findIndex((segment, index) => {
-        if (index === lastIndex) {
-          return currentTime >= segment.start && currentTime <= segment.end;
+      if (segments.length === 0) {
+        if (activeIndex !== -1) {
+          setActiveIndex(-1);
         }
+        return;
+      }
 
-        return currentTime >= segment.start && currentTime < segment.end;
-      });
+      const lastIndex = segments.length - 1;
+      const isTimeInsideSegment = (index: number) => {
+        if (index < 0 || index > lastIndex) return false;
+        const segment = segments[index];
+        if (!segment) return false;
+        return index === lastIndex
+          ? currentTime >= segment.start && currentTime <= segment.end
+          : currentTime >= segment.start && currentTime < segment.end;
+      };
 
-      if (newActiveIndex !== -1 && newActiveIndex !== activeIndex) {
+      // Fast path: still inside current segment.
+      if (activeIndex >= 0 && isTimeInsideSegment(activeIndex)) {
+        return;
+      }
+
+      // Adjacent segment checks handle normal playback without scanning all segments.
+      const nextIndex = activeIndex + 1;
+      if (isTimeInsideSegment(nextIndex)) {
+        setActiveIndex(nextIndex);
+        return;
+      }
+
+      const previousIndex = activeIndex - 1;
+      if (isTimeInsideSegment(previousIndex)) {
+        setActiveIndex(previousIndex);
+        return;
+      }
+
+      // Fallback for seeks/jumps: full scan.
+      const newActiveIndex = segments.findIndex((_, index) => isTimeInsideSegment(index));
+
+      if (newActiveIndex !== activeIndex) {
         setActiveIndex(newActiveIndex);
-      } else if (newActiveIndex === -1 && activeIndex !== -1) {
-        // Clear active index if current time is outside all segments
-        setActiveIndex(-1);
       }
     }, [currentTime, segments, activeIndex, selectedSegmentIndex]);
 
@@ -375,7 +425,6 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
       lastScrolledIndexRef.current = activeIndex;
     }, [
       activeIndex,
-      currentTime,
       segments.length,
       isElementVisible,
       isElementBelowMiddle,
@@ -453,7 +502,7 @@ export const TranscriptionSegments = React.memo<TranscriptionSegmentsProps>(
         />
       </div>
     );
-  }
+  })
 );
 
 TranscriptionSegments.displayName = "TranscriptionSegments";

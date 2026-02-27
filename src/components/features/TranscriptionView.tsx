@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, FileText, RefreshCw, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/hooks";
 import { useTasks, useUIStore } from "@/stores";
 
 import { CompletedView } from "./CompletedView";
@@ -10,6 +11,7 @@ import { ProcessingView } from "./ProcessingView";
 import { QueuedView } from "./QueuedView";
 
 export function TranscriptionView() {
+  const { t } = useI18n();
   const selectedTaskId = useUIStore((s) => s.selectedTaskId);
   const retryTask = useTasks((s) => s.retryTask);
   const tasks = useTasks((s) => s.tasks);
@@ -28,10 +30,9 @@ export function TranscriptionView() {
         <div className="rounded-full bg-muted p-4 mb-4">
           <FileText className="h-8 w-8 text-muted-foreground" />
         </div>
-        <h2 className="text-lg font-semibold mb-2">No Task Selected</h2>
+        <h2 className="text-lg font-semibold mb-2">{t("transcriptionView.noTaskTitle")}</h2>
         <p className="text-sm text-muted-foreground max-w-sm">
-          Select a task from the list on the left to view the transcription result.
-          Upload a video or audio file to create a new task.
+          {t("transcriptionView.noTaskDesc")}
         </p>
       </div>
     );
@@ -52,10 +53,10 @@ export function TranscriptionView() {
           <CardTitle className="text-lg">{task.fileName}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-destructive">Error: {task.error}</p>
+          <p className="text-destructive">{`${t("transcriptionView.error")}: ${task.error}`}</p>
           <Button onClick={() => retryTask(task.id)}>
             <RefreshCw className="mr-2 h-4 w-4" />
-            Retry
+            {t("common.retry")}
           </Button>
         </CardContent>
       </Card>
@@ -68,14 +69,13 @@ export function TranscriptionView() {
         <div className="rounded-full bg-destructive/10 p-4 mb-4">
           <XCircle className="h-8 w-8 text-destructive" />
         </div>
-        <h2 className="text-lg font-semibold mb-2">Transcription Cancelled</h2>
+        <h2 className="text-lg font-semibold mb-2">{t("transcriptionView.cancelled")}</h2>
         <p className="text-sm text-muted-foreground max-w-sm">
-          The task was cancelled by the user. You can remove it from the list
-          or re-upload the file for reprocessing.
+          {t("transcriptionView.cancelledDesc")}
         </p>
         <Button onClick={() => retryTask(task.id)} className="mt-4">
           <RefreshCw className="mr-2 h-4 w-4" />
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
@@ -87,14 +87,13 @@ export function TranscriptionView() {
         <div className="rounded-full bg-orange-500/10 p-4 mb-4">
           <AlertTriangle className="h-8 w-8 text-orange-500" />
         </div>
-        <h2 className="text-lg font-semibold mb-2">Transcription Interrupted</h2>
+        <h2 className="text-lg font-semibold mb-2">{t("transcriptionView.interrupted")}</h2>
         <p className="text-sm text-muted-foreground max-w-sm">
-          The application closed during processing. You can remove this task or
-          re-upload the file to restart transcription.
+          {t("transcriptionView.interruptedDesc")}
         </p>
         <Button onClick={() => retryTask(task.id)} className="mt-4">
           <RefreshCw className="mr-2 h-4 w-4" />
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
@@ -104,7 +103,7 @@ export function TranscriptionView() {
     return (
       <Card className="h-full">
         <CardContent className="flex h-full items-center justify-center p-6">
-          <p className="text-muted-foreground">No transcription data</p>
+          <p className="text-muted-foreground">{t("transcriptionView.noData")}</p>
         </CardContent>
       </Card>
     );

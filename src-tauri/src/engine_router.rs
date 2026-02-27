@@ -4,9 +4,9 @@
 //! transcription_manager.rs via transcribe-rs.
 //! Python is called exclusively for Sherpa-ONNX diarization.
 
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
-use serde::{Deserialize, Serialize};
 
 use crate::python_bridge::{PythonBridge, SpeakerSegment};
 
@@ -60,11 +60,12 @@ impl EngineRouter {
     pub fn new(
         python_path: &Path,
         engine_path: &Path,
-        cache_dir: &Path,
+        models_dir: &Path,
+        audio_cache_dir: &Path,
         _preference: EnginePreference,
     ) -> Self {
         Self {
-            python_bridge: PythonBridge::new(python_path, engine_path, cache_dir),
+            python_bridge: PythonBridge::new(python_path, engine_path, models_dir, audio_cache_dir),
         }
     }
 
@@ -76,9 +77,16 @@ impl EngineRouter {
         num_speakers: Option<i32>,
     ) -> Option<Vec<SpeakerSegment>> {
         eprintln!("[INFO] EngineRouter: Running Sherpa-ONNX diarization");
-        match self.python_bridge.diarize_sherpa(audio_path, num_speakers).await {
+        match self
+            .python_bridge
+            .diarize_sherpa(audio_path, num_speakers)
+            .await
+        {
             Ok(segs) => {
-                eprintln!("[INFO] EngineRouter: Diarization returned {} segments", segs.len());
+                eprintln!(
+                    "[INFO] EngineRouter: Diarization returned {} segments",
+                    segs.len()
+                );
                 Some(segs)
             }
             Err(e) => {

@@ -22,9 +22,6 @@ export async function checkPythonEnvironment(): Promise<CommandResult<PythonChec
     const result = await invoke<PythonCheckResult>("check_python_environment");
     logger.info("Python environment checked", {
       version: result.version,
-      pytorchInstalled: result.pytorchInstalled,
-      cudaAvailable: result.cudaAvailable,
-      mpsAvailable: result.mpsAvailable,
     });
     return { success: true, data: result };
   } catch (error) {

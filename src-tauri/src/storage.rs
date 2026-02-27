@@ -9,6 +9,10 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 use crate::AppError;
+use crate::types::{TranscriptionSegment, SpeakerTurn};
+
+/// Alias for backward compatibility with existing serialized data
+pub type TaskSegment = TranscriptionSegment;
 
 /// Metadata for a transcription task (stored in index)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,23 +98,10 @@ pub struct TaskResult {
     pub speaker_segments: Option<Vec<TaskSegment>>,
 }
 
-/// A single transcription segment
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskSegment {
-    pub start: f64,
-    pub end: f64,
-    pub text: String,
-    pub speaker: Option<String>,
-    pub confidence: f64,
-}
+/// A single transcription segment - using TranscriptionSegment from crate::types
+// (TaskSegment is a type alias defined above)
 
-/// A speaker turn from diarization
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpeakerTurn {
-    pub start: f64,
-    pub end: f64,
-    pub speaker: String,
-}
+/// A speaker turn - using SpeakerTurn from crate::types
 
 /// Get the transcription storage directory
 #[tauri::command]

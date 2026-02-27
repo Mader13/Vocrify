@@ -17,10 +17,10 @@
   --secondary: oklch(0.9245 0.0138 92.9892);
   --secondary-foreground: oklch(0.4334 0.0177 98.6048);
   --muted: oklch(0.9341 0.0153 90.2390);
-  --muted-foreground: oklch(0.6059 0.0075 97.4233);
+  --muted-foreground: oklch(0.45 0.01 97.4233); /* Darker gray for better contrast in light mode */
   --accent: oklch(0.9245 0.0138 92.9892);
   --accent-foreground: oklch(0.2671 0.0196 98.9390);
-  --destructive: oklch(0.5778 0.2236 27.6936);
+  --destructive: oklch(0.50 0.2236 27.6936); /* Darker red for light mode contrast */
   --destructive-foreground: oklch(1.0000 0 0);
   --border: oklch(0.8847 0.0069 97.3627);
   --input: oklch(0.7621 0.0156 98.3528);
@@ -47,7 +47,7 @@
   --status-queued: oklch(0.721 0.151 68.96);
   --status-processing: oklch(0.627 0.195 253.21);
   --status-completed: oklch(0.652 0.177 142.50);
-  --status-failed: oklch(0.5778 0.2236 27.6936);
+  --status-failed: oklch(0.50 0.2236 27.6936);
 
   /* Border radius */
   --radius: 0.5rem;
@@ -286,38 +286,7 @@ input[type="range"]::-moz-range-thumb {
   border: none;
 }
 
-/* Compact volume slider */
-.volume-slider {
-  height: 0.375rem !important; /* h-1.5 */
-  background-color: color-mix(in srgb, var(--muted-foreground) 30%, transparent) !important;
-  appearance: none !important;
-  -webkit-appearance: none !important;
-}
 
-.volume-slider::-webkit-slider-thumb {
-  width: 0.75rem !important; /* w-3 */
-  height: 0.75rem !important; /* h-3 */
-  background-color: #f59e0b !important; /* orange-500 */
-  border-radius: 50% !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
-  appearance: none !important;
-  -webkit-appearance: none !important;
-  cursor: pointer !important;
-}
-
-.volume-slider::-moz-range-thumb {
-  width: 0.75rem !important;
-  height: 0.75rem !important;
-  background-color: #f59e0b !important; /* orange-500 */
-  border-radius: 50% !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
-  border: none !important;
-  cursor: pointer !important;
-}
-
-.volume-slider:hover {
-  background-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent) !important;
-}
 
 /* Animations */
 @keyframes spin {

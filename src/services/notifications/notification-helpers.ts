@@ -1,5 +1,5 @@
 /**
- * Notification Helpers — convenience functions for showing notifications.
+ * Notification Helpers - convenience functions for showing notifications.
  */
 
 import { useNotificationStore as useUINotificationStore } from "@/components/ui/notifications";

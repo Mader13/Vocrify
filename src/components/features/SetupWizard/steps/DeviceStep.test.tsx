@@ -36,6 +36,6 @@ describe("DeviceStep", () => {
     render(<DeviceStep />);
 
     expect(screen.getByText("AMD/Intel GPU (Vulkan)")).toBeInTheDocument();
-    expect(screen.getByText("⚡ Fast")).toBeInTheDocument();
+    expect(screen.getByText("Fast")).toBeInTheDocument();
   });
 });

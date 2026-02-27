@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 """
 Transcribe Video - AI Engine
-Phase 4: Diarization-only microservice.
-
-This engine is called by the Rust backend (python_bridge.rs) exclusively for
-speaker diarization via Sherpa-ONNX. All audio transcription is handled by
-the Rust transcribe-rs library.
+Utility entrypoint for setup checks and model management.
 
 Usage:
-    python main.py --diarize-only --audio <path> --provider sherpa-onnx [--cache-dir <path>]
     python main.py --download-model sherpa-onnx-diarization --cache-dir <path> --model-type diarization
     python main.py --list-models --cache-dir <path>
     python main.py --delete-model <model_name> --cache-dir <path>
@@ -29,7 +24,6 @@ from commands import (
     handle_check_command,
     handle_cancel_download,
     handle_delete_model,
-    handle_diarize_only,
     handle_download_model,
     handle_list_models,
     handle_validate_models,
@@ -60,35 +54,6 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Transcribe Video AI Engine - Diarization Microservice",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "--audio", type=str, default=None, help="Path to audio file for diarization"
-    )
-    parser.add_argument(
-        "--diarize-only", action="store_true", help="Run diarization only (required)"
-    )
-    parser.add_argument(
-        "--provider",
-        type=str,
-        default=None,
-        help="Diarization provider alias",
-    )
-    parser.add_argument(
-        "--diarization-provider",
-        type=str,
-        default="sherpa-onnx",
-        choices=["none", "sherpa-onnx"],
-        help="Diarization provider",
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="Inference device (sherpa-onnx is CPU-only)",
-    )
-    parser.add_argument(
-        "--num-speakers", type=int, default=-1, help="Number of speakers (-1 = auto)"
     )
     parser.add_argument(
         "--download-model", type=str, default=None, help="Download a diarization model"
@@ -150,12 +115,11 @@ COMMANDS = {
     if args.cancel_download
     else None,
     "check_command": lambda args: handle_check_command(args) if args.command else None,
-    "diarize_only": lambda args: handle_diarize_only(args) if args.diarize_only else None,
 }
 
 
 def main():
-    """Main entry point — diarization microservice dispatch."""
+    """Main entry point - diarization microservice dispatch."""
     args = parse_args()
 
     print(
@@ -167,9 +131,6 @@ def main():
                 "parsed_args": {
                     "download_model": args.download_model,
                     "cache_dir": args.cache_dir,
-                    "diarize_only": args.diarize_only,
-                    "audio": args.audio,
-                    "provider": args.provider,
                 },
             }
         ),
@@ -184,7 +145,7 @@ def main():
 
     from ipc_events import emit_error
 
-    emit_error("No valid command provided. Use --diarize-only, --download-model, --list-models, etc.")
+    emit_error("No valid command provided. Use --download-model, --list-models, --delete-model, etc.")
     return 1
 
 

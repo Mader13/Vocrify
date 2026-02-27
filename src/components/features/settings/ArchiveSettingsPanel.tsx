@@ -1,10 +1,12 @@
 import { Settings } from "lucide-react";
 import { useTasks } from "@/stores";
+import { useI18n } from "@/hooks";
 import type { ArchiveMode, ArchiveCompression } from "@/types";
 import { ARCHIVE_COMPRESSION_LABELS } from "@/types";
 import { cn } from "@/lib/utils";
 
 export function ArchiveSettingsPanel() {
+  const { t } = useI18n();
   const archiveSettings = useTasks((s) => s.archiveSettings);
   const setArchiveSettings = useTasks((s) => s.setArchiveSettings);
 
@@ -21,10 +23,10 @@ export function ArchiveSettingsPanel() {
   };
 
   const compressionOptions: { value: ArchiveCompression; label: string; desc: string }[] = [
-    { value: "none", label: "No compression", desc: "Maximum quality, larger file size" },
-    { value: "light", label: "Light", desc: "High quality, ~30% smaller" },
-    { value: "medium", label: "Medium", desc: "Balanced quality and size" },
-    { value: "heavy", label: "Heavy", desc: "Smallest size, lower quality" },
+    { value: "none", label: t("settings.archiveNoCompression"), desc: t("settings.archiveNoCompressionDesc") },
+    { value: "light", label: t("settings.archiveLight"), desc: t("settings.archiveLightDesc") },
+    { value: "medium", label: t("settings.archiveMedium"), desc: t("settings.archiveMediumDesc") },
+    { value: "heavy", label: t("settings.archiveHeavy"), desc: t("settings.archiveHeavyDesc") },
   ];
 
   return (
@@ -32,20 +34,20 @@ export function ArchiveSettingsPanel() {
       <div>
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <Settings className="h-5 w-5" />
-          Archive Settings
+          {t("settings.archiveTitle")}
         </h3>
         <p className="text-sm text-muted-foreground mt-1">
-          Configure default behavior for archiving transcriptions
+          {t("settings.archiveDescription")}
         </p>
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm font-medium">Default Archive Mode:</label>
+        <label className="text-sm font-medium">{t("settings.archiveDefaultMode")}</label>
         <div className="grid grid-cols-1 gap-2">
           {[
-            { value: "keep_all", label: "Keep All", desc: "Don't delete any files" },
-            { value: "delete_video", label: "Delete Video", desc: "Delete video, keep audio" },
-            { value: "text_only", label: "Text Only", desc: "Delete all media files" },
+            { value: "keep_all", label: t("settings.archiveKeepAll"), desc: t("settings.archiveKeepAllDesc") },
+            { value: "delete_video", label: t("settings.archiveDeleteVideo"), desc: t("settings.archiveDeleteVideoDesc") },
+            { value: "text_only", label: t("settings.archiveTextOnly"), desc: t("settings.archiveTextOnlyDesc") },
           ].map((option) => (
             <button
               key={option.value}
@@ -75,7 +77,7 @@ export function ArchiveSettingsPanel() {
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm font-medium">Video Compression (for Keep All mode):</label>
+        <label className="text-sm font-medium">{t("settings.archiveCompression")}</label>
         <div className="grid grid-cols-2 gap-2">
           {compressionOptions.map((option) => (
             <button
@@ -116,9 +118,9 @@ export function ArchiveSettingsPanel() {
             className="rounded"
           />
           <div>
-            <div className="text-sm font-medium">Remember Choice</div>
+            <div className="text-sm font-medium">{t("settings.archiveRememberChoice")}</div>
             <div className="text-xs text-muted-foreground">
-              Use selected mode for all future archives
+              {t("settings.archiveRememberChoiceDesc")}
             </div>
           </div>
         </label>
@@ -130,9 +132,9 @@ export function ArchiveSettingsPanel() {
             className="rounded"
           />
           <div>
-            <div className="text-sm font-medium">Show File Sizes</div>
+            <div className="text-sm font-medium">{t("settings.archiveShowFileSizes")}</div>
             <div className="text-xs text-muted-foreground">
-              Display file size and potential space savings
+              {t("settings.archiveShowFileSizesDesc")}
             </div>
           </div>
         </label>

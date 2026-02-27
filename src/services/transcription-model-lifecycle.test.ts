@@ -2,16 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TranscriptionOptions } from "@/types";
 
-const { invokeMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(),
-}));
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: invokeMock,
+const { loadModelRustMock, transcribeRustMock } = vi.hoisted(() => ({
+  loadModelRustMock: vi.fn(async () => ({ success: true })),
+  transcribeRustMock: vi.fn(async () => ({
+    success: true,
+    data: { segments: [], language: "en", duration: 0 },
+  })),
 }));
 
 vi.mock("@/services/tauri", () => ({
-  startTranscription: vi.fn(async () => ({ success: true })),
+  loadModelRust: loadModelRustMock,
+  transcribeRust: transcribeRustMock,
+  initTranscriptionManager: vi.fn(async () => ({ success: true })),
   onTranscriptionComplete: vi.fn(async () => vi.fn()),
 }));
 
@@ -28,21 +30,15 @@ const baseOptions: TranscriptionOptions = {
 
 describe("transcription model lifecycle", () => {
   beforeEach(() => {
-    invokeMock.mockReset();
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === "transcribe_rust") {
-        return { segments: [], language: "en", duration: 0 };
-      }
-
-      return undefined;
-    });
+    loadModelRustMock.mockClear();
+    transcribeRustMock.mockClear();
   });
 
   it("loads rust model once for consecutive tasks with same model", async () => {
     await transcribeWithFallback("task-1", "C:/tmp/a.wav", baseOptions, "auto");
     await transcribeWithFallback("task-2", "C:/tmp/b.wav", baseOptions, "auto");
 
-    const loadCalls = invokeMock.mock.calls.filter(([command]) => command === "load_model_rust");
-    expect(loadCalls).toHaveLength(1);
+    expect(loadModelRustMock).toHaveBeenCalledTimes(1);
+    expect(transcribeRustMock).toHaveBeenCalledTimes(2);
   });
 });

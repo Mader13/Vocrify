@@ -54,7 +54,7 @@ export function ProgressBar({
                 {/* Step name */}
                 <span
                   className={cn(
-                    "mt-2 text-xs font-medium text-center max-w-[80px]",
+                    "mt-2 text-xs font-medium text-center max-w-20",
                     isCurrent && "text-primary",
                     isCompleted && "text-green-600 dark:text-green-400",
                     isPending && "text-muted-foreground"
@@ -68,7 +68,7 @@ export function ProgressBar({
               {index < totalSteps - 1 && (
                 <div
                   className={cn(
-                    "flex-1 h-0.5 mx-2 mt-[-20px] transition-colors",
+                    "flex-1 h-0.5 mx-2 -mt-5 transition-colors",
                     index < currentStepIndex
                       ? "bg-green-500"
                       : "bg-muted"

@@ -1,5 +1,5 @@
 """
-Canonical model configuration — single source of truth.
+Canonical model configuration - single source of truth.
 
 All model repository mappings, GGML filenames, and size estimates
 live here. Other modules (model_registry, downloader, environment_checks,
@@ -81,7 +81,7 @@ SHERPA_DIARIZATION_URLS: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Size estimates (MB) — used for progress bars when Content-Length is absent
+# Size estimates (MB) - used for progress bars when Content-Length is absent
 # ---------------------------------------------------------------------------
 MODEL_SIZE_ESTIMATES_MB: dict[str, int] = {
     "whisper-tiny": 74,
@@ -105,7 +105,7 @@ ASSET_SIZE_ESTIMATES_MB: dict[str, int] = {
 
 
 # ---------------------------------------------------------------------------
-# Shared utility — get_model_size_mb  (was duplicated in 3 files)
+# Shared utility - get_model_size_mb  (was duplicated in 3 files)
 # ---------------------------------------------------------------------------
 def get_model_size_mb(path: str) -> int:
     """Get the size of a model directory (or single file) in MB."""

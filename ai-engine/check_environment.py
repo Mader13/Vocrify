@@ -16,6 +16,13 @@ import subprocess
 import importlib
 from pathlib import Path
 
+from utils.ffmpeg_utils import (
+    get_windows_path_from_registry as _get_windows_path_from_registry,
+    find_ffmpeg_in_paths as _find_ffmpeg_in_paths,
+    find_ffmpeg,
+    check_ffmpeg_executable,
+)
+
 
 def check_python_version():
     """Check if Python version is compatible."""
@@ -38,8 +45,7 @@ def check_python_version():
 
         if version.minor >= 13:
             print("\n⚠️  CRITICAL: Python 3.13+ is NOT supported")
-            print("   Key dependencies (faster-whisper, sherpa-onnx)")
-            print("   do not support Python 3.13+ yet.")
+            print("   Some packaged dependencies may not be available for 3.13+ yet.")
             print("\n📖 Solution:")
             print("   1. Install Python 3.12 from https://www.python.org/downloads/")
             print("   2. Create new venv: py -3.12 -m venv venv")
@@ -55,13 +61,14 @@ def check_dependencies():
     print("Dependency Check")
     print("=" * 70)
 
-    # Core dependencies
+    # Core dependencies for setup/model utilities
     core_deps = {
-        "faster_whisper": "1.0.3",
-        "sherpa_onnx": "1.10.0",
-        "numpy": "1.24.4",
-        "soundfile": "0.12.1",
-        "huggingface_hub": "0.23.4",
+        "requests": "2.31.0",
+        "tenacity": "8.5.0",
+        "tqdm": "4.66.4",
+        "jsonschema": "4.22.0",
+        "packaging": "24.0",
+        "psutil": "6.1.0",
     }
 
     all_ok = True

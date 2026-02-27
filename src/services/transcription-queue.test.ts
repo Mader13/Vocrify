@@ -41,4 +41,24 @@ describe("getQueuedTaskIdsToStart", () => {
     const startIds = getQueuedTaskIdsToStart(tasks, 3);
     expect(startIds).toEqual(["q1"]);
   });
+
+  it("defaults to one slot when maxConcurrentTasks is NaN", () => {
+    const tasks: TranscriptionTask[] = [
+      createTask({ id: "q1", status: "queued" }),
+      createTask({ id: "q2", status: "queued" }),
+    ];
+
+    const startIds = getQueuedTaskIdsToStart(tasks, Number.NaN);
+    expect(startIds).toEqual(["q1"]);
+  });
+
+  it("clamps maxConcurrentTasks to at least one", () => {
+    const tasks: TranscriptionTask[] = [
+      createTask({ id: "q1", status: "queued" }),
+      createTask({ id: "q2", status: "queued" }),
+    ];
+
+    const startIds = getQueuedTaskIdsToStart(tasks, 0);
+    expect(startIds).toEqual(["q1"]);
+  });
 });
