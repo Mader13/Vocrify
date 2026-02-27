@@ -1,11 +1,24 @@
 import { useEffect, useState } from "react";
 import { Box, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CheckCard } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
 import { AVAILABLE_MODELS, type LocalModel } from "@/types";
 import { useModelsStore } from "@/stores/modelsStore";
 import { useI18n } from "@/hooks";
+import { getModelsDir, selectOutputDirectory, setModelsDir } from "@/services/tauri";
+import { logger } from "@/lib/logger";
 
 /**
  * Format model size for display
@@ -58,6 +71,13 @@ export function ModelStep() {
   const { modelCheck, checkModel, isChecking } = useSetupStore();
   const { downloads, downloadModel } = useModelsStore();
   const [isDownloadingBase, setIsDownloadingBase] = useState(false);
+  const [modelsDirectory, setModelsDirectory] = useState("");
+  const [modelsDirectoryError, setModelsDirectoryError] = useState<string | null>(null);
+  const [modelsDirectoryNotice, setModelsDirectoryNotice] = useState<string | null>(null);
+  const [pendingModelsDirectory, setPendingModelsDirectory] = useState<string | null>(null);
+  const [isModelsDirectoryLoading, setIsModelsDirectoryLoading] = useState(true);
+  const [isMoveConfirmOpen, setIsMoveConfirmOpen] = useState(false);
+  const [isModelsDirectoryUpdating, setIsModelsDirectoryUpdating] = useState(false);
 
   // Run check on mount
   useEffect(() => {
@@ -65,6 +85,25 @@ export function ModelStep() {
       checkModel();
     }
   }, [modelCheck, checkModel]);
+
+  useEffect(() => {
+    const loadModelsDirectory = async () => {
+      setIsModelsDirectoryLoading(true);
+      setModelsDirectoryError(null);
+
+      const result = await getModelsDir();
+      if (result.success && result.data) {
+        setModelsDirectory(result.data);
+      } else {
+        logger.modelError("Setup wizard: failed to load models directory", { error: result.error });
+        setModelsDirectoryError(t("setup.modelsDirectoryLoadError"));
+      }
+
+      setIsModelsDirectoryLoading(false);
+    };
+
+    void loadModelsDirectory();
+  }, [t]);
 
   // Watch for download completion to re-check models
   useEffect(() => {
@@ -80,6 +119,67 @@ export function ModelStep() {
   const hasModels = modelCheck && modelCheck.installedModels.length > 0;
   const baseDownloadState = downloads["whisper-base"];
   const isDownloading = baseDownloadState?.status === "downloading";
+  const hasInstalledModels = (modelCheck?.installedModels.length ?? 0) > 0;
+
+  const handleSelectModelsDirectory = async () => {
+    setModelsDirectoryError(null);
+    setModelsDirectoryNotice(null);
+
+    const selectedResult = await selectOutputDirectory();
+    if (!selectedResult.success) {
+      logger.modelError("Setup wizard: failed to open models directory picker", { error: selectedResult.error });
+      setModelsDirectoryError(t("setup.modelsDirectorySetError"));
+      return;
+    }
+
+    const selectedDirectory = selectedResult.data;
+    if (!selectedDirectory) {
+      return;
+    }
+
+    if (selectedDirectory.trim().toLowerCase() === modelsDirectory.trim().toLowerCase()) {
+      return;
+    }
+
+    setPendingModelsDirectory(selectedDirectory);
+    setIsMoveConfirmOpen(true);
+  };
+
+  const handleConfirmModelsDirectory = async () => {
+    if (!pendingModelsDirectory) {
+      return;
+    }
+
+    setIsMoveConfirmOpen(false);
+    setIsModelsDirectoryUpdating(true);
+    setModelsDirectoryError(null);
+    setModelsDirectoryNotice(null);
+
+    try {
+      const updateResult = await setModelsDir(pendingModelsDirectory, true);
+      if (!updateResult.success || !updateResult.data) {
+        logger.modelError("Setup wizard: failed to set models directory", { error: updateResult.error });
+        setModelsDirectoryError(updateResult.error || t("setup.modelsDirectorySetError"));
+        return;
+      }
+
+      setModelsDirectory(updateResult.data.path);
+      setModelsDirectoryNotice(
+        `${t("setup.modelsDirectoryMoveSuccessPrefix")} ${updateResult.data.movedItems} ${t("setup.modelsDirectoryMoveSuccessSuffix")}`,
+      );
+    } catch (error) {
+      logger.modelError("Setup wizard: unexpected error while setting models directory", { error: String(error) });
+      setModelsDirectoryError(t("setup.modelsDirectorySetError"));
+    } finally {
+      setIsModelsDirectoryUpdating(false);
+      setPendingModelsDirectory(null);
+    }
+  };
+
+  const handleCancelModelsDirectory = () => {
+    setIsMoveConfirmOpen(false);
+    setPendingModelsDirectory(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -88,6 +188,31 @@ export function ModelStep() {
         <p className="text-sm text-muted-foreground mt-1">
           {t("setup.modelsStepDesc")}
         </p>
+      </div>
+
+      <div className="rounded-lg border border-border/60 bg-muted/20 p-4 space-y-3">
+        <h4 className="text-sm font-medium">{t("setup.modelsDirectoryTitle")}</h4>
+        <p className="text-xs text-muted-foreground">
+          {t("setup.modelsDirectoryDescription")}
+        </p>
+        <p className="text-xs font-mono break-all text-foreground/90">
+          {isModelsDirectoryLoading ? t("common.loading") : modelsDirectory || "-"}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={handleSelectModelsDirectory}
+            disabled={isModelsDirectoryLoading || isModelsDirectoryUpdating || isDownloading}
+          >
+            {t("setup.modelsDirectoryChangeAction")}
+          </Button>
+        </div>
+        {modelsDirectoryError && (
+          <p className="text-xs text-destructive">{modelsDirectoryError}</p>
+        )}
+        {modelsDirectoryNotice && (
+          <p className="text-xs text-emerald-600 dark:text-emerald-400">{modelsDirectoryNotice}</p>
+        )}
       </div>
 
       {/* Main check card */}
@@ -164,6 +289,58 @@ export function ModelStep() {
           </div>
         </div>
       )}
+
+      <AlertDialog
+        open={isMoveConfirmOpen}
+        onOpenChange={(open) => {
+          setIsMoveConfirmOpen(open);
+          if (!open) {
+            setPendingModelsDirectory(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("setup.modelsDirectoryMoveTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {hasInstalledModels
+                ? t("setup.modelsDirectoryMoveDescriptionWithTransfer")
+                : t("setup.modelsDirectoryMoveDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="space-y-3 rounded-lg border border-border/60 bg-muted/30 p-3 text-xs">
+            <div>
+              <p className="font-medium text-muted-foreground">{t("setup.modelsDirectoryCurrentPathLabel")}</p>
+              <p className="mt-1 break-all font-mono text-foreground/90">{modelsDirectory || "-"}</p>
+            </div>
+            <div>
+              <p className="font-medium text-muted-foreground">{t("setup.modelsDirectoryNewPathLabel")}</p>
+              <p className="mt-1 break-all font-mono text-foreground/90">{pendingModelsDirectory || "-"}</p>
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelModelsDirectory}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmModelsDirectory}>
+              {t("setup.modelsDirectoryMoveConfirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={isModelsDirectoryUpdating} onOpenChange={() => undefined}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("setup.modelsDirectoryMoveInProgressTitle")}</DialogTitle>
+            <DialogDescription>{t("setup.modelsDirectoryMoveInProgressDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 flex items-center gap-3 rounded-lg border border-border/60 bg-muted/30 p-3">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            <span className="text-sm text-foreground/90">{t("common.loading")}</span>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
