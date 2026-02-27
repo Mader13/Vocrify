@@ -183,7 +183,7 @@ export function DeviceStep() {
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
           <p className="text-sm text-muted-foreground">
             <span className="font-medium text-foreground">Device priority:</span>{" "}
-            CUDA (NVIDIA GPU) → MPS (Apple Silicon) → Vulkan (AMD/Intel GPU) → CPU
+            {"CUDA (NVIDIA GPU) -> MPS (Apple Silicon) -> Vulkan (AMD/Intel GPU) -> CPU"}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
             Recommended device is selected automatically for maximum performance.
@@ -227,3 +227,4 @@ export function DeviceStepFooter({ onBack, onNext }: DeviceStepFooterProps) {
     </div>
   );
 }
+

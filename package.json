@@ -12,6 +12,8 @@
     "tauri": "tauri",
     "tauri:dev": "bun run prepare:tauri-resources && tauri dev",
     "tauri:build": "bun run prepare:tauri-resources && tauri build",
+    "portable:pack": "bun run scripts/build-portable.mjs",
+    "tauri:build:portable": "tauri build --no-bundle && bun run portable:pack",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",

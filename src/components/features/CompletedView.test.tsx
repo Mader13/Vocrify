@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import { CompletedView } from "@/components/features/CompletedView";
 import { useTasks, useUIStore } from "@/stores";
@@ -72,10 +72,12 @@ function createTask(overrides: Partial<TranscriptionTask> = {}): TranscriptionTa
 }
 
 function resetUiStore() {
-  useUIStore.setState({
-    displayMode: "clean",
-    isSidebarCollapsed: false,
-    completedViewModeByTask: {},
+  act(() => {
+    useUIStore.setState({
+      displayMode: "clean",
+      isSidebarCollapsed: false,
+      completedViewModeByTask: {},
+    });
   });
 }
 
@@ -86,7 +88,9 @@ describe("CompletedView", () => {
 
   afterEach(() => {
     resetUiStore();
-    useTasks.setState({ tasks: [] });
+    act(() => {
+      useTasks.setState({ tasks: [] });
+    });
   });
 
   it("hides waveform mode selector when speaker data is unavailable", () => {
@@ -118,10 +122,12 @@ describe("CompletedView", () => {
   it("shows waveform and controls in transcript focus mode", () => {
     const task = createTask();
 
-    useUIStore.setState({
-      completedViewModeByTask: {
-        [task.id]: "transcript-focus",
-      },
+    act(() => {
+      useUIStore.setState({
+        completedViewModeByTask: {
+          [task.id]: "transcript-focus",
+        },
+      });
     });
 
     render(<CompletedView task={task} />);
@@ -134,7 +140,9 @@ describe("CompletedView", () => {
 
   it("allows inline editing for transcription title", () => {
     const task = createTask();
-    useTasks.setState({ tasks: [task] });
+    act(() => {
+      useTasks.setState({ tasks: [task] });
+    });
 
     render(<CompletedView task={task} />);
 
@@ -151,7 +159,9 @@ describe("CompletedView", () => {
 
   it("saves transcription title on blur", () => {
     const task = createTask();
-    useTasks.setState({ tasks: [task] });
+    act(() => {
+      useTasks.setState({ tasks: [task] });
+    });
 
     render(<CompletedView task={task} />);
 

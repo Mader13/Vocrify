@@ -27,53 +27,12 @@ import {
 import { AVAILABLE_MODELS } from "@/types";
 import { useSettingsStore } from "./_store";
 import { logger } from "@/lib/logger";
-import { countBlockingTasksForModel } from "./utils/model-deletion";
-
-interface PendingModelDeletionState {
-  requestedAt: number;
-  lastAttemptAt?: number;
-  lastError?: string;
-}
-
-const PENDING_MODEL_DELETIONS_STORAGE_KEY = "vocrify-pending-model-deletions";
-
-function loadPendingModelDeletions(): Record<string, PendingModelDeletionState> {
-  if (typeof window === "undefined") {
-    return {};
-  }
-
-  try {
-    const raw = window.localStorage.getItem(PENDING_MODEL_DELETIONS_STORAGE_KEY);
-    if (!raw) {
-      return {};
-    }
-
-    const parsed = JSON.parse(raw) as Record<string, PendingModelDeletionState>;
-    if (!parsed || typeof parsed !== "object") {
-      return {};
-    }
-
-    return parsed;
-  } catch (error) {
-    logger.modelWarn("Failed to parse pending model deletions from storage", { error });
-    return {};
-  }
-}
-
-function persistPendingModelDeletions(pendingModelDeletions: Record<string, PendingModelDeletionState>): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(
-      PENDING_MODEL_DELETIONS_STORAGE_KEY,
-      JSON.stringify(pendingModelDeletions),
-    );
-  } catch (error) {
-    logger.modelWarn("Failed to persist pending model deletions", { error });
-  }
-}
+import {
+  countBlockingTasksForModel,
+  loadPendingModelDeletions,
+  persistPendingModelDeletions,
+  type PendingModelDeletionState,
+} from "./utils/model-deletion";
 
 function isModelMissingError(errorMessage: string | undefined): boolean {
   if (!errorMessage) {

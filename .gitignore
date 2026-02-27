@@ -1,3 +1,5 @@
+.vscode
+
 # Logs
 logs
 *.log
@@ -49,11 +51,16 @@ coverage/
 # Rust / Tauri
 target/
 src-tauri/target/
+src-tauri/target-check/
+src-tauri/target-check-2/
 src-tauri/WixTools/
 src-tauri/bundle/
 src-tauri/gen/
 src-tauri/capabilities/generated/
 src-tauri/resources/ai-engine/
+src-tauri/resources/ort/
+src-tauri/resources/vad/
+src-tauri/test_parakeet_validation/
 
 # Python
 __pycache__/
@@ -163,4 +170,4 @@ agent-mail.db
 claude_desktop_config.json
 test_models.js
 claude.md
-agents.md
+.agents/

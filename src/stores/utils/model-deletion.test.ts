@@ -1,11 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { TranscriptionTask } from "@/types";
 
 import {
   countBlockingTasksForModel,
   hasBlockingTasksForModel,
+  isModelPendingDeletion,
   isTaskBlockingModelDeletion,
+  PENDING_MODEL_DELETIONS_STORAGE_KEY,
+  persistPendingModelDeletions,
 } from "./model-deletion";
 
 function createTask(overrides: Partial<TranscriptionTask>): TranscriptionTask {
@@ -30,6 +33,12 @@ function createTask(overrides: Partial<TranscriptionTask>): TranscriptionTask {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(PENDING_MODEL_DELETIONS_STORAGE_KEY);
+  }
+});
 
 describe("model deletion task guards", () => {
   it("treats only processing tasks as blockers", () => {
@@ -59,5 +68,22 @@ describe("model deletion task guards", () => {
     expect(countBlockingTasksForModel(tasks, "whisper-base")).toBe(1);
     expect(hasBlockingTasksForModel(tasks, "whisper-base")).toBe(true);
     expect(hasBlockingTasksForModel(tasks, "whisper-small")).toBe(false);
+  });
+});
+
+describe("model deletion pending storage", () => {
+  it("returns false when model is not scheduled for deletion", () => {
+    expect(isModelPendingDeletion("whisper-base")).toBe(false);
+  });
+
+  it("returns true when model is scheduled for deletion", () => {
+    persistPendingModelDeletions({
+      "whisper-base": {
+        requestedAt: Date.now(),
+      },
+    });
+
+    expect(isModelPendingDeletion("whisper-base")).toBe(true);
+    expect(isModelPendingDeletion("parakeet")).toBe(false);
   });
 });

@@ -32,6 +32,7 @@ import type {
 import { logger } from "@/lib/logger";
 import { recoverInterruptedTasks } from "@/stores/utils/task-recovery";
 import { canArchiveTask } from "@/stores/utils/archive-eligibility";
+import { isModelPendingDeletion } from "@/stores/utils/model-deletion";
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from "@/i18n";
 
 // ============================================================================
@@ -611,8 +612,7 @@ export const useTasks = create<TasksState>()(
 
           const validatedOptions = { ...options };
 
-          const { useModelsStore } = await import("./modelsStore");
-          if (useModelsStore.getState().isModelPendingDeletion(validatedOptions.model)) {
+          if (isModelPendingDeletion(validatedOptions.model)) {
             throw new Error(
               `Model "${validatedOptions.model}" is scheduled for deletion and cannot be used for new transcriptions. Select another model first.`,
             );
@@ -662,8 +662,7 @@ export const useTasks = create<TasksState>()(
             return;
           }
 
-          const { useModelsStore } = await import("./modelsStore");
-          if (useModelsStore.getState().isModelPendingDeletion(task.options.model)) {
+          if (isModelPendingDeletion(task.options.model)) {
             logger.transcriptionWarn("Retry blocked: model scheduled for deletion", {
               taskId,
               modelName: task.options.model,

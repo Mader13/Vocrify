@@ -79,6 +79,9 @@ bun run build
 # Production desktop build
 bun run tauri:build
 
+# Production portable build (no installer)
+bun run tauri:build:portable
+
 # Type check
 bunx tsc --noEmit
 
@@ -154,3 +157,4 @@ Install Visual Studio Build Tools and enable `Desktop development with C++`.
 - Use `bun`, not `npm`.
 - Keep Rust and Python environments in sync after dependency updates.
 - For architecture and coding rules, see `AGENTS.md`.
+- Portable archive output: `src-tauri/target/release/bundle/portable/`.
