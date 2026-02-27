@@ -4,7 +4,7 @@ export type { CommandResult } from "./tauri/core";
 export { handleBackendLog } from "./tauri/log-handler";
 export { startTranscription, cancelTranscription, getQueueStatus, testPythonEngine, checkCudaAvailable, loadModelRust, transcribeRust, initTranscriptionManager } from "./tauri/transcription-commands";
 export type { RustTranscriptionOptions, RustTranscriptionResult } from "./tauri/transcription-commands";
-export { downloadModel, getLocalModels, deleteModel, openModelsFolder, getDiskUsage, clearCache, saveSelectedModel, loadSelectedModel, cancelModelDownload } from "./tauri/model-commands";
+export { downloadModel, getLocalModels, deleteModel, openModelsFolder, setModelsDir, getDiskUsage, clearCache, saveSelectedModel, loadSelectedModel, cancelModelDownload } from "./tauri/model-commands";
 export type { ModelDownloadProgress, ModelDownloadStageEvent } from "./tauri/model-commands";
 export { getAvailableDevices, getFFmpegStatus, downloadFFmpeg } from "./tauri/device-commands";
 export type { FFmpegStatus, FFmpegProgress, FFmpegStatusEvent } from "./tauri/device-commands";

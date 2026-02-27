@@ -749,13 +749,6 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
         </div>
       )}
 
-      {/* Audio-only message when video is deleted */}
-      {!showVideoElement && mediaPath && (
-        <div className="rounded-xl border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-          Video file removed. Showing audio waveform only.
-        </div>
-      )}
-
       {/* Waveform Container */}
       <div className="relative h-[120px] overflow-hidden rounded-lg border bg-card">
         {/* Waveform */}

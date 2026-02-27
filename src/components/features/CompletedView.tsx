@@ -350,6 +350,10 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const effectiveViewMode = viewMode;
   const isVideoVisible = effectiveViewMode !== "transcript-focus";
   const showMediaColumn = effectiveViewMode === "balanced" && (layoutMode === "stacked" || layoutMode === "split");
+  const canRenderVideoElement = !task.archived
+    ? Boolean(task.filePath)
+    : task.archiveMode === "keep_all" && Boolean(task.filePath);
+  const shouldShowWaveformControls = !isVideoVisible || !canRenderVideoElement;
 
   const handleConfirmDelete = useCallback(() => {
     removeTask(task.id);
@@ -558,7 +562,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                   colorMode={waveformMode}
                   onTimeUpdate={handlePlayerTimeUpdate}
                   isVideoVisible={isVideoVisible}
-                  showControls={false}
+                  showControls={shouldShowWaveformControls}
                   className="w-full"
                 />
               </PlayerErrorBoundary>
@@ -699,7 +703,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                   colorMode={waveformMode}
                   onTimeUpdate={handlePlayerTimeUpdate}
                   isVideoVisible={false}
-                  showControls
+                  showControls={shouldShowWaveformControls}
                   className="w-full"
                 />
               </PlayerErrorBoundary>

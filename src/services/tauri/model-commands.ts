@@ -3,6 +3,12 @@ import type { LocalModel, DiskUsage, ModelDownloadProgress, ModelDownloadStageEv
 import { logger } from "@/lib/logger";
 import type { CommandResult } from "./core";
 
+export interface SetModelsDirResult {
+  path: string;
+  movedItems: number;
+  movedExistingModels: boolean;
+}
+
 export async function downloadModel(
   modelName: string,
   modelType: string
@@ -46,6 +52,26 @@ export async function openModelsFolder(): Promise<CommandResult<void>> {
     return { success: true };
   } catch (error) {
     console.error("Failed to open models folder:", error);
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function setModelsDir(
+  modelsDir: string,
+  moveExistingModels = false,
+): Promise<CommandResult<SetModelsDirResult>> {
+  try {
+    const updatedPath = await invoke<SetModelsDirResult>("set_models_dir_command", {
+      modelsDir,
+      moveExistingModels,
+    });
+    return { success: true, data: updatedPath };
+  } catch (error) {
+    logger.modelError("Failed to update models directory", {
+      error: String(error),
+      modelsDir,
+      moveExistingModels,
+    });
     return { success: false, error: String(error) };
   }
 }

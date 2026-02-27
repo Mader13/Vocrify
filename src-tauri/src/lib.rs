@@ -2208,8 +2208,16 @@ fn format_srt_time(seconds: f64) -> String {
     format!("{:02}:{:02}:{:02},{:03}", hours, minutes, secs, millis)
 }
 
-/// Get the models directory path
-fn get_models_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
+fn get_models_settings_path(app: &AppHandle) -> PathBuf {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."));
+
+    app_data.join("Vocrify").join("models_settings.json")
+}
+
+fn get_default_models_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     let app_data = app.path().app_data_dir().map_err(|_| {
         AppError::IoError(std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -2217,7 +2225,134 @@ fn get_models_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
         ))
     })?;
 
-    let models_dir = app_data.join("Vocrify").join("models");
+    Ok(app_data.join("Vocrify").join("models"))
+}
+
+fn load_custom_models_dir(app: &AppHandle) -> Option<PathBuf> {
+    let settings_path = get_models_settings_path(app);
+    if !settings_path.exists() {
+        return None;
+    }
+
+    let content = std::fs::read_to_string(&settings_path).ok()?;
+    let settings_data = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+
+    let models_dir = settings_data
+        .get("modelsDir")
+        .or_else(|| settings_data.get("models_dir"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+
+    Some(PathBuf::from(models_dir))
+}
+
+fn save_custom_models_dir(app: &AppHandle, models_dir: &Path) -> Result<(), AppError> {
+    let settings_path = get_models_settings_path(app);
+    let fallback = PathBuf::from(".");
+    let settings_dir = settings_path.parent().unwrap_or(&fallback);
+
+    std::fs::create_dir_all(settings_dir).map_err(AppError::IoError)?;
+
+    let data = serde_json::json!({
+        "modelsDir": models_dir.to_string_lossy().to_string(),
+    });
+
+    std::fs::write(settings_path, data.to_string()).map_err(AppError::IoError)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetModelsDirResponse {
+    path: String,
+    moved_items: u64,
+    moved_existing_models: bool,
+}
+
+fn is_cross_device_error(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::CrossesDevices
+        || matches!(error.raw_os_error(), Some(17) | Some(18))
+}
+
+fn move_entry(src_path: &Path, dst_path: &Path, moved_items: &mut u64) -> Result<(), AppError> {
+    if dst_path.exists() {
+        return Err(AppError::Other(format!(
+            "Cannot move models: destination already contains '{}'",
+            dst_path.display()
+        )));
+    }
+
+    let metadata = std::fs::symlink_metadata(src_path).map_err(AppError::IoError)?;
+
+    if metadata.is_dir() {
+        match std::fs::rename(src_path, dst_path) {
+            Ok(_) => {
+                *moved_items += 1;
+                return Ok(());
+            }
+            Err(error) if !is_cross_device_error(&error) => return Err(AppError::IoError(error)),
+            Err(_) => {}
+        }
+
+        std::fs::create_dir_all(dst_path).map_err(AppError::IoError)?;
+
+        for entry in std::fs::read_dir(src_path).map_err(AppError::IoError)? {
+            let entry = entry.map_err(AppError::IoError)?;
+            let nested_src = entry.path();
+            let nested_dst = dst_path.join(entry.file_name());
+            move_entry(&nested_src, &nested_dst, moved_items)?;
+        }
+
+        std::fs::remove_dir(src_path).map_err(AppError::IoError)?;
+        *moved_items += 1;
+        return Ok(());
+    }
+
+    match std::fs::rename(src_path, dst_path) {
+        Ok(_) => {
+            *moved_items += 1;
+            Ok(())
+        }
+        Err(error) if is_cross_device_error(&error) => {
+            std::fs::copy(src_path, dst_path).map_err(AppError::IoError)?;
+            std::fs::remove_file(src_path).map_err(AppError::IoError)?;
+            *moved_items += 1;
+            Ok(())
+        }
+        Err(error) => Err(AppError::IoError(error)),
+    }
+}
+
+fn move_models_contents(source_dir: &Path, target_dir: &Path) -> Result<u64, AppError> {
+    if !source_dir.exists() {
+        return Ok(0);
+    }
+
+    std::fs::create_dir_all(target_dir).map_err(AppError::IoError)?;
+
+    let mut moved_items = 0_u64;
+    for entry in std::fs::read_dir(source_dir).map_err(AppError::IoError)? {
+        let entry = entry.map_err(AppError::IoError)?;
+        let src_path = entry.path();
+        let dst_path = target_dir.join(entry.file_name());
+        move_entry(&src_path, &dst_path, &mut moved_items)?;
+    }
+
+    Ok(moved_items)
+}
+
+/// Get the models directory path
+fn get_models_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let default_models_dir = get_default_models_dir(app)?;
+    let models_dir = load_custom_models_dir(app).unwrap_or(default_models_dir);
+
+    if models_dir.exists() && !models_dir.is_dir() {
+        return Err(AppError::Other(format!(
+            "Configured models path is not a directory: {}",
+            models_dir.display()
+        )));
+    }
 
     std::fs::create_dir_all(&models_dir).map_err(|e| AppError::IoError(e))?;
 
@@ -2427,6 +2562,68 @@ async fn get_audio_metadata(file_path: String) -> Result<AudioInfo, String> {
 async fn get_models_dir_command(app: AppHandle) -> Result<String, AppError> {
     let models_dir = get_models_dir(&app)?;
     Ok(models_dir.to_string_lossy().to_string())
+}
+
+/// Update models directory
+#[tauri::command]
+async fn set_models_dir_command(
+    app: AppHandle,
+    state: State<'_, TranscriptionManagerState>,
+    models_dir: String,
+    move_existing_models: Option<bool>,
+) -> Result<SetModelsDirResponse, AppError> {
+    let trimmed = models_dir.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Other(
+            "Models directory path cannot be empty".to_string(),
+        ));
+    }
+
+    let selected_dir = PathBuf::from(trimmed);
+
+    if selected_dir.exists() && !selected_dir.is_dir() {
+        return Err(AppError::Other(format!(
+            "Selected path is not a directory: {}",
+            selected_dir.display()
+        )));
+    }
+
+    std::fs::create_dir_all(&selected_dir).map_err(AppError::IoError)?;
+    let normalized = dunce::simplified(&selected_dir).to_path_buf();
+    let current_models_dir = get_models_dir(&app)?;
+    let should_move_existing = move_existing_models.unwrap_or(false) && current_models_dir != normalized;
+
+    let moved_items = if should_move_existing {
+        let source = current_models_dir.clone();
+        let destination = normalized.clone();
+        tokio::task::spawn_blocking(move || move_models_contents(&source, &destination))
+            .await
+            .map_err(|e| AppError::Other(format!("Failed to move models directory: {}", e)))??
+    } else {
+        0
+    };
+
+    save_custom_models_dir(&app, &normalized)?;
+
+    // Force a clean manager rebuild on next use so new paths are picked up.
+    if let Ok(mut manager_guard) = state.try_lock() {
+        *manager_guard = None;
+    } else {
+        eprintln!(
+            "[WARN] TranscriptionManager is busy, new models directory will apply after current task"
+        );
+    }
+
+    eprintln!(
+        "[INFO] Models directory updated: {:?} (moved_items={})",
+        normalized, moved_items
+    );
+
+    Ok(SetModelsDirResponse {
+        path: normalized.to_string_lossy().to_string(),
+        moved_items,
+        moved_existing_models: should_move_existing,
+    })
 }
 
 /// Open models directory in system file manager
@@ -4602,6 +4799,7 @@ pub fn run() {
             select_media_files,
             export_transcription,
             get_models_dir_command,
+            set_models_dir_command,
             open_models_folder_command,
             open_archive_folder_command,
             open_app_directory_command,

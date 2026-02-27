@@ -58,7 +58,6 @@ function ModelSectionPanel({
   onDeleteModel,
   animationOffsetMs = 0,
 }: ModelSectionPanelProps): React.JSX.Element {
-  const { t } = useI18n();
   return (
     <section className="rounded-2xl bg-card/40 border border-transparent p-4 sm:p-5 shadow-sm">
       <div className="mb-5 flex items-start justify-between gap-3">
