@@ -1,5 +1,5 @@
-import * as React from "react";
 import { Check } from "lucide-react";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -26,57 +26,67 @@ export function ProgressBar({
   return (
     <div className="w-full" role="progressbar" aria-valuenow={currentStepIndex + 1} aria-valuemin={1} aria-valuemax={totalSteps}>
       {/* Step indicators */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between relative">
+        {/* Background line */}
+        <div className="absolute top-5 left-0 right-0 h-0.5 bg-muted -z-10" />
+        
+        {/* Active line */}
+        <motion.div 
+          className="absolute top-5 left-0 h-0.5 bg-primary -z-10"
+          initial={{ width: "0%" }}
+          animate={{ width: `${(currentStepIndex / (totalSteps - 1)) * 100}%` }}
+          transition={{ duration: 0.3, ease: "easeInOut" }}
+        />
+
         {Array.from({ length: totalSteps }).map((_, index) => {
           const isCompleted = index < currentStepIndex;
           const isCurrent = index === currentStepIndex;
           const isPending = index > currentStepIndex;
 
           return (
-            <React.Fragment key={stepNames[index] || index}>
+            <div key={stepNames[index] || index} className="flex flex-col items-center relative z-10">
               {/* Step circle */}
-              <div className="flex flex-col items-center">
-                <div
-                  className={cn(
-                    "flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors",
-                    isCompleted && "border-green-500 bg-green-500 text-white",
-                    isCurrent && "border-primary bg-primary text-primary-foreground",
-                    isPending && "border-muted bg-muted text-muted-foreground"
-                  )}
-                  aria-current={isCurrent ? "step" : undefined}
-                >
-                  {isCompleted ? (
+              <motion.div
+                initial={false}
+                animate={{
+                  backgroundColor: isCompleted || isCurrent ? "var(--color-primary)" : "var(--color-background)",
+                  borderColor: isCompleted || isCurrent ? "var(--color-primary)" : "var(--color-border)",
+                  color: isCompleted || isCurrent ? "var(--color-primary-foreground)" : "var(--color-muted-foreground)",
+                  scale: isCurrent ? 1.1 : 1,
+                }}
+                transition={{ duration: 0.2 }}
+                className={cn(
+                  "flex h-10 w-10 items-center justify-center rounded-full border-2 transition-colors",
+                  isCompleted && "border-primary bg-primary text-primary-foreground",
+                  isCurrent && "border-primary bg-primary text-primary-foreground shadow-sm",
+                  isPending && "border-muted bg-background text-muted-foreground"
+                )}
+                aria-current={isCurrent ? "step" : undefined}
+              >
+                {isCompleted ? (
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                  >
                     <Check className="h-5 w-5" aria-hidden="true" />
-                  ) : (
-                    <span className="text-sm font-medium">{index + 1}</span>
-                  )}
-                </div>
-                {/* Step name */}
-                <span
-                  className={cn(
-                    "mt-2 text-xs font-medium text-center max-w-20",
-                    isCurrent && "text-primary",
-                    isCompleted && "text-green-600 dark:text-green-400",
-                    isPending && "text-muted-foreground"
-                  )}
-                >
-                  {stepNames[index]}
-                </span>
-              </div>
-
-              {/* Connector line */}
-              {index < totalSteps - 1 && (
-                <div
-                  className={cn(
-                    "flex-1 h-0.5 mx-2 -mt-5 transition-colors",
-                    index < currentStepIndex
-                      ? "bg-green-500"
-                      : "bg-muted"
-                  )}
-                  aria-hidden="true"
-                />
-              )}
-            </React.Fragment>
+                  </motion.div>
+                ) : (
+                  <span className="text-sm font-medium">{index + 1}</span>
+                )}
+              </motion.div>
+              {/* Step name */}
+              <span
+                className={cn(
+                  "mt-2 text-xs font-medium text-center max-w-24 transition-colors duration-200",
+                  isCurrent && "text-foreground font-semibold",
+                  isCompleted && "text-foreground",
+                  isPending && "text-muted-foreground"
+                )}
+              >
+                {stepNames[index]}
+              </span>
+            </div>
           );
         })}
       </div>

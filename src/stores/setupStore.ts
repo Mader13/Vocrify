@@ -74,10 +74,10 @@ interface SetupStore {
   backgroundValidate: () => Promise<void>;
 }
 
-const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "model", "summary"];
+const STEPS: SetupStep[] = ["language", "ffmpeg", "device", "model", "summary"];
 
 const initialState = {
-  currentStep: "python" as SetupStep,
+  currentStep: "language" as SetupStep,
   isComplete: false,
   isChecking: false,
   pythonCheck: null as PythonCheckResult | null,
@@ -129,19 +129,18 @@ function failedModelCheck(message: string): ModelCheckResult {
 }
 
 function buildRuntimeReadiness(
-  pythonCheck: PythonCheckResult,
   ffmpegCheck: FFmpegCheckResult
 ): RuntimeReadinessStatus {
-  const pythonReady = pythonCheck.status === "ok";
+  const pythonReady = true;
   const ffmpegReady = ffmpegCheck.installed && ffmpegCheck.status !== "error";
-  // Python is optional for basic transcription, so we only strictly require FFmpeg
+  // Python is not required for onboarding/runtime readiness in the current Rust-native flow.
   const ready = ffmpegReady;
 
   return {
     ready,
     pythonReady,
     ffmpegReady,
-    pythonMessage: pythonCheck.message,
+    pythonMessage: "Python is not required for setup",
     ffmpegMessage: ffmpegCheck.message,
     message: ready
       ? "Runtime ready"
@@ -207,17 +206,11 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
     logger.info("Running all setup checks (excluding devices - call fetchDevices separately)");
 
     try {
-      const [pythonResult, ffmpegResult, modelsResult] =
+      const [ffmpegResult, modelsResult] =
         await Promise.all([
-          checkPythonEnvironment(),
           checkFFmpegStatus(),
           checkModelsStatus(),
         ]);
-
-      const pythonCheck: PythonCheckResult =
-        pythonResult.success && pythonResult.data
-          ? pythonResult.data
-          : failedPythonCheck(pythonResult.error || "Failed to check Python");
 
       const ffmpegCheck: FFmpegCheckResult =
         ffmpegResult.success && ffmpegResult.data
@@ -229,10 +222,9 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
           ? modelsResult.data
           : failedModelCheck(modelsResult.error || "Failed to check models");
 
-      const runtimeReadiness = buildRuntimeReadiness(pythonCheck, ffmpegCheck);
+      const runtimeReadiness = buildRuntimeReadiness(ffmpegCheck);
 
       set({
-        pythonCheck,
         ffmpegCheck,
         modelCheck,
         runtimeReadiness,
@@ -240,7 +232,6 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
       });
 
       logger.info("All setup checks completed", {
-        python: pythonCheck.status,
         ffmpeg: ffmpegCheck.status,
         model: modelCheck.status,
         runtimeReady: runtimeReadiness.ready,
@@ -462,16 +453,7 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
   completeSetup: async () => {
     logger.info("Completing setup");
     try {
-      const { pythonCheck, ffmpegCheck } = get();
-
-      // Python is optional, so we don't block on it failing
-      if (!pythonCheck) {
-        set({
-          isComplete: false,
-          error: "Python check not completed",
-        });
-        return;
-      }
+      const { ffmpegCheck } = get();
 
       if (!ffmpegCheck || ffmpegCheck.status !== "ok") {
         set({
@@ -482,7 +464,7 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
       }
 
       // Build runtime readiness from cached results
-      const readiness = buildRuntimeReadiness(pythonCheck, ffmpegCheck);
+      const readiness = buildRuntimeReadiness(ffmpegCheck);
       set({ runtimeReadiness: readiness });
 
       if (!readiness.ready) {

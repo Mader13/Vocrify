@@ -1,8 +1,9 @@
 import * as React from "react";
 import { useEffect, useMemo } from "react";
 import { Rocket, X } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { ProgressBar } from "./ProgressBar";
-import { PythonStep, PythonStepFooter } from "./steps/PythonStep";
+import { LanguageStep, LanguageStepFooter } from "./steps/LanguageStep";
 import { FFmpegStep, FFmpegStepFooter } from "./steps/FFmpegStep";
 import { DeviceStep, DeviceStepFooter } from "./steps/DeviceStep";
 import { ModelStep, ModelStepFooter } from "./steps/ModelStep";
@@ -15,7 +16,7 @@ import type { SetupStep } from "@/types/setup";
 /**
  * Step order for navigation
  */
-const STEPS: SetupStep[] = ["python", "ffmpeg", "device", "model", "summary"];
+const STEPS: SetupStep[] = ["language", "ffmpeg", "device", "model", "summary"];
 
 /**
  * Props for SetupWizard component
@@ -38,7 +39,6 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   const {
     currentStep,
     error,
-    pythonCheck,
     ffmpegCheck,
     deviceCheck,
     modelCheck,
@@ -50,19 +50,20 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
     skipSetup,
   } = useSetupStore();
 
-  // Run Python/FFmpeg checks on mount, and fetch devices on-demand
+  // Run checks on mount, and fetch devices on-demand
   useEffect(() => {
-    if (!pythonCheck || !ffmpegCheck || !modelCheck) {
+    if (!ffmpegCheck || !modelCheck) {
       void checkAll();
     }
 
     if (!deviceCheck) {
       void fetchDevices(false);
     }
-  }, [pythonCheck, ffmpegCheck, modelCheck, deviceCheck, checkAll, fetchDevices]);
+  }, [ffmpegCheck, modelCheck, deviceCheck, checkAll, fetchDevices]);
 
   const stepNames = useMemo(() => [
-    t("setup.python"),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    t("settings.language" as any),
     t("setup.ffmpeg"),
     t("setup.devices"),
     t("setup.modelsStep"),
@@ -106,8 +107,8 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   // Render current step content
   const renderStepContent = () => {
     switch (currentStep) {
-      case "python":
-        return <PythonStep />;
+      case "language":
+        return <LanguageStep />;
       case "ffmpeg":
         return <FFmpegStep />;
       case "device":
@@ -124,9 +125,9 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   // Render current step footer
   const renderStepFooter = () => {
     switch (currentStep) {
-      case "python":
+      case "language":
         return (
-          <PythonStepFooter
+          <LanguageStepFooter
             onNext={handleNext}
           />
         );
@@ -164,10 +165,14 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
   };
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -20, scale: 0.95 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
       className={cn(
         "flex flex-col min-h-125 max-w-2xl mx-auto",
-        "bg-background rounded-xl shadow-lg border",
+        "bg-background rounded-xl shadow-2xl border border-border/50 overflow-hidden",
         className
       )}
       role="dialog"
@@ -175,16 +180,16 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       aria-modal="true"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10 text-primary">
-            <Rocket className="h-5 w-5" aria-hidden="true" />
+      <div className="flex items-center justify-between px-6 py-5 border-b bg-card/50 backdrop-blur-sm">
+        <div className="flex items-center gap-4">
+          <div className="p-2.5 rounded-xl bg-primary/10 text-primary shadow-sm">
+            <Rocket className="h-6 w-6" aria-hidden="true" />
           </div>
           <div>
-            <h1 id="setup-wizard-title" className="text-lg font-semibold">
+            <h1 id="setup-wizard-title" className="text-xl font-bold tracking-tight">
               {t("setup.initialSetup")}
             </h1>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground font-medium">
               {t("setup.stepOf")} {currentStepIndex + 1} {t("common.of")} {STEPS.length}
             </p>
           </div>
@@ -201,7 +206,7 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       </div>
 
       {/* Progress bar */}
-      <div className="px-6 py-4 border-b bg-muted/30">
+      <div className="px-8 py-5 border-b bg-muted/20">
         <ProgressBar
           currentStepIndex={currentStepIndex}
           totalSteps={STEPS.length}
@@ -210,18 +215,35 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       </div>
 
       {/* Step content */}
-      <div className="flex-1 px-6 py-6 overflow-y-auto">
-        {renderStepContent()}
+      <div className="flex-1 px-8 py-8 overflow-y-auto overflow-x-hidden relative bg-card/30">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentStep}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="h-full"
+          >
+            {renderStepContent()}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* Footer with navigation */}
-      <div className="px-6 py-4 border-t bg-muted/30">
+      <div className="px-8 py-5 border-t bg-card/50 backdrop-blur-sm">
         {renderStepFooter()}
         {error && (
-          <p className="mt-3 text-sm text-destructive">{error}</p>
+          <motion.p 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 text-sm text-destructive font-medium bg-destructive/10 p-3 rounded-lg border border-destructive/20"
+          >
+            {error}
+          </motion.p>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 

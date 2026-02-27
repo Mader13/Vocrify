@@ -12,11 +12,7 @@ function statusIcon(state: string) {
 
 export function SummaryStep() {
   const { t } = useI18n();
-  const { pythonCheck, ffmpegCheck, deviceCheck, goToStep } = useSetupStore();
-
-  const handleInstallPythonNow = async () => {
-    goToStep("python");
-  };
+  const { ffmpegCheck, deviceCheck } = useSetupStore();
 
   const statusLabel = (state: string) => {
     if (state === "completed") return t("setup.statusCompleted");
@@ -36,7 +32,6 @@ export function SummaryStep() {
     return "idle";
   };
 
-  const pythonStatus = pythonCheck ? getStepStatus(pythonCheck) : "idle";
   const ffmpegStatus = ffmpegCheck ? getStepStatus(ffmpegCheck) : "idle";
   const deviceStatus = deviceCheck ? getStepStatus(deviceCheck) : "idle";
   const modelStatus = useSetupStore.getState().modelCheck ? getStepStatus(useSetupStore.getState().modelCheck) : "idle";
@@ -59,7 +54,6 @@ export function SummaryStep() {
 
       <div className="space-y-3 rounded-lg border p-4">
         {([
-          [t("setup.python"), pythonStatus],
           [t("setup.ffmpeg"), ffmpegStatus],
           [t("setup.devices"), deviceStatus, deviceCheck?.recommended ? `${t("setup.recommended")}: ${deviceCheck.recommended.toUpperCase()}` : t("setup.recommendedFallback")],
           [t("setup.modelsStep"), modelStatus],
@@ -79,30 +73,16 @@ export function SummaryStep() {
         ))}
       </div>
 
-      {pythonStatus === "idle" && (
+      {ffmpegStatus === "idle" && (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-4">
           <div className="flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 mt-0.5 text-yellow-600" />
             <div>
-              <p className="text-sm font-medium">{t("setup.pythonNotChecked")}</p>
+              <p className="text-sm font-medium">{t("setup.ffmpegNotFound")}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 {t("setup.clickNextToCheck")}
               </p>
-              <Button size="sm" variant="outline" className="mt-3" onClick={handleInstallPythonNow}>
-                {t("setup.check")}
-              </Button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {pythonCheck?.status === "error" && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-700 dark:text-red-400">
-          <div className="space-y-2">
-            <p>{pythonCheck.message}</p>
-            <Button size="sm" variant="outline" onClick={handleInstallPythonNow}>
-              {t("setup.tryAgain")}
-            </Button>
           </div>
         </div>
       )}

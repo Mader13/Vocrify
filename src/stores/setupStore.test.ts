@@ -46,7 +46,7 @@ const mockedResetSetup = vi.mocked(resetSetup);
 
 function resetStore() {
   useSetupStore.setState({
-    currentStep: "python",
+    currentStep: "language",
     isComplete: false,
     isChecking: false,
     pythonCheck: null,
@@ -180,7 +180,7 @@ describe("setupStore", () => {
     await useSetupStore.getState().checkAll();
 
     const state = useSetupStore.getState();
-    expect(state.pythonCheck?.status).toBe("ok");
+    expect(state.pythonCheck).toBe(null);
     expect(state.ffmpegCheck?.installed).toBe(true);
     expect(state.deviceCheck).toBe(null);
     expect(state.modelCheck?.status).toBe("ok");
@@ -193,7 +193,7 @@ describe("setupStore", () => {
   });
 
   it("nextStep advances to next step in order", () => {
-    useSetupStore.getState().goToStep("python");
+    useSetupStore.getState().goToStep("language");
     useSetupStore.getState().nextStep();
     expect(useSetupStore.getState().currentStep).toBe("ffmpeg");
   });
@@ -201,29 +201,16 @@ describe("setupStore", () => {
   it("prevStep goes back to previous step", () => {
     useSetupStore.getState().goToStep("ffmpeg");
     useSetupStore.getState().prevStep();
-    expect(useSetupStore.getState().currentStep).toBe("python");
+    expect(useSetupStore.getState().currentStep).toBe("language");
   });
 
   it("completeSetup marks store complete when runtime is ready", async () => {
-    await useSetupStore.getState().checkPython();
     await useSetupStore.getState().checkFFmpeg();
     await useSetupStore.getState().completeSetup();
     expect(useSetupStore.getState().isComplete).toBe(true);
   });
 
-  it("completeSetup allows completion when Python is unavailable", async () => {
-    mockedCheckPythonEnvironment.mockResolvedValueOnce({
-      success: true,
-      data: {
-        status: "error",
-        version: null,
-        executable: null,
-        inVenv: false,
-        message: "python missing",
-      },
-    });
-
-    await useSetupStore.getState().checkPython();
+  it("completeSetup allows completion without Python checks", async () => {
     await useSetupStore.getState().checkFFmpeg();
 
     await useSetupStore.getState().completeSetup();
@@ -246,7 +233,6 @@ describe("setupStore", () => {
       },
     });
 
-    await useSetupStore.getState().checkPython();
     await useSetupStore.getState().checkFFmpeg();
 
     await useSetupStore.getState().completeSetup();
@@ -263,7 +249,6 @@ describe("setupStore", () => {
       error: "backend unavailable",
     });
 
-    await useSetupStore.getState().checkPython();
     await useSetupStore.getState().checkFFmpeg();
     await useSetupStore.getState().completeSetup();
 
@@ -290,7 +275,7 @@ describe("setupStore", () => {
     await useSetupStore.getState().resetSetupState();
 
     const state = useSetupStore.getState();
-    expect(state.currentStep).toBe("python");
+    expect(state.currentStep).toBe("language");
     expect(state.isComplete).toBe(false);
     expect(state.error).toBe(null);
   });

@@ -5,7 +5,7 @@ import { useSetupStore } from "@/stores/setupStore";
 
 function resetSetupStoreState() {
   useSetupStore.setState({
-    currentStep: "python",
+    currentStep: "language",
     isComplete: false,
     isChecking: false,
     pythonCheck: null,

@@ -46,9 +46,14 @@ export function SettingsPanel() {
 
   const handleRerunSetup = async () => {
     await resetSetupState();
+    const { isComplete, error } = useSetupStore.getState();
+
+    if (error || isComplete) {
+      return;
+    }
+
     setIsRerunSetupDialogOpen(false);
     setSettingsOpen(false);
-    window.location.reload();
   };
 
   return (

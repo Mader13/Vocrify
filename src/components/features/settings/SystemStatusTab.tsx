@@ -1,4 +1,4 @@
-import { Film, FileCode, Zap, Sparkles, RotateCcw } from "lucide-react";
+import { Film, Zap, Sparkles, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui";
 import { useSetupStore } from "@/stores";
 import { useI18n } from "@/hooks";
@@ -19,10 +19,9 @@ interface SystemStatusTabProps {
 
 export function SystemStatusTab({ onRerunSetupClick }: SystemStatusTabProps) {
   const { t } = useI18n();
-  const { ffmpegCheck, pythonCheck, deviceCheck, isChecking, checkAll } = useSetupStore();
+  const { ffmpegCheck, deviceCheck, isChecking, checkAll } = useSetupStore();
 
   const ffmpegStatus = deriveStatus(ffmpegCheck);
-  const pythonStatus = deriveStatus(pythonCheck);
 
   const availableDevices = deviceCheck?.devices?.filter((d) => d.available) ?? [];
   const deviceStatus: StatusType = !deviceCheck
@@ -37,10 +36,6 @@ export function SystemStatusTab({ onRerunSetupClick }: SystemStatusTabProps) {
 
   const ffmpegDetails = ffmpegCheck
     ? [ffmpegCheck.version ? `v${ffmpegCheck.version}` : "Not found", ffmpegCheck.path ?? "Path not defined"]
-    : ["Checking..."];
-
-  const pythonDetails = pythonCheck
-    ? [pythonCheck.version ? `Python ${pythonCheck.version}` : "Not found"]
     : ["Checking..."];
 
   const deviceDetails = deviceCheck
@@ -65,14 +60,6 @@ export function SystemStatusTab({ onRerunSetupClick }: SystemStatusTabProps) {
           icon={<Film className="h-4 w-4 text-purple-500" />}
           status={ffmpegStatus}
           details={ffmpegDetails}
-          onRetry={checkAll}
-          isLoading={isChecking}
-        />
-        <SystemStatusCard
-          title={t("settings.pythonEnvironment")}
-          icon={<FileCode className="h-4 w-4 text-yellow-500" />}
-          status={pythonStatus}
-          details={pythonDetails}
           onRetry={checkAll}
           isLoading={isChecking}
         />

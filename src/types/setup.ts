@@ -7,14 +7,14 @@ import type { DeviceInfo, LocalModel } from "./index";
 
 /**
  * Steps in the setup wizard
- * - python: Check Python environment and PyTorch
+ * - language: Select application language
  * - ffmpeg: Check FFmpeg installation
  * - device: Check available compute devices (GPU/CPU)
  * - model: Check AI models
  * - summary: Final getting-started instructions before first transcription
  */
 export type SetupStep =
-  | "python"
+  | "language"
   | "ffmpeg"
   | "device"
   | "model"
@@ -113,8 +113,6 @@ export interface SetupWizardState {
   currentStep: SetupStep;
   /** Whether all required steps are complete */
   isComplete: boolean;
-  /** Python environment check result */
-  python: PythonCheckResult | null;
   /** FFmpeg check result */
   ffmpeg: FFmpegCheckResult | null;
   /** Device check result */

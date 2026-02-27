@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SetupWizard } from "./SetupWizard";
 import { useSetupStore } from "@/stores/setupStore";
 
@@ -18,7 +18,7 @@ function setHappyPathState() {
   const noopAsync = vi.fn(async () => undefined);
 
   useSetupStore.setState({
-    currentStep: "ffmpeg",
+    currentStep: "language",
     isComplete: false,
     isChecking: false,
     pythonCheck: {
@@ -81,83 +81,41 @@ describe("SetupWizard flow", () => {
 
     render(<SetupWizard onComplete={onComplete} />);
 
+    // Language step
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    expect(screen.getByRole("heading", { name: "Devices" })).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getAllByRole("heading", { name: "FFmpeg" })[0]).toBeInTheDocument();
+    });
 
+    // FFmpeg step
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    
+    await waitFor(() => {
+      expect(screen.getAllByRole("heading", { name: "Devices" })[0]).toBeInTheDocument();
+    });
+
+    // Device step
     fireEvent.click(screen.getByRole("button", { name: /skip setup|continue/i }));
-    expect(screen.getByRole("heading", { level: 3, name: "AI Models" })).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 3, name: "AI Models" })).toBeInTheDocument();
+    });
 
+    // Model step
     fireEvent.click(screen.getByRole("button", { name: /skip setup|continue/i }));
-    expect(screen.getByRole("heading", { name: /almost ready/i })).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /almost ready/i })).toBeInTheDocument();
+    });
 
+    // Summary step
     fireEvent.click(screen.getByRole("button", { name: /finish setup/i }));
 
     await waitFor(() => {
       expect(useSetupStore.getState().isComplete).toBe(true);
     });
     expect(onComplete).toHaveBeenCalledTimes(1);
-  });
-
-  it("blocks forward navigation on Python step until check turns green", async () => {
-    const noopAsync = vi.fn(async () => undefined);
-
-    useSetupStore.setState({
-      currentStep: "python",
-      isComplete: false,
-      isChecking: false,
-      pythonCheck: {
-        status: "error",
-        version: null,
-        executable: null,
-        inVenv: false,
-        message: "Python not ready",
-      },
-      ffmpegCheck: {
-        status: "ok",
-        installed: true,
-        path: "ffmpeg",
-        version: "7.1",
-        message: "ok",
-      },
-      deviceCheck: {
-        status: "ok",
-        devices: [],
-        recommended: "cpu",
-        message: "ok",
-      },
-      modelCheck: {
-        status: "ok",
-        installedModels: [],
-        hasRequiredModel: false,
-        message: "No models yet",
-      },
-      runtimeReadiness: null,
-      ffmpegProgress: null,
-      ffmpegInstallStatus: "idle",
-      error: null,
-      checkAll: noopAsync,
-      fetchDevices: noopAsync,
-    });
-
-    render(<SetupWizard />);
-
-    const continueButton = screen.getByRole("button", { name: /skip|continue/i });
-    expect(continueButton).toBeEnabled();
-
-    act(() => {
-      useSetupStore.setState({
-        pythonCheck: {
-          status: "ok",
-          version: "3.12.0",
-          executable: "python",
-          inVenv: true,
-          message: "ok",
-        },
-      });
-    });
-
-    fireEvent.click(continueButton);
-    expect(screen.getByRole("heading", { level: 3, name: "FFmpeg" })).toBeInTheDocument();
   });
 
   it("keeps FFmpeg gate closed until auto-install completes", async () => {
@@ -228,6 +186,9 @@ describe("SetupWizard flow", () => {
     });
 
     fireEvent.click(continueButton);
-    expect(screen.getByRole("heading", { name: "Devices" })).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Devices" })).toBeInTheDocument();
+    });
   });
 });

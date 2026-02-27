@@ -3164,116 +3164,171 @@ fn reset_setup_impl(app: &AppHandle) -> Result<(), String> {
 // Setup Wizard Tauri Commands
 // ============================================================================
 
-fn is_python_runtime_ready(check: &PythonCheckResult) -> bool {
-    check.status == "ok" && check.version.is_some()
-}
-
 fn is_ffmpeg_runtime_ready(check: &FFmpegCheckResult) -> bool {
     check.installed && check.status != "error"
 }
 
 async fn run_python_environment_check_impl(app: &AppHandle) -> Result<PythonCheckResult, String> {
-    let engine_path = get_python_engine_path(app);
     let python_exe = get_python_executable(app);
-    let engine_dir = engine_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
+    let executable = Some(python_exe.to_string_lossy().to_string());
+    let has_python_hint = python_is_runnable(&python_exe);
 
-    eprintln!("[INFO] Checking Python environment...");
-    eprintln!("[DEBUG] Python exe: {:?}", python_exe);
-    eprintln!("[DEBUG] Engine path: {:?}", engine_path);
+    Ok(PythonCheckResult {
+        status: "warning".to_string(),
+        version: None,
+        executable,
+        in_venv: false,
+        message: if has_python_hint {
+            "Python detected, but setup wizard no longer requires Python".to_string()
+        } else {
+            "Python not detected, but setup wizard no longer requires Python".to_string()
+        },
+    })
+}
 
-    let check_code = r#"
-import json, sys
-from pathlib import Path
-engine_dir = Path(sys.argv[1])
-sys.path.insert(0, str(engine_dir))
-from environment_checks import check_python_environment
-print(json.dumps(check_python_environment()), flush=True)
-"#;
-
-    let output = python_installer::create_hidden_command(&python_exe)
-        .current_dir(&engine_dir)
-        .arg("-c")
-        .arg(check_code)
-        .arg(engine_dir.to_string_lossy().to_string())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| format!("Failed to execute Python: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !output.status.success() {
-        eprintln!("[ERROR] Python check failed: {}", stderr);
-        return Err(format!("Python check failed: {}", stderr));
-    }
-
-    // Parse JSON response
-    let result: PythonCheckResult = serde_json::from_str(&stdout).map_err(|e| {
-        format!(
-            "Failed to parse Python check result: {}. Output: {}",
-            e, stdout
-        )
-    })?;
-
-    eprintln!("[INFO] Python check complete: status={}", result.status);
-    Ok(result)
+fn parse_ffmpeg_version(raw: &str) -> Option<String> {
+    raw.lines().find_map(|line| {
+        if line.to_ascii_lowercase().starts_with("ffmpeg version") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                return Some(parts[2].to_string());
+            }
+        }
+        None
+    })
 }
 
 async fn run_ffmpeg_status_check_impl(app: &AppHandle) -> Result<FFmpegCheckResult, String> {
-    let engine_path = get_python_engine_path(app);
-    let python_exe = get_python_executable(app);
-    let engine_dir = engine_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
+    eprintln!("[INFO] Checking FFmpeg status (native Rust)...");
 
-    eprintln!("[INFO] Checking FFmpeg status...");
+    let ffmpeg_path = match get_ffmpeg_path(app).await {
+        Ok(path) => path,
+        Err(e) => {
+            let msg = format!("FFmpeg not found: {}", e);
+            return Ok(FFmpegCheckResult {
+                status: "error".to_string(),
+                installed: false,
+                path: None,
+                version: None,
+                message: msg,
+            });
+        }
+    };
 
-    let check_code = r#"
-import json, sys
-from pathlib import Path
-engine_dir = Path(sys.argv[1])
-sys.path.insert(0, str(engine_dir))
-from environment_checks import check_ffmpeg
-print(json.dumps(check_ffmpeg()), flush=True)
-"#;
-
-    let output = python_installer::create_hidden_command(&python_exe)
-        .current_dir(&engine_dir)
-        .arg("-c")
-        .arg(check_code)
-        .arg(engine_dir.to_string_lossy().to_string())
+    let output = create_hidden_command(&ffmpeg_path)
+        .arg("-version")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
         .await
-        .map_err(|e| format!("Failed to execute Python: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        .map_err(|e| format!("Failed to execute FFmpeg: {}", e))?;
 
     if !output.status.success() {
-        eprintln!("[ERROR] FFmpeg check failed: {}", stderr);
-        return Err(format!("FFmpeg check failed: {}", stderr));
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let msg = if stderr.trim().is_empty() {
+            "FFmpeg executable is present but failed to run".to_string()
+        } else {
+            format!("FFmpeg executable is present but failed to run: {}", stderr.trim())
+        };
+        return Ok(FFmpegCheckResult {
+            status: "error".to_string(),
+            installed: false,
+            path: Some(ffmpeg_path.to_string_lossy().to_string()),
+            version: None,
+            message: msg,
+        });
     }
 
-    let result: FFmpegCheckResult = serde_json::from_str(&stdout).map_err(|e| {
-        format!(
-            "Failed to parse FFmpeg check result: {}. Output: {}",
-            e, stdout
-        )
-    })?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let version = parse_ffmpeg_version(&stdout);
 
-    eprintln!(
-        "[INFO] FFmpeg check complete: installed={}",
-        result.installed
-    );
-    Ok(result)
+    Ok(FFmpegCheckResult {
+        status: "ok".to_string(),
+        installed: true,
+        path: Some(ffmpeg_path.to_string_lossy().to_string()),
+        version,
+        message: "FFmpeg is installed and ready".to_string(),
+    })
+}
+
+async fn run_models_status_check_impl(app: &AppHandle) -> Result<ModelCheckResult, String> {
+    let models_dir = get_models_dir(app).map_err(|e| e.to_string())?;
+    let local_models = get_local_models_internal(&models_dir).map_err(|e| e.to_string())?;
+
+    let installed_models: Vec<LocalModelInfo> = local_models
+        .iter()
+        .map(|model| LocalModelInfo {
+            name: model.name.clone(),
+            model_type: model.model_type.clone(),
+            size_mb: model.size_mb,
+        })
+        .collect();
+
+    let has_required_model = local_models
+        .iter()
+        .any(|model| model.model_type != "diarization");
+
+    let (status, message) = if has_required_model {
+        (
+            "ok".to_string(),
+            format!(
+                "{} model(s) installed",
+                installed_models.len()
+            ),
+        )
+    } else {
+        (
+            "warning".to_string(),
+            "No transcription models installed yet".to_string(),
+        )
+    };
+
+    Ok(ModelCheckResult {
+        status,
+        installed_models,
+        has_required_model,
+        message,
+    })
+}
+
+async fn run_environment_status_check_impl(app: &AppHandle) -> Result<EnvironmentStatus, String> {
+    let python = run_python_environment_check_impl(app).await?;
+    let ffmpeg = run_ffmpeg_status_check_impl(app).await?;
+    let models = run_models_status_check_impl(app).await?;
+
+    let devices_response = get_available_devices(app.clone(), false)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let recommended_device = devices_response
+        .devices
+        .iter()
+        .find(|d| d.device_type == devices_response.recommended)
+        .cloned();
+
+    let devices = DeviceCheckResult {
+        status: "ok".to_string(),
+        devices: devices_response.devices,
+        recommended: recommended_device,
+        message: "Device detection completed".to_string(),
+    };
+
+    let runtime_ready = is_ffmpeg_runtime_ready(&ffmpeg);
+    let overall_status = if runtime_ready { "ok" } else { "error" }.to_string();
+    let message = if runtime_ready {
+        "Environment is ready".to_string()
+    } else {
+        "Environment is not ready: FFmpeg is required".to_string()
+    };
+
+    Ok(EnvironmentStatus {
+        python,
+        ffmpeg,
+        models,
+        devices,
+        overall_status,
+        message,
+    })
 }
 
 struct RuntimeReadinessEvaluation {
@@ -3284,18 +3339,10 @@ struct RuntimeReadinessEvaluation {
 
 async fn evaluate_runtime_readiness(app: &AppHandle) -> RuntimeReadinessEvaluation {
     let checked_at = now_rfc3339();
-
-    let python_result = run_python_environment_check_impl(app).await;
     let ffmpeg_result = run_ffmpeg_status_check_impl(app).await;
 
-    let (python_ready, python_message, python_executable) = match python_result {
-        Ok(result) => (
-            is_python_runtime_ready(&result),
-            result.message,
-            result.executable,
-        ),
-        Err(err) => (false, format!("Python check failed: {}", err), None),
-    };
+    let python_ready = true;
+    let python_message = "Python is not required for runtime readiness".to_string();
 
     let (ffmpeg_ready, ffmpeg_message, ffmpeg_path) = match ffmpeg_result {
         Ok(result) => (
@@ -3306,13 +3353,9 @@ async fn evaluate_runtime_readiness(app: &AppHandle) -> RuntimeReadinessEvaluati
         Err(err) => (false, format!("FFmpeg check failed: {}", err), None),
     };
 
-    let ready = python_ready && ffmpeg_ready;
+    let ready = ffmpeg_ready;
     let message = if ready {
         "Runtime is ready".to_string()
-    } else if !python_ready && !ffmpeg_ready {
-        "Runtime is not ready: Python and FFmpeg are required".to_string()
-    } else if !python_ready {
-        "Runtime is not ready: Python environment is not configured".to_string()
     } else {
         "Runtime is not ready: FFmpeg is not configured".to_string()
     };
@@ -3327,7 +3370,7 @@ async fn evaluate_runtime_readiness(app: &AppHandle) -> RuntimeReadinessEvaluati
             message,
             checked_at,
         },
-        python_executable,
+        python_executable: None,
         ffmpeg_path,
     }
 }
@@ -3352,116 +3395,13 @@ async fn check_runtime_readiness(app: AppHandle) -> Result<RuntimeReadinessStatu
 /// Check AI models through Python backend
 #[tauri::command]
 async fn check_models_status(app: AppHandle) -> Result<ModelCheckResult, String> {
-    let engine_path = get_python_engine_path(&app);
-    let python_exe = get_python_executable(&app);
-    let engine_dir = engine_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
-    let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
-
-    eprintln!("[INFO] Checking models status...");
-    eprintln!("[DEBUG] Models dir: {:?}", models_dir);
-
-    let check_code = r#"
-import json, sys
-from pathlib import Path
-engine_dir = Path(sys.argv[1])
-cache_dir = sys.argv[2] if len(sys.argv) > 2 else None
-sys.path.insert(0, str(engine_dir))
-from environment_checks import check_models
-print(json.dumps(check_models(cache_dir)), flush=True)
-"#;
-
-    let output = create_hidden_command(&python_exe)
-        .current_dir(&engine_dir)
-        .arg("-c")
-        .arg(check_code)
-        .arg(engine_dir.to_string_lossy().to_string())
-        .arg(models_dir.to_string_lossy().to_string())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| format!("Failed to execute Python: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !output.status.success() {
-        eprintln!("[ERROR] Models check failed: {}", stderr);
-        return Err(format!("Models check failed: {}", stderr));
-    }
-
-    let result: ModelCheckResult = serde_json::from_str(&stdout).map_err(|e| {
-        format!(
-            "Failed to parse models check result: {}. Output: {}",
-            e, stdout
-        )
-    })?;
-
-    eprintln!(
-        "[INFO] Models check complete: has_required={}",
-        result.has_required_model
-    );
-    Ok(result)
+    run_models_status_check_impl(&app).await
 }
 
 /// Get complete environment status through Python backend
 #[tauri::command]
 async fn get_environment_status(app: AppHandle) -> Result<EnvironmentStatus, String> {
-    let engine_path = get_python_engine_path(&app);
-    let python_exe = get_python_executable(&app);
-    let engine_dir = engine_path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .ok_or_else(|| format!("Invalid engine path: {:?}", engine_path))?;
-    let models_dir = get_models_dir(&app).map_err(|e| e.to_string())?;
-
-    eprintln!("[INFO] Getting full environment status...");
-
-    let check_code = r#"
-import json, sys
-from pathlib import Path
-engine_dir = Path(sys.argv[1])
-cache_dir = sys.argv[2] if len(sys.argv) > 2 else None
-sys.path.insert(0, str(engine_dir))
-from environment_checks import get_full_environment_status
-print(json.dumps(get_full_environment_status(cache_dir)), flush=True)
-"#;
-
-    let output = create_hidden_command(&python_exe)
-        .current_dir(&engine_dir)
-        .arg("-c")
-        .arg(check_code)
-        .arg(engine_dir.to_string_lossy().to_string())
-        .arg(models_dir.to_string_lossy().to_string())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| format!("Failed to execute Python: {}", e))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !output.status.success() {
-        eprintln!("[ERROR] Environment check failed: {}", stderr);
-        return Err(format!("Environment check failed: {}", stderr));
-    }
-
-    let result: EnvironmentStatus = serde_json::from_str(&stdout).map_err(|e| {
-        format!(
-            "Failed to parse environment status: {}. Output: {}",
-            e, stdout
-        )
-    })?;
-
-    eprintln!(
-        "[INFO] Environment check complete: overall={}",
-        result.overall_status
-    );
-    Ok(result)
+    run_environment_status_check_impl(&app).await
 }
 
 /// Fast-path setup check using cached state with TTL
@@ -3547,7 +3487,6 @@ async fn is_setup_complete(app: AppHandle) -> Result<bool, String> {
 /// This avoids spawning Python processes on every setup completion.
 #[tauri::command]
 async fn mark_setup_complete(app: AppHandle) -> Result<(), String> {
-    let python_exe = get_python_executable(&app);
     let ffmpeg_path = get_ffmpeg_path(&app)
         .await
         .ok()
@@ -3567,7 +3506,7 @@ async fn mark_setup_complete(app: AppHandle) -> Result<(), String> {
         &app,
         &readiness,
         Some(now_rfc3339()),
-        Some(python_exe.to_string_lossy().to_string()),
+        None,
         ffmpeg_path,
     )
 }

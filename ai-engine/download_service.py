@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 import re
 
-from downloader import download_model as downloader_download_model
 from ipc_events import emit_error, emit_progress
 from logger import logger
 
@@ -65,6 +64,10 @@ def download_model(
     token_file: str | None = None,
 ) -> None:
     """Download model with pre-validation and delegated implementation."""
+    # Import lazily so non-download commands (e.g. --delete-model) do not require
+    # optional downloader dependencies at process startup.
+    from downloader import download_model as downloader_download_model
+
     try:
         safe_model_name = validate_model_name(model_name)
     except ValueError as e:
