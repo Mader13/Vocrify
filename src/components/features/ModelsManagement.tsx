@@ -59,8 +59,6 @@ function ModelSectionPanel({
   animationOffsetMs = 0,
 }: ModelSectionPanelProps): React.JSX.Element {
   const { t } = useI18n();
-  const installedCount = models.filter((model) => model.installed).length;
-
   return (
     <section className="rounded-2xl bg-card/40 border border-transparent p-4 sm:p-5 shadow-sm">
       <div className="mb-5 flex items-start justify-between gap-3">
@@ -71,9 +69,6 @@ function ModelSectionPanel({
           </h2>
           <p className="mt-1.5 text-[14px] leading[1.6] text-muted-foreground/80">{description}</p>
         </div>
-        <span className="rounded-md border border-border/40 bg-background/50 px-2 py-1 text-xs font-medium text-muted-foreground">
-          {installedCount}/{models.length} {t("models.installed")}
-        </span>
       </div>
 
       <div className="space-y-3">
