@@ -5,6 +5,7 @@ import type {
   TranscriptionResult,
   ModelDownloadProgress,
   ModelDownloadStageEvent,
+  ModelsDirMoveProgressEvent,
   DevicesResponse,
 } from "@/types";
 import { handleBackendLog } from "./log-handler";
@@ -128,6 +129,14 @@ export async function onModelDownloadStageComplete(
       callback(event.payload.modelName, event.payload.stage);
     }
   );
+}
+
+export async function onModelsDirMoveProgress(
+  callback: (event: ModelsDirMoveProgressEvent) => void
+): Promise<UnlistenFn> {
+  return listen<ModelsDirMoveProgressEvent>("models-dir-move-progress", (event) => {
+    callback(event.payload);
+  });
 }
 
 export async function onBackendLogs(

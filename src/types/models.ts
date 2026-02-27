@@ -66,6 +66,14 @@ export interface ModelDownloadStageCompleteEvent {
   stage: "segmentation" | "embedding";
 }
 
+export interface ModelsDirMoveProgressEvent {
+  percent: number;
+  movedItems: number;
+  totalItems: number;
+  status: "preparing" | "moving" | "completed" | "error";
+  message: string;
+}
+
 export interface ModelDownloadState {
   modelName: string;
   progress: number;

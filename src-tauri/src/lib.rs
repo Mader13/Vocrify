@@ -2270,12 +2270,74 @@ struct SetModelsDirResponse {
     moved_existing_models: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelsDirMoveProgressEvent {
+    percent: u8,
+    moved_items: u64,
+    total_items: u64,
+    status: String,
+    message: String,
+}
+
+fn emit_models_dir_move_progress(
+    app: &AppHandle,
+    moved_items: u64,
+    total_items: u64,
+    status: &str,
+    message: &str,
+) {
+    let percent = if total_items == 0 {
+        100
+    } else {
+        ((moved_items.saturating_mul(100)) / total_items).min(100) as u8
+    };
+
+    let _ = app.emit(
+        "models-dir-move-progress",
+        ModelsDirMoveProgressEvent {
+            percent,
+            moved_items,
+            total_items,
+            status: status.to_string(),
+            message: message.to_string(),
+        },
+    );
+}
+
 fn is_cross_device_error(error: &std::io::Error) -> bool {
     error.kind() == std::io::ErrorKind::CrossesDevices
         || matches!(error.raw_os_error(), Some(17) | Some(18))
 }
 
-fn move_entry(src_path: &Path, dst_path: &Path, moved_items: &mut u64) -> Result<(), AppError> {
+fn count_entries(path: &Path) -> Result<u64, AppError> {
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0_u64;
+    for entry in std::fs::read_dir(path).map_err(AppError::IoError)? {
+        let entry = entry.map_err(AppError::IoError)?;
+        total += 1;
+        let entry_path = entry.path();
+        let metadata = std::fs::symlink_metadata(&entry_path).map_err(AppError::IoError)?;
+        if metadata.is_dir() {
+            total += count_entries(&entry_path)?;
+        }
+    }
+
+    Ok(total)
+}
+
+fn move_entry<F>(
+    src_path: &Path,
+    dst_path: &Path,
+    moved_items: &mut u64,
+    on_progress: &mut F,
+) -> Result<(), AppError>
+where
+    F: FnMut(u64),
+{
     if dst_path.exists() {
         return Err(AppError::Other(format!(
             "Cannot move models: destination already contains '{}'",
@@ -2289,6 +2351,7 @@ fn move_entry(src_path: &Path, dst_path: &Path, moved_items: &mut u64) -> Result
         match std::fs::rename(src_path, dst_path) {
             Ok(_) => {
                 *moved_items += 1;
+                on_progress(*moved_items);
                 return Ok(());
             }
             Err(error) if !is_cross_device_error(&error) => return Err(AppError::IoError(error)),
@@ -2301,43 +2364,83 @@ fn move_entry(src_path: &Path, dst_path: &Path, moved_items: &mut u64) -> Result
             let entry = entry.map_err(AppError::IoError)?;
             let nested_src = entry.path();
             let nested_dst = dst_path.join(entry.file_name());
-            move_entry(&nested_src, &nested_dst, moved_items)?;
+            move_entry(&nested_src, &nested_dst, moved_items, on_progress)?;
         }
 
         std::fs::remove_dir(src_path).map_err(AppError::IoError)?;
         *moved_items += 1;
+        on_progress(*moved_items);
         return Ok(());
     }
 
     match std::fs::rename(src_path, dst_path) {
         Ok(_) => {
             *moved_items += 1;
+            on_progress(*moved_items);
             Ok(())
         }
         Err(error) if is_cross_device_error(&error) => {
             std::fs::copy(src_path, dst_path).map_err(AppError::IoError)?;
             std::fs::remove_file(src_path).map_err(AppError::IoError)?;
             *moved_items += 1;
+            on_progress(*moved_items);
             Ok(())
         }
         Err(error) => Err(AppError::IoError(error)),
     }
 }
 
-fn move_models_contents(source_dir: &Path, target_dir: &Path) -> Result<u64, AppError> {
+fn move_models_contents(source_dir: &Path, target_dir: &Path, app: &AppHandle) -> Result<u64, AppError> {
     if !source_dir.exists() {
         return Ok(0);
     }
 
     std::fs::create_dir_all(target_dir).map_err(AppError::IoError)?;
+    let total_items = count_entries(source_dir)?;
+
+    emit_models_dir_move_progress(
+        app,
+        0,
+        total_items,
+        "preparing",
+        "Preparing to move models...",
+    );
 
     let mut moved_items = 0_u64;
+    let mut last_percent = 0_u8;
+    let mut on_progress = |moved_now: u64| {
+        let percent = if total_items == 0 {
+            100
+        } else {
+            ((moved_now.saturating_mul(100)) / total_items).min(100) as u8
+        };
+
+        if percent != last_percent {
+            last_percent = percent;
+            emit_models_dir_move_progress(
+                app,
+                moved_now,
+                total_items,
+                "moving",
+                "Moving model files...",
+            );
+        }
+    };
+
     for entry in std::fs::read_dir(source_dir).map_err(AppError::IoError)? {
         let entry = entry.map_err(AppError::IoError)?;
         let src_path = entry.path();
         let dst_path = target_dir.join(entry.file_name());
-        move_entry(&src_path, &dst_path, &mut moved_items)?;
+        move_entry(&src_path, &dst_path, &mut moved_items, &mut on_progress)?;
     }
+
+    emit_models_dir_move_progress(
+        app,
+        moved_items,
+        total_items,
+        "completed",
+        "Models move completed",
+    );
 
     Ok(moved_items)
 }
@@ -2596,9 +2699,33 @@ async fn set_models_dir_command(
     let moved_items = if should_move_existing {
         let source = current_models_dir.clone();
         let destination = normalized.clone();
-        tokio::task::spawn_blocking(move || move_models_contents(&source, &destination))
-            .await
-            .map_err(|e| AppError::Other(format!("Failed to move models directory: {}", e)))??
+        let app_handle = app.clone();
+        match tokio::task::spawn_blocking(move || move_models_contents(&source, &destination, &app_handle)).await {
+            Ok(Ok(moved)) => moved,
+            Ok(Err(error)) => {
+                emit_models_dir_move_progress(
+                    &app,
+                    0,
+                    0,
+                    "error",
+                    &format!("Failed to move models: {}", error),
+                );
+                return Err(error);
+            }
+            Err(error) => {
+                emit_models_dir_move_progress(
+                    &app,
+                    0,
+                    0,
+                    "error",
+                    &format!("Failed to move models: {}", error),
+                );
+                return Err(AppError::Other(format!(
+                    "Failed to move models directory: {}",
+                    error
+                )));
+            }
+        }
     } else {
         0
     };

@@ -12,9 +12,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Progress } from "@/components/ui/progress";
 import { useI18n } from "@/hooks";
 import { logger } from "@/lib/logger";
-import { clearCache, getModelsDir, openModelsFolder, selectOutputDirectory, setModelsDir } from "@/services/tauri";
+import { clearCache, getModelsDir, onModelsDirMoveProgress, openModelsFolder, selectOutputDirectory, setModelsDir } from "@/services/tauri";
 import { useTasks } from "@/stores";
 import { useModelsStore } from "@/stores/modelsStore";
 
@@ -31,6 +32,9 @@ export function AdvancedTab() {
   const [pendingModelsDirectory, setPendingModelsDirectory] = React.useState<string | null>(null);
   const [isMoveConfirmOpen, setIsMoveConfirmOpen] = React.useState(false);
   const [isModelsMigrationInProgress, setIsModelsMigrationInProgress] = React.useState(false);
+  const [modelsMoveProgress, setModelsMoveProgress] = React.useState(0);
+  const [modelsMoveMessage, setModelsMoveMessage] = React.useState("");
+  const [modelsMoveCounts, setModelsMoveCounts] = React.useState<{ moved: number; total: number }>({ moved: 0, total: 0 });
   const [isModelsDirectoryLoading, setIsModelsDirectoryLoading] = React.useState(true);
   const [isModelsDirectoryUpdating, setIsModelsDirectoryUpdating] = React.useState(false);
 
@@ -52,6 +56,22 @@ export function AdvancedTab() {
   React.useEffect(() => {
     void loadModelsDirectory();
   }, [loadModelsDirectory]);
+
+  React.useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    void onModelsDirMoveProgress((event) => {
+      setModelsMoveProgress(Math.max(0, Math.min(100, event.percent)));
+      setModelsMoveMessage(event.message);
+      setModelsMoveCounts({ moved: event.movedItems, total: event.totalItems });
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const refreshModelsData = React.useCallback(async () => {
     await Promise.all([loadModels(), loadDiskUsage()]);
@@ -91,6 +111,9 @@ export function AdvancedTab() {
     setIsMoveConfirmOpen(false);
     setIsModelsDirectoryUpdating(true);
     setIsModelsMigrationInProgress(true);
+    setModelsMoveProgress(0);
+    setModelsMoveMessage(t("settings.modelsDirectoryMoveInProgressDescription"));
+    setModelsMoveCounts({ moved: 0, total: 0 });
     setModelsDirectoryError(null);
     setModelsDirectoryNotice(null);
 
@@ -251,9 +274,16 @@ export function AdvancedTab() {
             <DialogTitle>{t("settings.modelsDirectoryMoveInProgressTitle")}</DialogTitle>
             <DialogDescription>{t("settings.modelsDirectoryMoveInProgressDescription")}</DialogDescription>
           </DialogHeader>
-          <div className="mt-4 flex items-center gap-3 rounded-lg border border-border/60 bg-muted/30 p-3">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            <span className="text-sm text-foreground/90">{t("common.loading")}</span>
+          <div className="mt-4 space-y-3 rounded-lg border border-border/60 bg-muted/30 p-3">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span className="text-sm text-foreground/90">{modelsMoveMessage || t("common.loading")}</span>
+            </div>
+            <Progress value={modelsMoveProgress} className="h-2" />
+            <p className="text-xs text-muted-foreground">
+              {modelsMoveProgress}%{" "}
+              {modelsMoveCounts.total > 0 ? `(${modelsMoveCounts.moved} / ${modelsMoveCounts.total})` : ""}
+            </p>
           </div>
         </DialogContent>
       </Dialog>

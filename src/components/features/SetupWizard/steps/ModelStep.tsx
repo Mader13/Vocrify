@@ -12,12 +12,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Progress } from "@/components/ui/progress";
 import { CheckCard } from "../CheckCard";
 import { useSetupStore } from "@/stores/setupStore";
 import { AVAILABLE_MODELS, type LocalModel } from "@/types";
 import { useModelsStore } from "@/stores/modelsStore";
 import { useI18n } from "@/hooks";
-import { getModelsDir, selectOutputDirectory, setModelsDir } from "@/services/tauri";
+import { getModelsDir, onModelsDirMoveProgress, selectOutputDirectory, setModelsDir } from "@/services/tauri";
 import { logger } from "@/lib/logger";
 
 /**
@@ -78,6 +79,9 @@ export function ModelStep() {
   const [isModelsDirectoryLoading, setIsModelsDirectoryLoading] = useState(true);
   const [isMoveConfirmOpen, setIsMoveConfirmOpen] = useState(false);
   const [isModelsDirectoryUpdating, setIsModelsDirectoryUpdating] = useState(false);
+  const [modelsMoveProgress, setModelsMoveProgress] = useState(0);
+  const [modelsMoveMessage, setModelsMoveMessage] = useState("");
+  const [modelsMoveCounts, setModelsMoveCounts] = useState<{ moved: number; total: number }>({ moved: 0, total: 0 });
 
   // Run check on mount
   useEffect(() => {
@@ -104,6 +108,22 @@ export function ModelStep() {
 
     void loadModelsDirectory();
   }, [t]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    void onModelsDirMoveProgress((event) => {
+      setModelsMoveProgress(Math.max(0, Math.min(100, event.percent)));
+      setModelsMoveMessage(event.message);
+      setModelsMoveCounts({ moved: event.movedItems, total: event.totalItems });
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   // Watch for download completion to re-check models
   useEffect(() => {
@@ -152,6 +172,9 @@ export function ModelStep() {
 
     setIsMoveConfirmOpen(false);
     setIsModelsDirectoryUpdating(true);
+    setModelsMoveProgress(0);
+    setModelsMoveMessage(t("setup.modelsDirectoryMoveInProgressDescription"));
+    setModelsMoveCounts({ moved: 0, total: 0 });
     setModelsDirectoryError(null);
     setModelsDirectoryNotice(null);
 
@@ -335,9 +358,16 @@ export function ModelStep() {
             <DialogTitle>{t("setup.modelsDirectoryMoveInProgressTitle")}</DialogTitle>
             <DialogDescription>{t("setup.modelsDirectoryMoveInProgressDescription")}</DialogDescription>
           </DialogHeader>
-          <div className="mt-4 flex items-center gap-3 rounded-lg border border-border/60 bg-muted/30 p-3">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            <span className="text-sm text-foreground/90">{t("common.loading")}</span>
+          <div className="mt-4 space-y-3 rounded-lg border border-border/60 bg-muted/30 p-3">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span className="text-sm text-foreground/90">{modelsMoveMessage || t("common.loading")}</span>
+            </div>
+            <Progress value={modelsMoveProgress} className="h-2" />
+            <p className="text-xs text-muted-foreground">
+              {modelsMoveProgress}%{" "}
+              {modelsMoveCounts.total > 0 ? `(${modelsMoveCounts.moved} / ${modelsMoveCounts.total})` : ""}
+            </p>
           </div>
         </DialogContent>
       </Dialog>
