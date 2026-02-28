@@ -104,6 +104,12 @@ export function WaveformControls({
               step="0.01"
               value={volume}
               onChange={handleVolumeChange}
+              onWheel={(e) => {
+                e.preventDefault();
+                const delta = -Math.sign(e.deltaY) * 0.05;
+                const newVolume = Math.max(0, Math.min(1, volume + delta));
+                onVolumeChange(newVolume);
+              }}
               className="h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:shadow-sm [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-125 focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-ring [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:shadow-sm [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-125 focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-ring"
               style={{
                 background: `linear-gradient(to right, var(--primary) ${volume * 100}%, var(--border) ${volume * 100}%)`,

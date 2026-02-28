@@ -9,7 +9,6 @@ describe("DeviceStep", () => {
       currentStep: "device",
       isComplete: false,
       isChecking: false,
-      pythonCheck: null,
       ffmpegCheck: null,
       modelCheck: null,
       runtimeReadiness: null,

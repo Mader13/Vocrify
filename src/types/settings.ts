@@ -1,6 +1,6 @@
 export type DiarizationProvider = "none" | "native" | "sherpa-onnx";
 
-export type EnginePreference = "auto" | "rust" | "python";
+export type EnginePreference = "auto" | "rust";
 
 export type AppLocale = "en" | "ru";
 
@@ -70,10 +70,6 @@ export const ENGINE_PREFERENCES: Record<EnginePreference, { name: string; descri
     name: "Rust Only",
     description: "Rust transcribe-rs only, error if unavailable",
   },
-  python: {
-    name: "Python Only",
-    description: "Deprecated - kept for compatibility",
-  },
 };
 
 export const DIARIZATION_PROVIDERS: Record<DiarizationProvider, { name: string; description: string; requirements: string }> = {
@@ -85,7 +81,7 @@ export const DIARIZATION_PROVIDERS: Record<DiarizationProvider, { name: string; 
   native: {
     name: "Native (Rust)",
     description: "Built-in sherpa-rs diarization",
-    requirements: "No Python required",
+    requirements: "No additional runtime required",
   },
   "sherpa-onnx": {
     name: "Sherpa-ONNX (legacy alias)",

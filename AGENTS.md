@@ -7,7 +7,7 @@ Tauri desktop application for video/audio transcription using AI. Built with Rea
 **Core Architecture:**
 
 - **Transcription Engine:** Rust `transcribe-rs` (Whisper GGML, Parakeet ONNX, Moonshine ONNX, SenseVoice ONNX)
-- **Speaker Diarization:** Python Sherpa-ONNX (via PythonBridge) - only when diarization is enabled
+- **Speaker Diarization:** Native Sherpa-ONNX via Rust `sherpa-rs`
 - **GPU Acceleration:** CUDA (NVIDIA), MPS (Apple Silicon), Vulkan (AMD/Intel), CPU (fallback)
 
 ## Commands
@@ -24,7 +24,7 @@ bun run tauri:dev
 
 ````
 
-**Note:** The Rust `transcribe-rs` engine handles all transcription. Python is only used for Sherpa-ONNX speaker diarization when enabled.
+**Note:** The app is Rust-native for transcription and diarization; Python is not required.
 
 ### Build
 
@@ -68,32 +68,13 @@ bun add <package>
 bun add -d <package>
 ```
 
-### Python Dependencies (AI Engine - Diarization Only)
-
-The Python backend (`ai-engine/`) is **only** used for speaker diarization (Sherpa-ONNX). All transcription is handled by the Rust `transcribe-rs` engine.
-
-**PyTorch Installation by Platform:**
-
-```bash
-cd ai-engine
-
-# Windows/Linux with NVIDIA GPU (CUDA 12.1) - RECOMMENDED
-pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
-
-# macOS with Apple Silicon (M1/M2/M3/M4) - MPS acceleration built-in
-pip install -r requirements.txt
-
-# CPU-only (any platform) - slowest but works everywhere
-pip install -r requirements.txt
-```
+### Runtime Requirements
 
 **Requirements:**
 
-- Python 3.10 or 3.12 (3.13+ NOT supported)
 - For CUDA: NVIDIA GPU with CUDA 12.1+ drivers
 - For MPS: macOS 12.3+ with Apple Silicon
 - Verify CUDA: `nvidia-smi` (should show CUDA Version >= 12.1)
-- Verify MPS: `python -c "import torch; print(torch.backends.mps.is_available())"`
 
 **Device Detection:**
 The app automatically detects available devices at startup. Device priority: CUDA > MPS > Vulkan > CPU.
@@ -356,3 +337,4 @@ const engine: EnginePreference = "auto";
 5. **Non-persisted sensitive data in Zustand** - Use persist middleware
 6. **Service layer bypass** - Never call `invoke()` directly in components
 7. **Bypassing engine router** - Always use `transcribeWithFallback()` from `src/services/transcription.ts`
+````

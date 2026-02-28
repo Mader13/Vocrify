@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:ai": "cd ai-engine && venv/Scripts/python.exe main.py --server",
     "prepare:tauri-resources": "bun run scripts/prepare-tauri-resources.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",

@@ -33,12 +33,11 @@ export interface OptionalStepFooterProps {
 }
 
 export function OptionalStepFooter({ onBack, onNext }: OptionalStepFooterProps) {
-  const { runtimeReadiness, pythonCheck, ffmpegCheck } = useSetupStore();
+  const { runtimeReadiness, ffmpegCheck } = useSetupStore();
   const canComplete =
     runtimeReadiness?.ready === true ||
     Boolean(
-      pythonCheck?.status === "ok" &&
-        ffmpegCheck?.installed &&
+      ffmpegCheck?.installed &&
         ffmpegCheck.status !== "error"
     );
 

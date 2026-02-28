@@ -8,7 +8,6 @@ function resetSetupStoreState() {
     currentStep: "language",
     isComplete: false,
     isChecking: false,
-    pythonCheck: null,
     ffmpegCheck: null,
     deviceCheck: null,
     modelCheck: null,

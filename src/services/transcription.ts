@@ -2,7 +2,7 @@
  * Transcription Service
  *
  * This module routes transcription to the Rust backend (`transcribe-rs`).
- * Python is only used by the backend for Sherpa-ONNX diarization.
+ * Speaker diarization is handled natively in Rust.
  */
 
 import type {

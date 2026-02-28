@@ -6,7 +6,6 @@
 import { create } from "zustand";
 import type {
   SetupStep,
-  PythonCheckResult,
   FFmpegCheckResult,
   ModelCheckResult,
   DeviceCheckResult,
@@ -14,7 +13,6 @@ import type {
 } from "@/types/setup";
 import { logger } from "@/lib/logger";
 import {
-  checkPythonEnvironment,
   checkFFmpegStatus,
   checkModelsStatus,
   isSetupComplete,
@@ -35,7 +33,6 @@ interface SetupStore {
   isChecking: boolean;
 
   // Check results
-  pythonCheck: PythonCheckResult | null;
   ffmpegCheck: FFmpegCheckResult | null;
   deviceCheck: DeviceCheckResult | null;
   modelCheck: ModelCheckResult | null;
@@ -50,7 +47,6 @@ interface SetupStore {
 
   // Actions - Checks
   checkAll: () => Promise<void>;
-  checkPython: () => Promise<void>;
   checkFFmpeg: () => Promise<void>;
   checkDevice: () => Promise<void>;
   checkModel: () => Promise<void>;
@@ -80,7 +76,6 @@ const initialState = {
   currentStep: "language" as SetupStep,
   isComplete: false,
   isChecking: false,
-  pythonCheck: null as PythonCheckResult | null,
   ffmpegCheck: null as FFmpegCheckResult | null,
   deviceCheck: null as DeviceCheckResult | null,
   modelCheck: null as ModelCheckResult | null,
@@ -89,16 +84,6 @@ const initialState = {
   ffmpegInstallStatus: "idle" as "idle" | "downloading" | "extracting" | "completed" | "failed",
   error: null as string | null,
 };
-
-function failedPythonCheck(message: string): PythonCheckResult {
-  return {
-    status: "error",
-    version: null,
-    executable: null,
-    inVenv: false,
-    message,
-  };
-}
 
 function failedFFmpegCheck(message: string): FFmpegCheckResult {
   return {
@@ -131,16 +116,12 @@ function failedModelCheck(message: string): ModelCheckResult {
 function buildRuntimeReadiness(
   ffmpegCheck: FFmpegCheckResult
 ): RuntimeReadinessStatus {
-  const pythonReady = true;
   const ffmpegReady = ffmpegCheck.installed && ffmpegCheck.status !== "error";
-  // Python is not required for onboarding/runtime readiness in the current Rust-native flow.
   const ready = ffmpegReady;
 
   return {
     ready,
-    pythonReady,
     ffmpegReady,
-    pythonMessage: "Python is not required for setup",
     ffmpegMessage: ffmpegCheck.message,
     message: ready
       ? "Runtime ready"
@@ -241,25 +222,6 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
         error instanceof Error ? error.message : "Unknown error";
       set({ error: errorMessage, isChecking: false });
       logger.error("Failed to run setup checks", { error: errorMessage });
-    }
-  },
-
-  checkPython: async () => {
-    logger.info("Checking Python environment");
-    try {
-      const result = await checkPythonEnvironment();
-      if (result.success && result.data) {
-        set({ pythonCheck: result.data });
-      } else {
-        set({
-          pythonCheck: failedPythonCheck(result.error || "Check failed"),
-        });
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Check failed";
-      set({ pythonCheck: failedPythonCheck(errorMessage) });
-      logger.error("Python check failed", { error: errorMessage });
     }
   },
 
@@ -400,7 +362,7 @@ export const useSetupStore = create<SetupStore>()((set, get) => ({
    * @param forceRefresh - If true, bypass cache and re-detect devices
    *
    * Device detection is deferred until the user opens Settings or Setup Wizard.
-   * This avoids expensive PyTorch imports during app initialization.
+   * This avoids expensive runtime probes during app initialization.
    * Results are cached in the Rust backend for the app session.
    */
   fetchDevices: async (forceRefresh = false) => {

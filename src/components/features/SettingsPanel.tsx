@@ -19,14 +19,14 @@ export function SettingsPanel() {
 
   const isSettingsOpen = useUIStore((s) => s.isSettingsOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
-  const { checkAll, fetchDevices, ffmpegCheck, pythonCheck, resetSetupState } = useSetupStore();
+  const { checkAll, fetchDevices, ffmpegCheck, resetSetupState } = useSetupStore();
   const { t } = useI18n();
 
   useEffect(() => {
     if (!isSettingsOpen) return;
-    if (!ffmpegCheck || !pythonCheck) checkAll();
+    if (!ffmpegCheck) checkAll();
     fetchDevices(false);
-  }, [isSettingsOpen, ffmpegCheck, pythonCheck, checkAll, fetchDevices]);
+  }, [isSettingsOpen, ffmpegCheck, checkAll, fetchDevices]);
 
   const handleClickOutside = useCallback(
     (event: MouseEvent) => {

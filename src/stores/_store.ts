@@ -96,6 +96,7 @@ interface TasksState {
   unarchiveTask: (taskId: string) => void;
   updateSettings: (settings: Partial<AppSettings>) => void;
   updateLastDiarizationProvider: (provider: DiarizationProvider) => void;
+  initializeTaskStorage: () => Promise<void>;
   addTask: (path: string, name: string, size: number, options: TranscriptionOptions) => Promise<void>;
   retryTask: (taskId: string) => Promise<void>;
   cancelTask: (taskId: string) => Promise<void>;
@@ -175,6 +176,28 @@ function ensureTaskResult(task: TranscriptionTask): TranscriptionTask {
   return task;
 }
 
+let taskStorageInitialized = false;
+let taskStorageInitializationPromise: Promise<void> | null = null;
+
+function persistTaskSnapshot(task: TranscriptionTask): void {
+  void (async () => {
+    const { saveTranscription } = await import("@/services/storage");
+    const result = await saveTranscription(task);
+
+    if (!result.success) {
+      logger.warn("Failed to persist task snapshot", {
+        taskId: task.id,
+        error: result.error,
+      });
+    }
+  })().catch((error) => {
+    logger.error("Unexpected task persistence error", {
+      taskId: task.id,
+      error: String(error),
+    });
+  });
+}
+
 // ============================================================================
 // Tasks Store
 // ============================================================================
@@ -185,7 +208,7 @@ export const useTasks = create<TasksState>()(
       const validateSettings = (state: TasksState) => {
         if (!state.settings) return;
         const { settings } = state;
-        const validEnginePrefs: EnginePreference[] = ["auto", "rust", "python"];
+        const validEnginePrefs: EnginePreference[] = ["auto", "rust"];
         const validDevices: DeviceType[] = ["auto", "cpu", "cuda", "mps", "vulkan"];
 
         if (settings.enginePreference && !validEnginePrefs.includes(settings.enginePreference)) {
@@ -224,6 +247,96 @@ export const useTasks = create<TasksState>()(
       return {
         ...initialState,
 
+        initializeTaskStorage: async () => {
+          if (taskStorageInitialized) {
+            return;
+          }
+
+          if (taskStorageInitializationPromise) {
+            await taskStorageInitializationPromise;
+            return;
+          }
+
+          taskStorageInitializationPromise = (async () => {
+            const {
+              loadAllTranscriptions,
+              loadLegacyPersistedTasks,
+              clearLegacyPersistedTasks,
+              saveTranscription,
+            } = await import("@/services/storage");
+
+            const loadedTasksResult = await loadAllTranscriptions();
+            let tasksFromStorage = loadedTasksResult.success && loadedTasksResult.data
+              ? loadedTasksResult.data
+              : [];
+            let migratedLegacyCount = 0;
+
+            if (tasksFromStorage.length === 0) {
+              const legacyTasks = loadLegacyPersistedTasks();
+              if (legacyTasks.length > 0) {
+                tasksFromStorage = legacyTasks;
+                migratedLegacyCount = legacyTasks.length;
+
+                const migrationResults = await Promise.all(
+                  legacyTasks.map((task) => saveTranscription(task)),
+                );
+                const failedMigrations = migrationResults.filter((result) => !result.success).length;
+                if (failedMigrations > 0) {
+                  logger.warn("Some legacy task migrations failed", {
+                    migratedLegacyCount,
+                    failedMigrations,
+                  });
+                }
+              }
+            }
+
+            const processingTaskIds = new Set(
+              tasksFromStorage
+                .filter((task) => task.status === "processing")
+                .map((task) => task.id),
+            );
+
+            const {
+              tasks: recoveredTasks,
+              recoveredCount,
+              hasActiveProcessing,
+            } = recoverInterruptedTasks(tasksFromStorage);
+
+            set({ tasks: recoveredTasks });
+
+            if (processingTaskIds.size > 0) {
+              await Promise.all(
+                recoveredTasks
+                  .filter((task) => processingTaskIds.has(task.id))
+                  .map((task) => saveTranscription(task)),
+              );
+            }
+
+            if (tasksFromStorage.length > 0 || migratedLegacyCount > 0) {
+              clearLegacyPersistedTasks();
+            }
+
+            taskStorageInitialized = true;
+
+            logger.info("Task storage initialized", {
+              loadedCount: tasksFromStorage.length,
+              recoveredCount,
+              hasActiveProcessing,
+              migratedLegacyCount,
+            });
+          })()
+            .catch((error) => {
+              logger.error("Failed to initialize task storage", {
+                error: String(error),
+              });
+            })
+            .finally(() => {
+              taskStorageInitializationPromise = null;
+            });
+
+          await taskStorageInitializationPromise;
+        },
+
         upsertTask: (task) => {
           logger.transcriptionInfo("Task created/updated", { taskId: task.id, fileName: task.fileName, status: task.status });
           set((state) => {
@@ -235,6 +348,7 @@ export const useTasks = create<TasksState>()(
               tasks: state.tasks.map((t, i) => (i === index ? task : t)),
             };
           });
+          persistTaskSnapshot(task);
         },
 
         updateTaskProgress: (taskId, progress, stage, metrics) => {
@@ -250,13 +364,17 @@ export const useTasks = create<TasksState>()(
 
         updateTaskStatus: (taskId, status, result, error) => {
           logger.transcriptionInfo("Status update", { taskId, status, error, hasResult: !!result });
+          let taskToPersist: TranscriptionTask | null = null;
+
           set((state) => {
             const taskExists = state.tasks.some((t) => t.id === taskId);
             if (!taskExists) {
               logger.transcriptionError("Task not found in store", { taskId, availableTasks: state.tasks.map(t => t.id) });
             }
+
             const tasks = state.tasks.map((task) => {
               if (task.id !== taskId) return task;
+
               const updatedTask: TranscriptionTask = {
                 ...task,
                 status,
@@ -267,19 +385,29 @@ export const useTasks = create<TasksState>()(
                 ...(status === "processing" && !task.startedAt && { startedAt: new Date() }),
                 ...(status === "processing" && { lastProgressUpdate: Date.now() }),
               };
+
+              taskToPersist = updatedTask;
               return updatedTask;
             });
+
             return { tasks };
           });
+
+          if (taskToPersist) {
+            persistTaskSnapshot(taskToPersist);
+          }
         },
 
         setSpeakerSegments: (taskId, speakerSegments, speakerTurns) => {
           logger.transcriptionInfo("Speaker segments set", { taskId, count: speakerSegments.length });
+          let taskToPersist: TranscriptionTask | null = null;
+
           set((state) => ({
             tasks: state.tasks.map((task) => {
               if (task.id !== taskId) return task;
               if (!task.result) return task;
-              return {
+
+              const updatedTask: TranscriptionTask = {
                 ...task,
                 result: {
                   ...task.result,
@@ -287,8 +415,15 @@ export const useTasks = create<TasksState>()(
                   speakerTurns,
                 },
               };
+
+              taskToPersist = updatedTask;
+              return updatedTask;
             }),
           }));
+
+          if (taskToPersist) {
+            persistTaskSnapshot(taskToPersist);
+          }
         },
 
         updateSpeakerNameMap: (taskId, speakerNameMap) => {
@@ -296,24 +431,46 @@ export const useTasks = create<TasksState>()(
             taskId,
             mappedSpeakers: Object.keys(speakerNameMap).length,
           });
+
+          let taskToPersist: TranscriptionTask | null = null;
+
           set((state) => ({
-            tasks: state.tasks.map((task) => (
-              task.id === taskId
-                ? { ...task, speakerNameMap }
-                : task
-            )),
+            tasks: state.tasks.map((task) => {
+              if (task.id !== taskId) {
+                return task;
+              }
+
+              const updatedTask: TranscriptionTask = { ...task, speakerNameMap };
+              taskToPersist = updatedTask;
+              return updatedTask;
+            }),
           }));
+
+          if (taskToPersist) {
+            persistTaskSnapshot(taskToPersist);
+          }
         },
 
         updateTaskFileName: (taskId, fileName) => {
           logger.transcriptionInfo("Task filename updated", { taskId, fileName });
+
+          let taskToPersist: TranscriptionTask | null = null;
+
           set((state) => ({
-            tasks: state.tasks.map((task) => (
-              task.id === taskId
-                ? { ...task, fileName }
-                : task
-            )),
+            tasks: state.tasks.map((task) => {
+              if (task.id !== taskId) {
+                return task;
+              }
+
+              const updatedTask: TranscriptionTask = { ...task, fileName };
+              taskToPersist = updatedTask;
+              return updatedTask;
+            }),
           }));
+
+          if (taskToPersist) {
+            persistTaskSnapshot(taskToPersist);
+          }
         },
 
         appendTaskSegment: (taskId, segment, index, _totalSegments) => {
@@ -369,12 +526,15 @@ export const useTasks = create<TasksState>()(
 
         finalizeTaskResult: (taskId, segments, language, duration) => {
           logger.transcriptionInfo("Finalizing result", { taskId, segmentCount: segments.length, language, duration });
+          let taskToPersist: TranscriptionTask | null = null;
+
           set((state) => {
             const tasks = state.tasks.map((task) => {
               if (task.id !== taskId) {
                 return task;
               }
-              return {
+
+              const updatedTask: TranscriptionTask = {
                 ...task,
                 result: {
                   segments,
@@ -382,9 +542,17 @@ export const useTasks = create<TasksState>()(
                   duration,
                 },
               };
+
+              taskToPersist = updatedTask;
+              return updatedTask;
             });
+
             return { tasks };
           });
+
+          if (taskToPersist) {
+            persistTaskSnapshot(taskToPersist);
+          }
         },
 
         setTasks: (tasks) => {
@@ -435,6 +603,17 @@ export const useTasks = create<TasksState>()(
             fileToDelete = task.audioPath;
           }
 
+          const { deleteTranscription } = await import("@/services/storage");
+          const deletionResult = await deleteTranscription(taskId);
+
+          if (!deletionResult.success) {
+            logger.error("Failed to remove task snapshot from persistent storage", {
+              taskId,
+              error: deletionResult.error,
+            });
+            return;
+          }
+
           logger.info("Task removed", { taskId });
           set((state) => ({ tasks: state.tasks.filter((t) => t.id !== taskId) }));
 
@@ -460,20 +639,46 @@ export const useTasks = create<TasksState>()(
 
         archiveTask: (taskId) => {
           logger.transcriptionInfo("Task archived", { taskId });
+
+          let taskToPersist: TranscriptionTask | null = null;
+
           set((state) => ({
-            tasks: state.tasks.map((task) =>
-              task.id === taskId ? { ...task, archived: true } : task
-            ),
+            tasks: state.tasks.map((task) => {
+              if (task.id !== taskId) {
+                return task;
+              }
+
+              const updatedTask: TranscriptionTask = { ...task, archived: true };
+              taskToPersist = updatedTask;
+              return updatedTask;
+            }),
           }));
+
+          if (taskToPersist) {
+            persistTaskSnapshot(taskToPersist);
+          }
         },
 
         unarchiveTask: (taskId) => {
           logger.transcriptionInfo("Task unarchived", { taskId });
+
+          let taskToPersist: TranscriptionTask | null = null;
+
           set((state) => ({
-            tasks: state.tasks.map((task) =>
-              task.id === taskId ? { ...task, archived: false } : task
-            ),
+            tasks: state.tasks.map((task) => {
+              if (task.id !== taskId) {
+                return task;
+              }
+
+              const updatedTask: TranscriptionTask = { ...task, archived: false };
+              taskToPersist = updatedTask;
+              return updatedTask;
+            }),
           }));
+
+          if (taskToPersist) {
+            persistTaskSnapshot(taskToPersist);
+          }
         },
 
         setArchiveSettings: (newSettings) => {
@@ -499,6 +704,7 @@ export const useTasks = create<TasksState>()(
 
           let audioPath: string | undefined;
           let archiveSize: number | undefined;
+          let taskToPersist: TranscriptionTask | null = null;
 
           const readArchiveSize = async (filePath: string): Promise<number> => {
             const sizeResult = await getFileSize(filePath);
@@ -585,22 +791,31 @@ export const useTasks = create<TasksState>()(
             }
 
             set((state) => ({
-              tasks: state.tasks.map((t) =>
-                t.id === taskId
-                  ? {
-                      ...t,
-                      archived: true,
-                      archivedAt: new Date(),
-                      archiveMode: mode,
-                      filePath: mode === "keep_all" && audioPath ? audioPath : undefined,
-                      audioPath: mode === "delete_video" ? audioPath : undefined,
-                      archiveSize: archiveSize ?? task.fileSize,
-                    }
-                  : t
-              ),
+              tasks: state.tasks.map((t) => {
+                if (t.id !== taskId) {
+                  return t;
+                }
+
+                const updatedTask: TranscriptionTask = {
+                  ...t,
+                  archived: true,
+                  archivedAt: new Date(),
+                  archiveMode: mode,
+                  filePath: mode === "keep_all" && audioPath ? audioPath : undefined,
+                  audioPath: mode === "delete_video" ? audioPath : undefined,
+                  archiveSize: archiveSize ?? task.fileSize,
+                };
+
+                taskToPersist = updatedTask;
+                return updatedTask;
+              }),
             }));
 
             logger.transcriptionInfo("Task archived successfully", { taskId, mode });
+
+            if (taskToPersist) {
+              persistTaskSnapshot(taskToPersist);
+            }
           } catch (error) {
             logger.error("Archive task failed", { taskId, error: String(error) });
             throw error;
@@ -701,26 +916,11 @@ export const useTasks = create<TasksState>()(
       },
       merge: (persistedState: unknown, currentState: TasksState): TasksState => {
         const typedPersisted = persistedState as Partial<TasksState> | undefined;
-        const persistedTasks = Array.isArray(typedPersisted?.tasks) ? typedPersisted.tasks : [];
-
-        const { tasks: recoveredTasks, recoveredCount, hasActiveProcessing } = recoverInterruptedTasks(persistedTasks);
-
-        if (recoveredCount > 0) {
-          if (hasActiveProcessing) {
-            logger.transcriptionInfo("Found processing tasks after app restart - will sync with backend", {
-              recoveredCount,
-            });
-          } else {
-            logger.transcriptionWarn("Recovered interrupted transcription tasks after app restart", {
-              recoveredCount,
-            });
-          }
-        }
 
         return {
           ...currentState,
           ...typedPersisted,
-          tasks: recoveredTasks,
+          tasks: currentState.tasks,
           options: {
             ...currentState.options,
             ...(typedPersisted?.options ?? {}),
@@ -736,7 +936,6 @@ export const useTasks = create<TasksState>()(
         };
       },
       partialize: (state) => ({
-        tasks: state.tasks,
         options: state.options,
         settings: state.settings,
         archiveSettings: state.archiveSettings,

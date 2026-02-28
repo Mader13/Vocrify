@@ -4,6 +4,7 @@
 //! Each task is stored as a separate JSON file with an index file for metadata.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -63,14 +64,43 @@ pub struct StorageInfo {
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptionTask {
     pub id: String,
-    pub file_path: String,
+    #[serde(default)]
+    pub file_path: Option<String>,
     pub file_name: String,
+    #[serde(default)]
+    pub file_size: u64,
     pub status: String,
+    #[serde(default)]
+    pub progress: f64,
+    #[serde(default)]
+    pub stage: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub options: TaskOptions,
     pub result: Option<TaskResult>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub metrics: Option<serde_json::Value>,
+    #[serde(default)]
+    pub streaming_segments: Option<Vec<TaskSegment>>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub archived_at: Option<String>,
+    #[serde(default)]
+    pub archive_mode: Option<String>,
+    #[serde(default)]
+    pub audio_path: Option<String>,
+    #[serde(default)]
+    pub archive_size: Option<u64>,
+    #[serde(default)]
+    pub video_deleted: Option<bool>,
+    #[serde(default)]
+    pub last_progress_update: Option<u64>,
+    #[serde(default)]
+    pub speaker_name_map: Option<HashMap<String, String>>,
 }
 
 /// Transcription options
@@ -83,6 +113,8 @@ pub struct TaskOptions {
     pub enable_diarization: bool,
     pub diarization_provider: Option<String>,
     pub num_speakers: i32,
+    #[serde(default)]
+    pub audio_profile: Option<String>,
 }
 
 /// Transcription result
@@ -96,6 +128,8 @@ pub struct TaskResult {
     pub speaker_turns: Option<Vec<SpeakerTurn>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_segments: Option<Vec<TaskSegment>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<serde_json::Value>,
 }
 
 /// A single transcription segment - using TranscriptionSegment from crate::types
@@ -136,23 +170,20 @@ pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Resu
     let index_file = transcriptions_dir.join("index.json");
 
     // Create metadata
-    let file_size_bytes = fs::metadata(&task_file)
-        .map(|m| m.len())
-        .unwrap_or(0);
     let duration = task.result.as_ref().map(|r| r.duration);
     let segment_count = task.result.as_ref().map(|r| r.segments.len());
 
     let metadata = TaskMetadata {
         id: task.id.clone(),
         file_name: task.file_name.clone(),
-        file_path: task.file_path.clone(),
+        file_path: task.file_path.clone().unwrap_or_default(),
         status: task.status.clone(),
         created_at: task.created_at.clone(),
         completed_at: task.completed_at.clone(),
         duration,
         segment_count,
         has_result: task.result.is_some(),
-        file_size_bytes,
+        file_size_bytes: task.file_size,
     };
 
     // Atomic write for task file

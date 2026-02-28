@@ -93,12 +93,17 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
     const count = Math.max((state.foregroundPlayerCounts[taskId] || 0) - 1, 0);
     const newCounts = { ...state.foregroundPlayerCounts, [taskId]: count };
     
-    // If no more players for this task, wipe it
+    // When active foreground player unmounts, hand off to another foreground player if available.
+    // If no foreground players remain for the playing task, pause playback but keep progress/time.
     if (count === 0 && state.activeForegroundPlayerId === taskId) {
+      const fallbackActivePlayerId = Object.entries(newCounts).find(([, playerCount]) => playerCount > 0)?.[0] ?? null;
+      const shouldPausePlayback =
+        fallbackActivePlayerId === null && state.playingTaskId === taskId;
+
       set({
         foregroundPlayerCounts: newCounts,
-        activeForegroundPlayerId: null,
-        isPlaying: state.playingTaskId === taskId ? false : state.isPlaying,
+        activeForegroundPlayerId: fallbackActivePlayerId,
+        isPlaying: shouldPausePlayback ? false : state.isPlaying,
       });
     } else {
       set({ foregroundPlayerCounts: newCounts });

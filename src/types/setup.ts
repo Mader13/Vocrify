@@ -38,30 +38,6 @@ export type CheckStatus =
   | "installing";
 
 /**
- * Result of Python environment check
- */
-export interface PythonCheckResult {
-  /** Current status of the check */
-  status: CheckStatus;
-  /** Python version string (e.g., "3.10.12") */
-  version: string | null;
-  /** Path to Python executable */
-  executable: string | null;
-  /** Whether Python is running in a virtual environment */
-  inVenv: boolean;
-
-
-
-
-
-
-
-
-  /** Human-readable message about the check result */
-  message: string;
-}
-
-/**
  * Result of FFmpeg installation check
  */
 export interface FFmpegCheckResult {
@@ -126,8 +102,6 @@ export interface SetupWizardState {
  * Combines all check results in a single response
  */
 export interface EnvironmentStatus {
-  /** Python environment check result */
-  python: PythonCheckResult;
   /** FFmpeg check result */
   ffmpeg: FFmpegCheckResult;
   /** Device check result */
@@ -146,12 +120,8 @@ export interface EnvironmentStatus {
 export interface RuntimeReadinessStatus {
   /** True only when required runtime dependencies are available */
   ready: boolean;
-  /** Python + PyTorch readiness */
-  pythonReady: boolean;
   /** FFmpeg readiness */
   ffmpegReady: boolean;
-  /** Human-readable Python check message */
-  pythonMessage: string;
   /** Human-readable FFmpeg check message */
   ffmpegMessage: string;
   /** Combined readiness message */

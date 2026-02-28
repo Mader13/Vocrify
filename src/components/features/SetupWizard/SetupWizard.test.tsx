@@ -10,13 +10,6 @@ function setSummaryFailureState() {
     currentStep: "summary",
     isComplete: false,
     isChecking: false,
-    pythonCheck: {
-      status: "error",
-      version: null,
-      executable: null,
-      inVenv: false,
-      message: "Python not ready",
-    },
     ffmpegCheck: {
       status: "error",
       installed: false,

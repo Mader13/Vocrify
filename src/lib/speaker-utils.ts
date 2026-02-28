@@ -3,7 +3,7 @@
  * to a number suitable for the transcription engine.
  *
  * Returns -1 for auto-detect (when value is "auto", empty, or undefined).
- * The Rust/Python backends use -1 as the sentinel for automatic speaker detection.
+ * The backend uses -1 as the sentinel for automatic speaker detection.
  */
 export function normalizeNumSpeakers(
   value: string | number | undefined | null

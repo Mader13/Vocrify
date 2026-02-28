@@ -12,6 +12,7 @@ import { NotificationProvider } from "@/components/ui/notifications";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { normalizeNumSpeakers } from "@/lib/speaker-utils";
+import { usePlaybackStore } from "@/stores/playbackStore";
 import type { DiarizationProvider, AIModel, DeviceType, Language } from "@/types";
 import type { FileWithSettings } from "@/components/features/DiarizationOptionsModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -119,6 +120,19 @@ function MainApplication() {
       }
     }
   }, [currentView, setSelectedTask, selectedTaskId]);
+
+  useEffect(() => {
+    if (currentView === "transcription" && selectedTaskId) {
+      return;
+    }
+
+    const playback = usePlaybackStore.getState();
+    if (!playback.playingTaskId || !playback.isPlaying) {
+      return;
+    }
+
+    playback.setPlaying(playback.playingTaskId, playback.playingTaskFileName, false);
+  }, [currentView, selectedTaskId]);
 
   // NOTE: loadModels is intentionally NOT in the dependency array.
   // It's already called via initializeModelsStore() at startup.
@@ -343,21 +357,34 @@ function MainApplication() {
 
 function App() {
   const { initialize } = useSetupStore();
+  const initializeTaskStorage = useTasks((s) => s.initializeTaskStorage);
   const [isInitialized, setIsInitialized] = useState(false);
   const { t } = useI18n();
 
   useEffect(() => {
     let mounted = true;
+
     const init = async () => {
-      await initialize();
-      if (mounted) setIsInitialized(true);
+      try {
+        await initialize();
+        await initializeTaskStorage();
+      } catch (error) {
+        logger.error("Failed to initialize application", {
+          error: String(error),
+        });
+      } finally {
+        if (mounted) {
+          setIsInitialized(true);
+        }
+      }
     };
-    init();
+
+    void init();
+
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [initialize, initializeTaskStorage]);
 
   if (!isInitialized) {
     return <LoadingScreen message={t("app.loadingStatus")} />;

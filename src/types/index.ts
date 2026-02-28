@@ -8,7 +8,6 @@ export * from "./progress";
 export type {
   SetupStep,
   CheckStatus,
-  PythonCheckResult,
   FFmpegCheckResult,
   DeviceCheckResult,
   ModelCheckResult,

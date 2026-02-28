@@ -38,15 +38,15 @@ afterEach(() => {
 });
 
 describe("transcription completion contract", () => {
-  it("updates task status when Python completion event arrives", async () => {
+  it("updates task status when backend completion event arrives", async () => {
     const updateTaskStatus = vi.fn();
     const unsubscribe = await subscribeToTranscriptionCompletion(updateTaskStatus);
     const result = createResult();
 
     expect(tauriCompletionHandler).toBeTypeOf("function");
-    tauriCompletionHandler?.("python-task", result);
+    tauriCompletionHandler?.("backend-task", result);
 
-    expect(updateTaskStatus).toHaveBeenCalledWith("python-task", "completed", result);
+    expect(updateTaskStatus).toHaveBeenCalledWith("backend-task", "completed", result);
     unsubscribe();
   });
 

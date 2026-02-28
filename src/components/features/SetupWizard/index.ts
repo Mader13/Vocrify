@@ -16,9 +16,6 @@ export { CheckCard, CheckItem } from "./CheckCard";
 export type { CheckCardProps, CheckItemProps } from "./CheckCard";
 
 // Step components
-export { PythonStep, PythonStepFooter } from "./steps/PythonStep";
-export type { PythonStepFooterProps } from "./steps/PythonStep";
-
 export { FFmpegStep, FFmpegStepFooter } from "./steps/FFmpegStep";
 export type { FFmpegStepFooterProps } from "./steps/FFmpegStep";
 

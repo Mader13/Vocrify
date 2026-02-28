@@ -137,7 +137,6 @@ function StageRail({ stages, currentIndex, stageConfig, t }: StageRailProps) {
           const isComplete = index < currentIndex;
           const isCurrent = index === currentIndex;
           const isFuture = index > currentIndex;
-          const isDiarizing = isCurrent && stageKey === "diarizing";
 
           return (
             <motion.li
@@ -150,7 +149,6 @@ function StageRail({ stages, currentIndex, stageConfig, t }: StageRailProps) {
                 isCurrent && "border-foreground/20 bg-accent/50 shadow-sm",
                 isComplete && "border-emerald-500/25 bg-emerald-500/5",
                 isFuture && "border-border/60 bg-transparent",
-                isDiarizing && "border-lime-500/30 bg-lime-500/5",
               )}
             >
               <div
@@ -164,21 +162,11 @@ function StageRail({ stages, currentIndex, stageConfig, t }: StageRailProps) {
                 {isComplete ? (
                   <Check className="h-4 w-4 text-emerald-400" />
                 ) : isCurrent ? (
-                  <>
-                    <Icon className={cn("h-4 w-4", config.iconClass)} />
-                    {isDiarizing && (
-                      <motion.div
-                        className="absolute inset-0 rounded-full bg-lime-400/10"
-                        initial={{ opacity: 0.6, scale: 1 }}
-                        animate={{ opacity: 0, scale: 1.5 }}
-                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeOut" }}
-                      />
-                    )}
-                  </>
+                  <Icon className={cn("h-4 w-4", config.iconClass)} />
                 ) : (
                   <Circle className="h-3 w-3 text-muted-foreground" />
                 )}
-                {isCurrent && !isDiarizing && (
+                {isCurrent && (
                   <motion.div
                     className={cn("absolute inset-0 rounded-full border", config.accent)}
                     initial={{ opacity: 0.5, scale: 1 }}
@@ -193,7 +181,6 @@ function StageRail({ stages, currentIndex, stageConfig, t }: StageRailProps) {
                   className={cn(
                     "truncate text-xs font-medium sm:text-sm",
                     isFuture ? "text-muted-foreground" : "text-foreground",
-                    isDiarizing && "text-lime-700 dark:text-lime-400",
                   )}
                 >
                   {config.label}
@@ -202,12 +189,7 @@ function StageRail({ stages, currentIndex, stageConfig, t }: StageRailProps) {
               </div>
 
               {isCurrent && (
-                <Loader2
-                  className={cn(
-                    "h-4 w-4 shrink-0 animate-spin",
-                    isDiarizing ? "text-lime-500" : "text-muted-foreground"
-                  )}
-                />
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
               )}
             </motion.li>
           );
@@ -233,10 +215,6 @@ export const ProcessingView = React.memo(function ProcessingView({ task }: Proce
   const stageIndex = stages.indexOf(normalizedStage as TimelineStage);
   const currentIndex = stageIndex >= 0 ? stageIndex : fallbackIndex;
   const currentStep = currentIndex + 1;
-
-  // Dynamic message for diarization stage
-  const isDiarizing = normalizedStage === "diarizing";
-  const customMessage = isDiarizing ? t("processing.linkingVoices") : undefined;
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -298,18 +276,7 @@ export const ProcessingView = React.memo(function ProcessingView({ task }: Proce
                     {t("processing.currentlyRunning")}
                   </p>
                   <h3 className="mt-1 text-lg font-semibold leading-tight sm:text-xl">{config.label}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    {customMessage || stageDescriptions[normalizedStage]}
-                  </p>
-                  {isDiarizing && (
-                    <motion.p
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="mt-1.5 text-xs text-lime-600 dark:text-lime-400"
-                    >
-                      {t("processing.matchingSpeakers")}
-                    </motion.p>
-                  )}
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{stageDescriptions[normalizedStage]}</p>
                 </div>
               </div>
             </motion.div>

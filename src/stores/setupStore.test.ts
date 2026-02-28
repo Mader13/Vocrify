@@ -3,8 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/services/tauri", () => ({
   checkFFmpegStatus: vi.fn(),
   checkModelsStatus: vi.fn(),
-  checkPythonEnvironment: vi.fn(),
-  checkRuntimeReadiness: vi.fn(),
   downloadFFmpeg: vi.fn(),
   getAvailableDevices: vi.fn(),
   isSetupComplete: vi.fn(),
@@ -18,8 +16,6 @@ vi.mock("@/services/tauri", () => ({
 import {
   checkFFmpegStatus,
   checkModelsStatus,
-  checkPythonEnvironment,
-  checkRuntimeReadiness,
   downloadFFmpeg,
   getAvailableDevices,
   isSetupComplete,
@@ -33,8 +29,6 @@ import { useSetupStore } from "@/stores/setupStore";
 
 const mockedCheckFFmpegStatus = vi.mocked(checkFFmpegStatus);
 const mockedCheckModelsStatus = vi.mocked(checkModelsStatus);
-const mockedCheckPythonEnvironment = vi.mocked(checkPythonEnvironment);
-const mockedCheckRuntimeReadiness = vi.mocked(checkRuntimeReadiness);
 const mockedDownloadFFmpeg = vi.mocked(downloadFFmpeg);
 const mockedGetAvailableDevices = vi.mocked(getAvailableDevices);
 const mockedIsSetupComplete = vi.mocked(isSetupComplete);
@@ -49,7 +43,6 @@ function resetStore() {
     currentStep: "language",
     isComplete: false,
     isChecking: false,
-    pythonCheck: null,
     ffmpegCheck: null,
     deviceCheck: null,
     modelCheck: null,
@@ -68,16 +61,6 @@ describe("setupStore", () => {
 
     mockedIsSetupComplete.mockResolvedValue({ success: true, data: false });
     mockedIsSetupCompleteFast.mockResolvedValue({ success: true, data: false });
-    mockedCheckPythonEnvironment.mockResolvedValue({
-      success: true,
-      data: {
-        status: "ok",
-        version: "3.11.9",
-        executable: "python",
-        inVenv: true,
-        message: "ok",
-      },
-    });
     mockedCheckFFmpegStatus.mockResolvedValue({
       success: true,
       data: {
@@ -112,18 +95,6 @@ describe("setupStore", () => {
         message: "ok",
       },
     });
-    mockedCheckRuntimeReadiness.mockResolvedValue({
-      success: true,
-      data: {
-        ready: true,
-        pythonReady: true,
-        ffmpegReady: true,
-        pythonMessage: "ok",
-        ffmpegMessage: "ok",
-        message: "Runtime is ready",
-        checkedAt: "2026-02-16T00:00:00.000Z",
-      },
-    });
     mockedDownloadFFmpeg.mockResolvedValue({ success: true });
     mockedOnFFmpegProgress.mockResolvedValue(() => undefined);
     mockedOnFFmpegStatus.mockResolvedValue(() => undefined);
@@ -142,14 +113,6 @@ describe("setupStore", () => {
     await useSetupStore.getState().initialize();
 
     expect(useSetupStore.getState().isComplete).toBe(true);
-  });
-
-  it("checkPython populates pythonCheck", async () => {
-    await useSetupStore.getState().checkPython();
-
-    const state = useSetupStore.getState();
-    expect(state.pythonCheck?.status).toBe("ok");
-    expect(state.pythonCheck?.version).toBe("3.11.9");
   });
 
   it("checkFFmpeg populates ffmpegCheck", async () => {
@@ -180,7 +143,6 @@ describe("setupStore", () => {
     await useSetupStore.getState().checkAll();
 
     const state = useSetupStore.getState();
-    expect(state.pythonCheck).toBe(null);
     expect(state.ffmpegCheck?.installed).toBe(true);
     expect(state.deviceCheck).toBe(null);
     expect(state.modelCheck?.status).toBe("ok");
@@ -210,7 +172,7 @@ describe("setupStore", () => {
     expect(useSetupStore.getState().isComplete).toBe(true);
   });
 
-  it("completeSetup allows completion without Python checks", async () => {
+  it("completeSetup allows completion when FFmpeg is ready", async () => {
     await useSetupStore.getState().checkFFmpeg();
 
     await useSetupStore.getState().completeSetup();
@@ -296,19 +258,6 @@ describe("setupStore", () => {
     await useSetupStore.getState().backgroundValidate();
 
     expect(useSetupStore.getState().isComplete).toBe(true);
-  });
-
-  it("checkPython handles error gracefully", async () => {
-    mockedCheckPythonEnvironment.mockResolvedValueOnce({
-      success: false,
-      error: "Python not found",
-    });
-
-    await useSetupStore.getState().checkPython();
-
-    const state = useSetupStore.getState();
-    expect(state.pythonCheck?.status).toBe("error");
-    expect(state.pythonCheck?.message).toBe("Python not found");
   });
 
   it("installFFmpeg marks installation completed on successful download", async () => {

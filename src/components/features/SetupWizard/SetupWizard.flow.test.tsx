@@ -1,18 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { SetupWizard } from "./SetupWizard";
-import { useSetupStore } from "@/stores/setupStore";
 
-vi.mock("@/services/tauri/setup-commands", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/services/tauri/setup-commands")>();
-
+vi.mock("@/services/tauri", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/services/tauri")>();
   return {
     ...original,
-    installPythonFull: vi.fn(async () => ({ success: true })),
-    onPythonInstallProgress: vi.fn(async () => () => undefined),
-    cancelPythonInstall: vi.fn(async () => ({ success: true })),
+    getModelsDir: vi.fn(async () => ({ success: true, data: "C:/models" })),
+    onModelsDirMoveProgress: vi.fn(async () => () => undefined),
   };
 });
+
+import { SetupWizard } from "./SetupWizard";
+import { useSetupStore } from "@/stores/setupStore";
 
 function setHappyPathState() {
   const noopAsync = vi.fn(async () => undefined);
@@ -21,13 +20,6 @@ function setHappyPathState() {
     currentStep: "language",
     isComplete: false,
     isChecking: false,
-    pythonCheck: {
-      status: "ok",
-      version: "3.12.0",
-      executable: "python",
-      inVenv: true,
-      message: "ok",
-    },
     ffmpegCheck: {
       status: "ok",
       installed: true,
@@ -56,9 +48,7 @@ function setHappyPathState() {
     },
     runtimeReadiness: {
       ready: true,
-      pythonReady: true,
       ffmpegReady: true,
-      pythonMessage: "ok",
       ffmpegMessage: "ok",
       message: "Runtime ready",
       checkedAt: new Date().toISOString(),
@@ -138,13 +128,6 @@ describe("SetupWizard flow", () => {
       currentStep: "ffmpeg",
       isComplete: false,
       isChecking: false,
-      pythonCheck: {
-        status: "ok",
-        version: "3.12.0",
-        executable: "python",
-        inVenv: true,
-        message: "ok",
-      },
       ffmpegCheck: {
         status: "error",
         installed: false,
