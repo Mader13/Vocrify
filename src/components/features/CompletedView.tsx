@@ -19,11 +19,11 @@ import { PlayerErrorBoundary } from "@/components/features/PlayerErrorBoundary";
 import { DeleteTaskDialog } from "@/components/features/DeleteTaskDialog";
 import { SpeakerNamesModal } from "@/components/features/SpeakerNamesModal";
 import { TranscriptionSegments, type TranscriptionSegmentsHandle } from "@/components/features/TranscriptionSegments";
-import { VideoPlayer } from "@/components/features/VideoPlayer";
+import { VideoPlayer, type VideoPlayerHandle } from "@/components/features/VideoPlayer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { applySpeakerNameMapToResult, collectSpeakerLabels } from "@/lib/speaker-names";
 import { sanitizeSegments } from "@/lib/segment-utils";
-import { cn, formatTime } from "@/lib/utils";
+import { cn, formatTime, isVideoFile } from "@/lib/utils";
 import { useI18n } from "@/hooks";
 import { useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
@@ -78,7 +78,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const updateTaskFileName = useTasks((s) => s.updateTaskFileName);
   const removeTask = useTasks((s) => s.removeTask);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<VideoPlayerHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const segmentsContainerRef = useRef<HTMLDivElement>(null);
   const transcriptionSegmentsRef = useRef<TranscriptionSegmentsHandle>(null);
@@ -236,9 +236,9 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     setCurrentTime(startTime);
     currentTimeRef.current = startTime;
 
-    const videoElement = videoRef.current;
-    if (videoElement) {
-      videoElement.currentTime = startTime;
+    const player = videoRef.current;
+    if (player) {
+      player.seekTo(startTime);
     }
   }, []);
 
@@ -347,12 +347,14 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
   const actionButtonClass =
     "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 px-2.5 text-xs font-medium text-foreground transition-colors motion-safe:duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:px-3";
-  const effectiveViewMode = viewMode;
-  const isVideoVisible = effectiveViewMode !== "transcript-focus";
-  const showMediaColumn = effectiveViewMode === "balanced" && (layoutMode === "stacked" || layoutMode === "split");
+  const hasVideoSource = task.filePath ? isVideoFile(task.filePath) : false;
   const canRenderVideoElement = !task.archived
     ? Boolean(task.filePath)
     : task.archiveMode === "keep_all" && Boolean(task.filePath);
+  const hasVisibleVideoSource = hasVideoSource && canRenderVideoElement;
+  const effectiveViewMode = hasVisibleVideoSource ? viewMode : "transcript-focus";
+  const isVideoVisible = effectiveViewMode !== "transcript-focus";
+  const showMediaColumn = effectiveViewMode === "balanced" && (layoutMode === "stacked" || layoutMode === "split");
   const shouldShowWaveformControls = !isVideoVisible || !canRenderVideoElement;
 
   const handleConfirmDelete = useCallback(() => {
@@ -508,26 +510,28 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                     </div>
                   )}
 
-                  <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
-                    {(["balanced", "transcript-focus"] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => {
-                          setCompletedViewModeForTask(task.id, mode);
-                        }}
-                        className={cn(
-                          "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
-                          viewMode === mode
-                            ? "bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        aria-pressed={viewMode === mode}
-                      >
-                        {viewModeLabels[mode]}
-                      </button>
-                    ))}
-                  </div>
+                  {hasVisibleVideoSource && (
+                    <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
+                      {(["balanced", "transcript-focus"] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => {
+                            setCompletedViewModeForTask(task.id, mode);
+                          }}
+                          className={cn(
+                            "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
+                            viewMode === mode
+                              ? "bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                          aria-pressed={viewMode === mode}
+                        >
+                          {viewModeLabels[mode]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -83,6 +83,10 @@ function mergeNearbySpeakerRegions(
   return merged;
 }
 
+export interface VideoPlayerHandle {
+  seekTo: (time: number) => void;
+}
+
 /**
  * VideoPlayer component with integrated waveform visualization
  *
@@ -94,7 +98,7 @@ function mergeNearbySpeakerRegions(
  * - Color mode switching (clean/speakers)
  * - Theme-aware colors from CSS variables
  */
-export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(function VideoPlayer({
+export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(function VideoPlayer({
   task,
   colorMode,
   onTimeUpdate,
@@ -246,8 +250,53 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
     };
   }, []);
 
-  // Expose video element via ref
-  useImperativeHandle(forwardedRef, () => internalVideoRef.current!);
+  // Expose video element and custom methods via ref
+  useImperativeHandle(forwardedRef, () => ({
+    seekTo: (time: number) => {
+      controllerSeekTo(time, "store");
+    },
+  }), [controllerSeekTo]);
+
+  useEffect(() => {
+    return () => {
+      const videoElement = internalVideoRef.current;
+      if (videoElement) {
+        try {
+          videoElement.pause();
+        } catch {
+          // noop
+        }
+
+        videoElement.removeAttribute("src");
+
+        try {
+          videoElement.load();
+        } catch {
+          // noop
+        }
+      }
+
+      const ws = wavesurferRef.current;
+      if (ws) {
+        try {
+          ws.pause();
+        } catch {
+          // noop
+        }
+
+        try {
+          ws.destroy();
+        } catch {
+          // noop
+        }
+
+        wavesurferRef.current = null;
+      }
+
+      regionsRef.current = null;
+      isWaveformReadyRef.current = false;
+    };
+  }, []);
 
   // Convert file path to Tauri asset URL for security
   // Use audioPath if task is archived and has audioPath (delete_video mode)
@@ -724,6 +773,13 @@ export const VideoPlayer = forwardRef<HTMLVideoElement, VideoPlayerProps>(functi
                       controllerSetVolume(parseFloat(e.target.value));
                     }}
                     onClick={(e) => e.stopPropagation()}
+                    onWheel={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const delta = -Math.sign(e.deltaY) * 0.05;
+                      const newVolume = Math.max(0, Math.min(1, controllerVolume + delta));
+                      controllerSetVolume(newVolume);
+                    }}
                     className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-125 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-125"
                     style={{
                       background: `linear-gradient(to right, white ${controllerVolume * 100}%, rgba(255,255,255,0.2) ${controllerVolume * 100}%)`,
