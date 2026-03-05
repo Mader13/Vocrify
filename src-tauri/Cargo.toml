@@ -10,7 +10,7 @@ name = "transcribe_video_lib"
 crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.5.5", features = [] }
+tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
 # Pin ort to match Handy's version to avoid ndarray conflicts
