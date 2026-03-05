@@ -55,7 +55,7 @@ audrey = "0.3"
 symphonia = { version = "0.5", features = ["mp3", "aac", "alac", "flac", "ogg", "wav", "isomp4"] }
 hound = "3.5"
 anyhow = "1.0"
-rubato = "0.15"
+rubato = "1.0"
 
 # Phase 3: transcribe-rs - all engines included by default
 # NOTE: Building with rust-transcribe requires Vulkan SDK on Windows/Linux
