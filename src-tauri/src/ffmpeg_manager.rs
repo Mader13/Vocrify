@@ -161,7 +161,7 @@ struct FFmpegDownloadSource {
 fn get_ffmpeg_download_source() -> FFmpegDownloadSource {
     if cfg!(windows) {
         return FFmpegDownloadSource {
-            url: "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+            url: "https://github.com/GyanD/codexffmpeg/releases/download/8.0.1/ffmpeg-8.0.1-essentials_build.zip",
             version: "8.0.1",
             archive_ext: "zip",
             expected_sha256: "e2aaeaa0fdbc397d4794828086424d4aaa2102cef1fb6874f6ffd29c0b88b673",

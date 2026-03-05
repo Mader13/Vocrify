@@ -1,4 +1,6 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 
 use tauri::{AppHandle, Manager};
 
@@ -12,6 +14,51 @@ const ALLOWED_DIRS: &[&str] = &[];
 const USER_ALLOWED_SUBDIRS: &[&str] = &["Downloads", "Documents", "Desktop", "Music", "Videos"];
 
 const SAFE_COMPONENT_MAX_LEN: usize = 120;
+
+static USER_APPROVED_SCOPED_PATHS: OnceLock<RwLock<HashSet<PathBuf>>> = OnceLock::new();
+
+fn user_approved_scoped_paths() -> &'static RwLock<HashSet<PathBuf>> {
+    USER_APPROVED_SCOPED_PATHS.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
+fn add_user_approved_scoped_path(path: PathBuf) {
+    if let Ok(mut approved_paths) = user_approved_scoped_paths().write() {
+        approved_paths.insert(path);
+    }
+}
+
+fn is_user_approved_scoped_path(path: &Path) -> bool {
+    user_approved_scoped_paths()
+        .read()
+        .map(|approved_paths| {
+            approved_paths
+                .iter()
+                .any(|approved| path.starts_with(approved))
+        })
+        .unwrap_or(false)
+}
+
+pub(crate) fn approve_user_selected_existing_file_path(file_path: &str) {
+    if let Ok(canonical_file) = validate_file_path(file_path) {
+        add_user_approved_scoped_path(canonical_file.clone());
+
+        if let Some(parent) = canonical_file.parent() {
+            add_user_approved_scoped_path(parent.to_path_buf());
+        }
+    }
+}
+
+pub(crate) fn approve_user_selected_output_path(output_path: &str) {
+    let output = Path::new(output_path);
+
+    if let Some(parent) = output.parent() {
+        if parent.exists() {
+            if let Ok(canonical_parent) = parent.canonicalize() {
+                add_user_approved_scoped_path(canonical_parent);
+            }
+        }
+    }
+}
 
 /// Validate file path to prevent command injection and path traversal attacks
 ///
@@ -79,6 +126,10 @@ pub(crate) fn validate_file_path(file_path: &str) -> Result<PathBuf, AppError> {
 fn get_scoped_allowed_dirs(app: &AppHandle) -> Vec<PathBuf> {
     let mut dirs = vec![std::env::temp_dir()];
 
+    if let Ok(home_dir) = app.path().home_dir() {
+        dirs.push(home_dir);
+    }
+
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         dirs.push(app_data_dir.clone());
         dirs.push(app_data_dir.join("Vocrify"));
@@ -128,7 +179,8 @@ fn get_scoped_allowed_dirs(app: &AppHandle) -> Vec<PathBuf> {
 
 fn ensure_path_in_scoped_allowlist(app: &AppHandle, path: &Path) -> Result<(), AppError> {
     let allowed_dirs = get_scoped_allowed_dirs(app);
-    let is_allowed = allowed_dirs.iter().any(|allowed| path.starts_with(allowed));
+    let is_allowed = allowed_dirs.iter().any(|allowed| path.starts_with(allowed))
+        || is_user_approved_scoped_path(path);
 
     if is_allowed {
         Ok(())

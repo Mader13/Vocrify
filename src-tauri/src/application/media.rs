@@ -75,6 +75,7 @@ pub(crate) fn export_transcription(
 ) -> Result<(), AppError> {
     let content = build_export_content(&result, format.as_str(), export_mode.as_deref())?;
 
+    crate::path_validation::approve_user_selected_output_path(&output_path);
     let validated_output = crate::path_validation::validate_scoped_output_path(app, &output_path)?;
     std::fs::write(validated_output, content)?;
 
@@ -296,6 +297,8 @@ pub(crate) fn get_files_metadata(app: &AppHandle, file_paths: Vec<String>) -> Re
     for file_path in file_paths {
         let path = Path::new(&file_path);
 
+        crate::path_validation::approve_user_selected_existing_file_path(&file_path);
+
         let scoped_path = match crate::path_validation::validate_scoped_existing_file_path(app, &file_path) {
             Ok(valid_path) => valid_path,
             Err(_) => {
@@ -376,6 +379,7 @@ pub(crate) async fn convert_to_mp3(
     let validated_input = crate::path_validation::validate_scoped_existing_file_path(app, &input_path)?;
     eprintln!("[DEBUG] validated input path: {}", validated_input.display());
 
+    crate::path_validation::approve_user_selected_output_path(&output_path);
     let validated_output = crate::path_validation::validate_scoped_output_path(app, &output_path)?;
     eprintln!("[DEBUG] output path: {}", validated_output.display());
 

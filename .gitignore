@@ -121,6 +121,9 @@ nul
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
+!.env.sample
 
 # Lock files (using bun.lockb)
 package-lock.json
