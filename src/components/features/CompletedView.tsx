@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
   CircleDashed,
   ChevronDown,
@@ -518,29 +519,36 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
                 <div className="flex flex-wrap items-center gap-2">
                   {canUseSpeakerWaveform && (
-                    <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
+                    <div className="flex items-center gap-1 rounded-full border border-border/50 bg-background/60 px-1.5 py-1 backdrop-blur-sm">
                       {(["clean", "speakers"] as const).map((mode) => (
                         <button
                           key={mode}
                           type="button"
                           onClick={() => setDisplayMode(mode)}
                           className={cn(
-                            "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
+                            "group relative flex items-center justify-center rounded-full px-3 py-1 text-xs font-medium transition-colors motion-safe:duration-150",
                             displayMode === mode
-                              ? "bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                              ? "text-primary"
                               : "text-muted-foreground hover:text-foreground",
                           )}
                           aria-pressed={displayMode === mode}
                           title={`${t("completed.showWaveform")} ${waveformModeLabels[mode]}`}
                         >
-                          {waveformModeLabels[mode]}
+                          {displayMode === mode && (
+                            <motion.div
+                              layoutId="completed-waveform-active-tab"
+                              className="absolute inset-0 rounded-full bg-primary/15"
+                              transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                            />
+                          )}
+                          <span className="relative z-10">{waveformModeLabels[mode]}</span>
                         </button>
                       ))}
                     </div>
                   )}
 
                   {hasVisibleVideoSource && (
-                    <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
+                    <div className="flex items-center gap-1 rounded-full border border-border/50 bg-background/60 px-1.5 py-1 backdrop-blur-sm">
                       {(["balanced", "transcript-focus"] as const).map((mode) => (
                         <button
                           key={mode}
@@ -549,14 +557,21 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                             setCompletedViewModeForTask(task.id, mode);
                           }}
                           className={cn(
-                            "flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold transition-colors motion-safe:duration-150",
+                            "group relative flex items-center justify-center rounded-full px-3 py-1 text-xs font-medium transition-colors motion-safe:duration-150",
                             viewMode === mode
-                              ? "bg-primary text-primary-foreground shadow-[0_4px_12px_rgba(15,23,42,0.3)]"
+                              ? "text-primary"
                               : "text-muted-foreground hover:text-foreground",
                           )}
                           aria-pressed={viewMode === mode}
                         >
-                          {viewModeLabels[mode]}
+                          {viewMode === mode && (
+                            <motion.div
+                              layoutId="completed-view-active-tab"
+                              className="absolute inset-0 rounded-full bg-primary/15"
+                              transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                            />
+                          )}
+                          <span className="relative z-10">{viewModeLabels[mode]}</span>
                         </button>
                       ))}
                     </div>
