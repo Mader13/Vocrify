@@ -24,6 +24,35 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Configure Vulkan SDK
+        shell: pwsh
+        run: |
+          $sdkRoot = "C:\VulkanSDK"
+          $sdkPath = $null
+
+          if (Test-Path $sdkRoot) {
+            $sdkPath = Get-ChildItem $sdkRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          }
+
+          if (-not $sdkPath) {
+            choco install vulkan-sdk --no-progress -y
+            if (Test-Path $sdkRoot) {
+              $sdkPath = Get-ChildItem $sdkRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+            }
+          }
+
+          if (-not $sdkPath) {
+            throw "Vulkan SDK not found"
+          }
+
+          $vulkanLib = Join-Path $sdkPath.FullName "Lib\vulkan-1.lib"
+          if (-not (Test-Path $vulkanLib)) {
+            throw "Vulkan SDK library not found at $vulkanLib"
+          }
+
+          "VULKAN_SDK=$($sdkPath.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Configured VULKAN_SDK=$($sdkPath.FullName)"
+
       - name: Cache Rust dependencies
         uses: actions/cache@v4
         with:
