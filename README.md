@@ -1,5 +1,7 @@
 # Vocrify (Transcribe Video)
 
+<img width="1610" height="949" alt="Vocrify" src="https://github.com/user-attachments/assets/6095647a-0776-4533-9e8c-8d5636e107a2" />
+
 Desktop application for video and audio transcription with speaker diarization.
 
 ## Overview
