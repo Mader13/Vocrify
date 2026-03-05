@@ -10,6 +10,10 @@ on:
         description: 'Release tag (e.g. v1.0.0)'
         required: true
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare-release:
     name: Prepare Release Metadata
@@ -19,7 +23,7 @@ jobs:
       release-version: ${{ steps.version.outputs.VERSION }}
       release-notes: ${{ steps.changelog.outputs.NOTES }}
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -29,94 +33,92 @@ jobs:
         id: release-tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${{ steps.release-tag.outputs.tag }}" | sed 's/^VERSION=v/VERSION=/' >> $GITHUB_OUTPUT
+        run: echo "VERSION=${{ steps.release-tag.outputs.tag }}" | sed 's/^VERSION=v/VERSION=/' >> "$GITHUB_OUTPUT"
 
       - name: Extract changelog for this version
         id: changelog
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          # Extract section for this version from CHANGELOG.md
           NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md || echo "Release ${{ steps.release-tag.outputs.tag }}")
-          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "NOTES<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
-  build-artifacts:
-    name: Build Artifacts (windows-x64)
+  promote-build-artifacts:
+    name: Promote Build Artifacts
     needs: prepare-release
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+    outputs:
+      promoted: ${{ steps.promote.outputs.promoted }}
     permissions:
-      contents: write
+      actions: read
+      contents: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Configure Vulkan SDK
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.309.0
-          cache: true
-
-      - name: Cache Rust dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: windows-cargo-release-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            windows-cargo-release-
-            windows-cargo-
-
-      - name: Install JS dependencies
-        run: bun install
-
-      - name: Prepare Tauri resources
-        run: bun run prepare:tauri-resources
-
-      - name: Build installer (NSIS)
-        uses: tauri-apps/tauri-action@v0
+      - name: Try promoting artifacts from Build workflow
+        id: promote
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: --target x86_64-pc-windows-msvc
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -u
 
-      - name: Build raw executable for portable package
-        run: bunx tauri build --no-bundle
+          RUN_ID=$(gh api "repos/$REPO/actions/workflows/build.yml/runs?status=completed&per_page=50" --jq ".workflow_runs | map(select(.head_sha == \"$COMMIT_SHA\" and .conclusion == \"success\")) | first | .id // empty" 2>/dev/null || true)
 
-      - name: Package portable ZIP
-        run: bun run portable:pack
+          if [ -z "$RUN_ID" ]; then
+            echo "promoted=false" >> "$GITHUB_OUTPUT"
+            echo "No successful Build run found for commit $COMMIT_SHA"
+            exit 0
+          fi
 
-      - name: Upload NSIS artifact
+          echo "Found successful Build run $RUN_ID for commit $COMMIT_SHA"
+          mkdir -p artifacts/windows-installer artifacts/windows-portable
+
+          if gh run download "$RUN_ID" --repo "$REPO" --name vocrify-windows-installer --dir artifacts/windows-installer \
+            && gh run download "$RUN_ID" --repo "$REPO" --name vocrify-windows-portable --dir artifacts/windows-portable; then
+            echo "promoted=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          rm -rf artifacts
+          echo "promoted=false" >> "$GITHUB_OUTPUT"
+          echo "Build artifacts are unavailable in run $RUN_ID; fallback build will start"
+
+      - name: Upload promoted installer artifact
+        if: steps.promote.outputs.promoted == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          path: artifacts/windows-installer/**
           retention-days: 7
 
-      - name: Upload portable ZIP artifact
+      - name: Upload promoted portable artifact
+        if: steps.promote.outputs.promoted == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: windows-portable
-          path: src-tauri/target/release/bundle/portable/*.zip
+          path: artifacts/windows-portable/**
           retention-days: 7
+
+  build-artifacts:
+    if: needs.promote-build-artifacts.outputs.promoted != 'true'
+    name: Build Artifacts (windows-x64)
+    needs: [prepare-release, promote-build-artifacts]
+    uses: ./.github/workflows/windows-artifacts.yml
+    with:
+      run_checks: false
+      installer_artifact_name: windows-installer
+      portable_artifact_name: windows-portable
+      tauri_target: x86_64-pc-windows-msvc
+    secrets: inherit
 
   create-release:
     name: Create GitHub Release Draft
@@ -142,13 +144,20 @@ jobs:
 
   upload-release-assets:
     name: Upload Release Assets
-    needs: [prepare-release, build-artifacts, create-release]
+    needs: [prepare-release, create-release, promote-build-artifacts, build-artifacts]
+    if: |
+      always() &&
+      needs.create-release.result == 'success' &&
+      (
+        needs.promote-build-artifacts.outputs.promoted == 'true' ||
+        needs.build-artifacts.result == 'success'
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: Download NSIS artifact
+      - name: Download installer artifact
         uses: actions/download-artifact@v4
         with:
           name: windows-installer

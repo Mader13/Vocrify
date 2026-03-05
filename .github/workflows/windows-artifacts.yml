@@ -1,0 +1,113 @@
+name: Windows Artifacts
+
+on:
+  workflow_call:
+    inputs:
+      run_checks:
+        description: Run quality checks before packaging
+        required: false
+        type: boolean
+        default: false
+      installer_artifact_name:
+        description: Artifact name for the NSIS installer
+        required: false
+        type: string
+        default: windows-installer
+      portable_artifact_name:
+        description: Artifact name for the portable ZIP
+        required: false
+        type: string
+        default: windows-portable
+      tauri_target:
+        description: Rust target triple used by Tauri
+        required: false
+        type: string
+        default: x86_64-pc-windows-msvc
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ inputs.tauri_target }}
+
+      - name: Configure Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: 1.4.309.0
+          cache: true
+
+      - name: Cache Bun packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+          key: windows-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            windows-bun-
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-cargo-${{ inputs.tauri_target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-${{ inputs.tauri_target }}-
+            windows-cargo-
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Prepare Tauri resources
+        run: bun run prepare:tauri-resources
+
+      - name: Type check
+        if: inputs.run_checks
+        run: bunx tsc --noEmit
+
+      - name: Lint
+        if: inputs.run_checks
+        run: bun run lint
+
+      - name: Run frontend tests
+        if: inputs.run_checks
+        run: bun run test
+
+      - name: Build installer (NSIS)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ inputs.tauri_target }}
+
+      - name: Package portable ZIP
+        run: bun run portable:pack
+        env:
+          TAURI_RELEASE_DIR: src-tauri/target/${{ inputs.tauri_target }}/release
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.installer_artifact_name }}
+          path: src-tauri/target/${{ inputs.tauri_target }}/release/bundle/nsis/*.exe
+          retention-days: 7
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.portable_artifact_name }}
+          path: src-tauri/target/${{ inputs.tauri_target }}/release/bundle/portable/*.zip
+          retention-days: 7
