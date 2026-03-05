@@ -1,8 +1,8 @@
 use crate::EngineType;
 
 const MAX_CHUNK_SAMPLES: usize = 16000 * 30; // 30 seconds
-#[allow(dead_code)]
 const MERGE_GAP_SAMPLES: usize = 16000 * 2; // 2 seconds
+const VAD_CONTEXT_PADDING_SAMPLES: usize = 16000 * 400 / 1000; // 400ms
 
 pub struct ChunkingStrategy;
 
@@ -100,7 +100,6 @@ impl ChunkingStrategy {
         vad_segments: Vec<(usize, usize)>,
     ) -> Vec<(usize, usize)> {
         const MIN_SPEECH_SAMPLES: usize = 1_600; // 100ms at 16kHz
-        const MERGE_GAP_SAMPLES: usize = 3_200; // 200ms at 16kHz
 
         if audio_len_samples == 0 {
             return Vec::new();
@@ -127,17 +126,37 @@ impl ChunkingStrategy {
 
         let mut merged: Vec<(usize, usize)> = Vec::with_capacity(normalized.len());
         for (start, end) in normalized {
-            if let Some((_, last_end)) = merged.last_mut() {
+            if let Some((last_start, last_end)) = merged.last_mut() {
                 if start <= *last_end + MERGE_GAP_SAMPLES {
-                    *last_end = (*last_end).max(end);
-                    continue;
+                    let proposed_end = (*last_end).max(end);
+                    let proposed_len = proposed_end.saturating_sub(*last_start);
+                    
+                    // We only merge if the resulting chunk length leaves room for VAD padding 
+                    // and doesn't exceed the rigorous 30s limit. This prevents arbitrary cuts 
+                    // right through active speech.
+                    let safe_max_len = MAX_CHUNK_SAMPLES.saturating_sub(VAD_CONTEXT_PADDING_SAMPLES * 2);
+                    if proposed_len <= safe_max_len {
+                        *last_end = proposed_end;
+                        continue;
+                    }
                 }
             }
             merged.push((start, end));
         }
 
+        let padded = merged
+            .into_iter()
+            .map(|(start, end)| {
+                let padded_start = start.saturating_sub(VAD_CONTEXT_PADDING_SAMPLES);
+                let padded_end = (end + VAD_CONTEXT_PADDING_SAMPLES).min(audio_len_samples);
+                (padded_start, padded_end)
+            })
+            .collect::<Vec<(usize, usize)>>();
+
+        let normalized = Self::normalize_non_overlapping_chunks(padded);
+
         let mut chunks = Vec::new();
-        for (start, end) in merged {
+        for (start, end) in normalized {
             Self::split_chunk_with_limit(start, end, MAX_CHUNK_SAMPLES, &mut chunks);
         }
 
@@ -192,11 +211,96 @@ impl ChunkingStrategy {
         (covered_samples as f64 / total_samples as f64).min(1.0)
     }
 
+    #[cfg(feature = "rust-transcribe")]
+    fn normalize_non_overlapping_chunks(mut chunks: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+        if chunks.is_empty() {
+            return chunks;
+        }
+
+        chunks.sort_unstable_by_key(|(start, _)| *start);
+
+        let mut normalized: Vec<(usize, usize)> = Vec::with_capacity(chunks.len());
+        for (start, end) in chunks {
+            if end <= start {
+                continue;
+            }
+
+            if let Some((last_start, last_end)) = normalized.last_mut() {
+                if start < *last_end {
+                    // Overlap after padding!
+                    // Instead of blindly merging (which defeats our max chunk lengths),
+                    // we split the overlap evenly between the two contiguous chunks.
+                    let overlap = *last_end - start;
+                    let midpoint = start + overlap / 2;
+                    
+                    if midpoint <= *last_start {
+                        // The entire last chunk is swallowd, drop it.
+                        normalized.pop();
+                        normalized.push((start, end));
+                    } else {
+                        *last_end = midpoint;
+                        if end > midpoint {
+                            normalized.push((midpoint, end));
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            normalized.push((start, end));
+        }
+
+        normalized
+    }
+
     fn asr_vad_chunking_enabled() -> bool {
-        // Dense chunking is the default for stability and portability.
-        // VAD chunking is opt-in via TRANSCRIBE_ASR_USE_VAD_CHUNKS=true.
+        // VAD chunking is the default for speed.
+        // It can be disabled explicitly via TRANSCRIBE_ASR_USE_VAD_CHUNKS=false/0/off.
         std::env::var("TRANSCRIBE_ASR_USE_VAD_CHUNKS")
-            .map(|v| v.to_lowercase() == "true" || v == "1")
-            .unwrap_or(false)
+            .map(|v| {
+                let normalized = v.trim().to_ascii_lowercase();
+                !matches!(normalized.as_str(), "0" | "false" | "off")
+            })
+            .unwrap_or(true)
+    }
+}
+
+#[cfg(all(test, feature = "rust-transcribe"))]
+mod tests {
+    use super::ChunkingStrategy;
+
+    #[test]
+    fn vad_chunks_apply_padding_and_stay_bounded() {
+        let audio_len = 16_000 * 60;
+        let chunks = ChunkingStrategy::build_vad_chunks(
+            audio_len,
+            vec![(16_000 * 10, 16_000 * 12)],
+        );
+
+        assert_eq!(chunks.len(), 1);
+        let (start, end) = chunks[0];
+        assert_eq!(start, 16_000 * 10 - 6_400);
+        assert_eq!(end, 16_000 * 12 + 6_400);
+        assert!(start < end);
+        assert!(end <= audio_len);
+    }
+
+    #[test]
+    fn padded_vad_chunks_do_not_overlap_after_normalization() {
+        let audio_len = 16_000 * 120;
+        let chunks = ChunkingStrategy::build_vad_chunks(
+            audio_len,
+            vec![
+                (16_000 * 10, 16_000 * 11),
+                (16_000 * 12, 16_000 * 13),
+                (16_000 * 14, 16_000 * 15),
+            ],
+        );
+
+        for window in chunks.windows(2) {
+            let (_, prev_end) = window[0];
+            let (next_start, _) = window[1];
+            assert!(prev_end <= next_start);
+        }
     }
 }

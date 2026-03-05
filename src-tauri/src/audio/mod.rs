@@ -1,7 +1,7 @@
 //! Audio processing module for Transcribe Video
 //!
 //! Provides unified audio loading, conversion, and processing using Rust-native libraries.
-//! Replaces Python-based audio processing (pydub, soundfile) with Rust equivalents.
+//! Uses fully native Rust audio processing.
 //!
 //! # Features
 //! - Load audio from multiple formats (WAV, FLAC, MP3, M4A, MKV, OGG)
@@ -47,4 +47,5 @@ pub fn extract_audio_segment(path: &Path, start_ms: u64, end_ms: u64) -> Result<
 }
 
 #[cfg(test)]
+#[path = "audio_tests.rs"]
 mod tests;

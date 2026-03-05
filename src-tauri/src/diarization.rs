@@ -97,7 +97,7 @@ impl DiarizationEngine {
 
     pub fn diarize(
         &self,
-        samples: Vec<f32>,
+        samples: Arc<[f32]>,
         config: DiarizationConfig,
         progress_callback: Option<Arc<dyn Fn(u8) + Send + Sync>>,
     ) -> Result<Vec<SpeakerSegment>, String> {
@@ -133,7 +133,7 @@ impl DiarizationEngine {
         });
 
         let segments = diarizer
-            .compute(samples, callback)
+            .compute(samples.to_vec(), callback)
             .map_err(|e| format!("Diarization compute failed: {e}"))?;
 
         Ok(segments
@@ -148,7 +148,7 @@ impl DiarizationEngine {
 
     pub fn diarize_adaptive(
         &self,
-        samples: Vec<f32>,
+        samples: Arc<[f32]>,
         mut config: DiarizationConfig,
         progress_callback: Option<Arc<dyn Fn(u8) + Send + Sync>>,
     ) -> Result<Vec<SpeakerSegment>, String> {
@@ -166,7 +166,11 @@ impl DiarizationEngine {
         for threshold in thresholds {
             config.threshold = threshold;
 
-            let segments = self.diarize(samples.clone(), config.clone(), progress_callback.clone())?;
+            let segments = self.diarize(
+                Arc::clone(&samples),
+                config.clone(),
+                progress_callback.clone(),
+            )?;
             let unique_speakers = count_unique_speakers(&segments);
 
             if unique_speakers > best_unique_speakers {

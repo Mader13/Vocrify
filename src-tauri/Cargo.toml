@@ -16,12 +16,14 @@ tauri-build = { version = "2.5.5", features = [] }
 # Pin ort to match Handy's version to avoid ndarray conflicts
 # Use copy-dylibs to copy ONNX Runtime DLL next to the executable
 ort = { version = "=2.0.0-rc.10", features = ["download-binaries", "copy-dylibs"] }
-tauri = { version = "2.10.2", features = ["protocol-asset"] }
+tauri = { version = "2.10.2", features = ["protocol-asset", "tray-icon", "image-ico", "image-png"] }
 tauri-plugin-opener = "2.5.3"
 tauri-plugin-dialog = "2.6.0"
 tauri-plugin-store = "2.4.2"
+tauri-plugin-single-instance = "2.3.4"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+aho-corasick = "1.1.4"
 tokio = { version = "1.49.0", features = ["full", "process"] }
 thiserror = "2.0.18"
 uuid = { version = "1.20.0", features = ["v4"] }
@@ -42,7 +44,7 @@ bzip2 = "0.4"
 # Phase 3: transcribe-rs - Unified Rust Transcription Engine
 # ============================================================================
 #
-# transcribe-rs supports multiple engines: Whisper, Parakeet, Moonshine
+# transcribe-rs supports multiple engines: Whisper, Parakeet, Moonshine, GigaAM
 # GPU acceleration:
 # - macOS: Metal (automatic)
 # - Windows/Linux: Vulkan (AMD/Intel) or CUDA (NVIDIA)
@@ -57,7 +59,7 @@ rubato = "0.15"
 # Phase 3: transcribe-rs - all engines included by default
 # NOTE: Building with rust-transcribe requires Vulkan SDK on Windows/Linux
 # Disable default features to skip transcribe-rs for faster builds
-transcribe-rs = { version = "0.2.5", optional = true, features = ["whisper", "parakeet", "moonshine"] }
+transcribe-rs = { version = "0.2.9", optional = true, features = ["whisper", "parakeet", "moonshine", "gigaam"] }
 silero-vad-rust = "6.2.1"
 biquad = "0.5.0"
 

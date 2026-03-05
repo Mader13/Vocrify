@@ -1,20 +1,19 @@
 //! Engine Router - Phase 4: Rust-only transcription
 //!
-//! All transcription (Whisper, Parakeet, Moonshine) is handled by
-//! transcription_manager.rs via transcribe-rs.
-//! Python is called exclusively for Sherpa-ONNX diarization.
+//! All transcription and diarization are handled natively in Rust.
+//! This router is kept only for API compatibility.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
 
-use crate::python_bridge::{PythonBridge, SpeakerSegment};
+use crate::types::SpeakerSegment;
 
 /// Engine router errors
 #[derive(Debug, Error)]
 pub enum EngineRouterError {
-    #[error("Python bridge error: {0}")]
-    PythonBridge(String),
+    #[error("Engine routing error: {0}")]
+    Routing(String),
 
     #[error("Model not found: {0}")]
     ModelNotFound(String),
@@ -31,7 +30,7 @@ pub enum EnginePreference {
     Auto,
     RustOnly,
     /// Deprecated - kept for compile-time compatibility, behaves like Auto
-    PythonOnly,
+    CompatOnly,
 }
 
 impl Default for EnginePreference {
@@ -50,51 +49,30 @@ pub struct RouterSegment {
     pub confidence: f64,
 }
 
-/// Engine router (now a thin diarization wrapper around PythonBridge)
-pub struct EngineRouter {
-    python_bridge: PythonBridge,
-}
+/// Engine router compatibility shim.
+pub struct EngineRouter;
 
 impl EngineRouter {
     /// Create a new EngineRouter
     pub fn new(
-        python_path: &Path,
-        engine_path: &Path,
-        models_dir: &Path,
-        audio_cache_dir: &Path,
+        _runtime_path: &Path,
+        _engine_path: &Path,
+        _models_dir: &Path,
+        _audio_cache_dir: &Path,
         _preference: EnginePreference,
     ) -> Self {
-        Self {
-            python_bridge: PythonBridge::new(python_path, engine_path, models_dir, audio_cache_dir),
-        }
+        Self
     }
 
     /// Run Sherpa-ONNX speaker diarization for a given audio file.
     /// Called by transcription_manager.rs after Rust transcription is complete.
     pub async fn run_diarization(
         &self,
-        audio_path: &Path,
-        num_speakers: Option<i32>,
+        _audio_path: &Path,
+        _num_speakers: Option<i32>,
     ) -> Option<Vec<SpeakerSegment>> {
-        eprintln!("[INFO] EngineRouter: Running Sherpa-ONNX diarization");
-        match self
-            .python_bridge
-            .diarize_sherpa(audio_path, num_speakers)
-            .await
-        {
-            Ok(segs) => {
-                eprintln!(
-                    "[INFO] EngineRouter: Diarization returned {} segments",
-                    segs.len()
-                );
-                Some(segs)
-            }
-            Err(e) => {
-                // Non-fatal: diarization failure should not break transcription.
-                eprintln!("[WARN] EngineRouter: Diarization failed: {}", e);
-                None
-            }
-        }
+        // Native diarization path is used directly from transcription_manager.
+        None
     }
 }
 

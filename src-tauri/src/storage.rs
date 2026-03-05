@@ -6,11 +6,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 use crate::AppError;
 use crate::types::{TranscriptionSegment, SpeakerTurn};
+
+const STORAGE_LOCATION_KEY: &str = "transcriptionDirectory";
 
 /// Alias for backward compatibility with existing serialized data
 pub type TaskSegment = TranscriptionSegment;
@@ -59,6 +61,13 @@ pub struct StorageInfo {
     pub total_size_bytes: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageLocation {
+    pub directory: String,
+    pub is_default: bool,
+}
+
 /// Complete transcription task data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +104,16 @@ pub struct TranscriptionTask {
     pub audio_path: Option<String>,
     #[serde(default)]
     pub archive_size: Option<u64>,
+    #[serde(default)]
+    pub managed_copy_path: Option<String>,
+    #[serde(default)]
+    pub managed_copy_size: Option<u64>,
+    #[serde(default)]
+    pub managed_copy_status: Option<String>,
+    #[serde(default)]
+    pub managed_copy_error: Option<String>,
+    #[serde(default)]
+    pub managed_copy_created_at: Option<String>,
     #[serde(default)]
     pub video_deleted: Option<bool>,
     #[serde(default)]
@@ -138,8 +157,11 @@ pub struct TaskResult {
 /// A speaker turn - using SpeakerTurn from crate::types
 
 /// Get the transcription storage directory
-#[tauri::command]
 pub async fn get_transcription_dir(app: AppHandle) -> Result<String, AppError> {
+    resolve_transcription_dir(&app)
+}
+
+fn get_default_transcription_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| {
         AppError::IoError(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -147,23 +169,144 @@ pub async fn get_transcription_dir(app: AppHandle) -> Result<String, AppError> {
         ))
     })?;
 
-    let transcriptions_dir = app_data_dir.join("Vocrify").join("transcriptions");
+    Ok(app_data_dir.join("Vocrify").join("transcriptions"))
+}
 
-    // Create directory if it doesn't exist
-    fs::create_dir_all(&transcriptions_dir).map_err(|e| {
+fn load_storage_location_from_store(app: &AppHandle) -> Result<Option<PathBuf>, AppError> {
+    let store_path = crate::store_io::get_store_path(app);
+    let store_data = crate::store_io::load_store_data(&store_path)?;
+
+    let path = store_data
+        .get(STORAGE_LOCATION_KEY)
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+
+    Ok(path)
+}
+
+fn persist_storage_location_to_store(app: &AppHandle, directory: &Path) -> Result<(), AppError> {
+    let store_path = crate::store_io::get_store_path(app);
+    let mut store_data = crate::store_io::load_store_data(&store_path)?;
+
+    if !store_data.is_object() {
+        store_data = serde_json::json!({});
+    }
+
+    if let Some(store_object) = store_data.as_object_mut() {
+        store_object.insert(
+            STORAGE_LOCATION_KEY.to_string(),
+            serde_json::Value::String(directory.to_string_lossy().to_string()),
+        );
+    }
+
+    crate::store_io::save_store_data(&store_path, &store_data)
+}
+
+fn ensure_directory_exists(path: &Path) -> Result<(), AppError> {
+    fs::create_dir_all(path).map_err(|e| {
         AppError::IoError(std::io::Error::new(
             std::io::ErrorKind::Other,
             format!("Failed to create transcriptions directory: {}", e),
         ))
-    })?;
+    })
+}
 
-    Ok(transcriptions_dir
-        .to_string_lossy()
-        .to_string())
+fn resolve_transcription_dir(app: &AppHandle) -> Result<String, AppError> {
+    let default_dir = get_default_transcription_dir(app)?;
+    let configured = load_storage_location_from_store(app)?;
+
+    let target_dir = if let Some(directory) = configured {
+        let dir_str = directory.to_string_lossy().to_string();
+        crate::path_validation::validate_scoped_storage_directory_path(app, &dir_str)?
+    } else {
+        default_dir
+    };
+
+    ensure_directory_exists(&target_dir)?;
+
+    Ok(target_dir.to_string_lossy().to_string())
+}
+
+pub async fn get_storage_location(app: AppHandle) -> Result<StorageLocation, AppError> {
+    let default_dir = get_default_transcription_dir(&app)?;
+    let configured = load_storage_location_from_store(&app)?;
+
+    let resolved_dir = if let Some(directory) = configured {
+        let dir_str = directory.to_string_lossy().to_string();
+        crate::path_validation::validate_scoped_storage_directory_path(&app, &dir_str)?
+    } else {
+        default_dir
+    };
+
+    ensure_directory_exists(&resolved_dir)?;
+
+    let is_default = resolved_dir == get_default_transcription_dir(&app)?;
+
+    Ok(StorageLocation {
+        directory: resolved_dir.to_string_lossy().to_string(),
+        is_default,
+    })
+}
+
+pub async fn set_storage_location(
+    app: AppHandle,
+    directory: String,
+) -> Result<StorageLocation, AppError> {
+    let normalized = crate::path_validation::validate_scoped_storage_directory_path(&app, &directory)?;
+    ensure_directory_exists(&normalized)?;
+    persist_storage_location_to_store(&app, &normalized)?;
+
+    let is_default = normalized == get_default_transcription_dir(&app)?;
+
+    Ok(StorageLocation {
+        directory: normalized.to_string_lossy().to_string(),
+        is_default,
+    })
+}
+
+pub async fn validate_storage_location(app: AppHandle, directory: String) -> Result<String, AppError> {
+    let normalized = crate::path_validation::validate_scoped_storage_directory_path(&app, &directory)?;
+    ensure_directory_exists(&normalized)?;
+    Ok(normalized.to_string_lossy().to_string())
+}
+
+pub async fn open_storage_location(app: AppHandle) -> Result<(), AppError> {
+    let directory = resolve_transcription_dir(&app)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&directory)
+            .spawn()
+            .map_err(AppError::IoError)?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&directory)
+            .spawn()
+            .map_err(AppError::IoError)?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let open_result = std::process::Command::new("xdg-open").arg(&directory).spawn();
+
+        if open_result.is_err() {
+            std::process::Command::new("nautilus")
+                .arg(&directory)
+                .spawn()
+                .map_err(AppError::IoError)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Save a transcription task to file
-#[tauri::command]
 pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Result<(), AppError> {
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
     let task_file = transcriptions_dir.join(format!("{}.json", task.id));
@@ -228,7 +371,6 @@ pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Resu
 }
 
 /// Load a transcription task from file
-#[tauri::command]
 pub async fn load_transcription(app: AppHandle, task_id: String) -> Result<TranscriptionTask, AppError> {
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
     let task_file = transcriptions_dir.join(format!("{}.json", task_id));
@@ -249,7 +391,6 @@ pub async fn load_transcription(app: AppHandle, task_id: String) -> Result<Trans
 }
 
 /// Delete a transcription task file
-#[tauri::command]
 pub async fn delete_transcription(app: AppHandle, task_id: String) -> Result<(), AppError> {
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
     let task_file = transcriptions_dir.join(format!("{}.json", task_id));
@@ -290,7 +431,6 @@ pub async fn delete_transcription(app: AppHandle, task_id: String) -> Result<(),
 }
 
 /// List all transcription metadata
-#[tauri::command]
 pub async fn list_transcriptions(app: AppHandle) -> Result<Vec<TaskMetadata>, AppError> {
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
     let index_file = transcriptions_dir.join("index.json");
@@ -308,7 +448,6 @@ pub async fn list_transcriptions(app: AppHandle) -> Result<Vec<TaskMetadata>, Ap
 }
 
 /// Get storage information
-#[tauri::command]
 pub async fn get_storage_info(app: AppHandle) -> Result<StorageInfo, AppError> {
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
     let index_file = transcriptions_dir.join("index.json");

@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "languages": {
+    "en": [
+      "thank you for watching",
+      "thanks for watching",
+      "please subscribe",
+      "like and subscribe",
+      "see you next time",
+      "see you in the next video",
+      "hello everyone welcome to my channel",
+      "subtitles by the amara org community",
+      "subtitles by",
+      "subtitle editor",
+      "captions by",
+      "amara.org",
+      "Bye.",
+      "Bye bye.",
+      "(upbeat music)",
+      "[Music]",
+      "Music.",
+      "Applause.",
+      "Silence.",
+      "mooji",
+      "otter.ai"
+    ],
+    "ru": [
+      "СПОКОЙНАЯ МУЗЫКА",
+      "МУЗЫКА",
+      "АПЛОДИСМЕНТЫ",
+      "Спасибо за просмотр",
+      "Спасибо за просмотр.",
+      "Спасибо за просмотр!",
+      "Всем пока.",
+      "Поехали!",
+      "Поехали.",
+      "ПОДПИШИСЬ!",
+      "Спасибо за субтитры!",
+      "Субтитры подогнал «Симон»!",
+      "ПО ТВ.",
+      "Продолжение следует.",
+      "Продолжение следует...",
+      "Тишина.",
+      "(вздыхает)",
+      "(смеется)",
+      "СМЕХ",
+      "ДИНАМИЧНАЯ МУЗЫКА"
+    ],
+    "multi": ["thank you", "thanks", "subscribe", "subtitles", "captions"]
+  }
+}

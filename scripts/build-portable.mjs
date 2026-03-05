@@ -61,8 +61,13 @@ function createPortableReadme(productName) {
 }
 
 function buildZip(archivePath, sourceFolderName) {
-  const tarArgs = ["-a", "-c", "-f", archivePath, "-C", bundleDir, sourceFolderName];
-  execFileSync("tar", tarArgs, { stdio: "inherit" });
+  // Используем PowerShell Compress-Archive вместо tar для надёжности на Windows
+  const sourcePath = path.join(bundleDir, sourceFolderName);
+  const psArgs = [
+    "-Command",
+    `Compress-Archive -Path "${sourcePath}" -DestinationPath "${archivePath}" -Force`,
+  ];
+  execFileSync("powershell", psArgs, { stdio: "inherit" });
 }
 
 function main() {

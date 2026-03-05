@@ -2,7 +2,7 @@
 //!
 //! This module is the single source of truth for types that were
 //! previously duplicated across lib.rs, transcription_manager.rs,
-//! storage.rs, and python_bridge.rs.
+//! and storage.rs.
 
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +39,7 @@ pub struct TranscriptionResult {
     pub metrics: Option<crate::ProgressMetrics>,
 }
 
-/// Speaker segment from diarization (used in python_bridge)
+/// Speaker segment from diarization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeakerSegment {
     pub start: f64,

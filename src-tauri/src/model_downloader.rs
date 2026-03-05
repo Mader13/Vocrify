@@ -1,6 +1,6 @@
 //! Rust-native model downloader.
 //!
-//! Downloads AI models directly in Rust without spawning a Python process,
+//! Downloads AI models directly in Rust,
 //! emitting Tauri progress events throughout.
 //!
 //! # Supported model types
@@ -9,6 +9,7 @@
 //! |---------------|----------------------------|---------------------------------|
 //! | `"whisper"`   | `whisper-tiny` … `large-v3-turbo`| HuggingFace CDN (redirect) |
 //! | `"parakeet"`  | `parakeet-tdt-0.6b-v3` etc.| HuggingFace CDN (nvidia repos)  |
+//! | `"gigaam"`    | `gigaam-v3`                | HuggingFace CDN (istupakov)     |
 //! | `"diarization"` | `sherpa-onnx-diarization`| GitHub Releases (2 files)       |
 //!
 //! All models are downloaded via `reqwest` with Tauri progress events.
@@ -42,6 +43,18 @@ const PARAKEET_REGISTRY: ParakeetRegistry = ParakeetRegistry {
     download_url: "https://blob.handy.computer/parakeet-v3-int8.tar.gz",
     archive_name: "parakeet-v3-int8.tar.gz",
     target_dir: "parakeet-tdt-0.6b-v3",
+};
+
+struct GigaAMRegistry {
+    download_url: &'static str,
+    filename: &'static str,
+    target_dir: &'static str,
+}
+
+const GIGAAM_REGISTRY: GigaAMRegistry = GigaAMRegistry {
+    download_url: "https://huggingface.co/istupakov/gigaam-v3-onnx/resolve/main/v3_e2e_ctc.int8.onnx",
+    filename: "v3_e2e_ctc.int8.onnx",
+    target_dir: "gigaam-v3",
 };
 
 struct SherpaRegistry {
@@ -172,6 +185,7 @@ impl ModelDownloader {
             let result = match model_type {
                 "whisper" => self.download_whisper(model_name, &cancel).await,
                 "parakeet" => self.download_parakeet_onnx(model_name, &cancel).await,
+                "gigaam" => self.download_gigaam(model_name, &cancel).await,
                 "diarization" if model_name == "sherpa-onnx-diarization" => {
                     self.download_sherpa_onnx(&cancel).await
                 }
@@ -348,6 +362,44 @@ impl ModelDownloader {
         let size_mb = dir_size_mb(&target_dir);
         eprintln!("[ModelDownloader] Parakeet ONNX done - {} MB", size_mb);
         self.emit_complete(model_name, size_mb, &target_dir);
+        Ok(())
+    }
+
+    // ── GigaAM ONNX ───────────────────────────────────────────────────────
+
+    async fn download_gigaam(
+        &self,
+        model_name: &str,
+        cancel: &Arc<AtomicBool>,
+    ) -> Result<(), DownloadError> {
+        let target_dir = self.models_dir.join(GIGAAM_REGISTRY.target_dir);
+        std::fs::create_dir_all(&target_dir).map_err(DownloadError::Io)?;
+        let target_file = target_dir.join(GIGAAM_REGISTRY.filename);
+
+        if target_file.exists() {
+            std::fs::remove_file(&target_file).map_err(DownloadError::Io)?;
+        }
+
+        eprintln!(
+            "[ModelDownloader] GigaAM '{}' -> {}",
+            model_name, GIGAAM_REGISTRY.download_url
+        );
+        self.stream_to_file(
+            GIGAAM_REGISTRY.download_url,
+            &target_file,
+            model_name,
+            cancel,
+        )
+        .await?;
+
+        if !validate_non_empty_file(&target_file) {
+            return Err(DownloadError::Other(format!(
+                "GigaAM validation failed: file is empty ({})",
+                target_file.display()
+            )));
+        }
+
+        self.emit_complete(model_name, file_size_mb(&target_file), &target_dir);
         Ok(())
     }
 

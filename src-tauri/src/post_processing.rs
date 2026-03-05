@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::hallucination_bag::HallucinationBag;
 use crate::transcription_manager::{SpeakerTurn, TranscriptionSegment};
 
 pub struct PostProcessing;
@@ -184,6 +185,8 @@ impl PostProcessing {
             }
 
             let midpoint = (segment.start + segment.end) / 2.0;
+            let has_textual_payload =
+                segment.text.split_whitespace().count() >= Self::MIN_WORDS_FOR_TURN_SPLIT;
             let mut overlap_by_speaker: BTreeMap<String, f64> = BTreeMap::new();
             let mut midpoint_distance_by_speaker: BTreeMap<String, f64> = BTreeMap::new();
             let mut midpoint_speakers: BTreeSet<String> = BTreeSet::new();
@@ -211,6 +214,41 @@ impl PostProcessing {
             }
 
             let speaker = if !overlap_by_speaker.is_empty() {
+                // Midpoint-anchor policy for textual segments:
+                // when a meaningful text segment crosses turn boundaries (e.g. due to VAD padding),
+                // prioritize the speaker owning the segment midpoint to stabilize timeline alignment.
+                if has_textual_payload && !midpoint_speakers.is_empty() {
+                    let mut midpoint_candidates: Vec<String> = midpoint_speakers.into_iter().collect();
+                    midpoint_candidates.sort();
+
+                    if midpoint_candidates.len() > 1 {
+                        let max_overlap = midpoint_candidates
+                            .iter()
+                            .map(|speaker| overlap_by_speaker.get(speaker).copied().unwrap_or(0.0))
+                            .fold(0.0f64, f64::max);
+                        midpoint_candidates.retain(|speaker| {
+                            let overlap = overlap_by_speaker.get(speaker).copied().unwrap_or(0.0);
+                            (overlap - max_overlap).abs() <= Self::EPS
+                        });
+                    }
+
+                    if midpoint_candidates.len() > 1 {
+                        if let Some(previous) = previous_speaker.as_deref() {
+                            if let Some(current) = midpoint_candidates
+                                .iter()
+                                .find(|speaker| speaker.as_str() == previous)
+                            {
+                                Some(current.clone())
+                            } else {
+                                midpoint_candidates.into_iter().next()
+                            }
+                        } else {
+                            midpoint_candidates.into_iter().next()
+                        }
+                    } else {
+                        midpoint_candidates.into_iter().next()
+                    }
+                } else {
                 let max_overlap = overlap_by_speaker.values().copied().fold(0.0f64, f64::max);
                 let mut candidates: Vec<String> = overlap_by_speaker
                     .into_iter()
@@ -250,11 +288,11 @@ impl PostProcessing {
 
                 if candidates.len() > 1 {
                     if let Some(previous) = previous_speaker.as_deref() {
-                        if let Some(next) = candidates
+                        if let Some(current) = candidates
                             .iter()
-                            .find(|speaker| speaker.as_str() != previous)
+                            .find(|speaker| speaker.as_str() == previous)
                         {
-                            Some(next.clone())
+                            Some(current.clone())
                         } else {
                             candidates.into_iter().next()
                         }
@@ -263,6 +301,7 @@ impl PostProcessing {
                     }
                 } else {
                     candidates.into_iter().next()
+                }
                 }
             } else {
                 Self::nearest_turn_speaker(midpoint, turns, turn_index)
@@ -365,11 +404,18 @@ impl PostProcessing {
 
         segments
             .iter()
-            .filter(|seg| {
-                let text = seg.text.trim();
+            .filter_map(|seg| {
+                let mut candidate = seg.clone();
+
+                let boh = HallucinationBag::sanitize_segment_text(seg);
+                if boh.matched && boh.sanitized_text != candidate.text {
+                    candidate.text = boh.sanitized_text;
+                }
+
+                let text = candidate.text.trim();
 
                 if text.is_empty() || text.len() <= 1 {
-                    return false;
+                    return None;
                 }
 
                 let lower = text.to_lowercase();
@@ -378,7 +424,7 @@ impl PostProcessing {
                     .chars()
                     .all(|ch: char| ch.is_whitespace() || ch == '.' || ch == '*' || ch == '-');
                 if punctuation_only {
-                    return false;
+                    return None;
                 }
 
                 let exact_or_prefix_hallucination = hallucination_phrases.iter().any(|phrase| {
@@ -392,8 +438,8 @@ impl PostProcessing {
                 });
                 if exact_or_prefix_hallucination {
                     eprintln!("[VAD] Dropping hallucination phrase: \"{}\" [{:.2}s-{:.2}s]",
-                        text, seg.start, seg.end);
-                    return false;
+                        text, candidate.start, candidate.end);
+                    return None;
                 }
 
                 // Common Whisper silence hallucination pattern:
@@ -412,9 +458,9 @@ impl PostProcessing {
                 if looks_like_credit {
                     eprintln!(
                         "[VAD] Dropping subtitle-credit hallucination: \"{}\" [{:.2}s-{:.2}s]",
-                        text, seg.start, seg.end
+                        text, candidate.start, candidate.end
                     );
-                    return false;
+                    return None;
                 }
 
                 let alnum_count = lower.chars().filter(|ch: &char| ch.is_alphanumeric()).count();
@@ -425,9 +471,9 @@ impl PostProcessing {
                 if alnum_count > 0 && symbol_count > alnum_count * 2 {
                     eprintln!(
                         "[VAD] Dropping symbol-heavy segment: \"{}\" [{:.2}s-{:.2}s]",
-                        text, seg.start, seg.end
+                        text, candidate.start, candidate.end
                     );
-                    return false;
+                    return None;
                 }
 
                 if duration >= MAX_SPARSE_DURATION {
@@ -436,19 +482,19 @@ impl PostProcessing {
                     if wps < MIN_WORDS_PER_SEC && word_count <= 3.0 {
                         eprintln!(
                             "[VAD] Dropping sparse segment ({:.1} wps, {:.1}s): \"{}\" [{:.2}s-{:.2}s]",
-                            wps, duration, text, seg.start, seg.end
+                            wps, duration, text, candidate.start, candidate.end
                         );
-                        return false;
+                        return None;
                     }
                 }
 
-                if words.len() >= 5 {
+                if words.len() >= 4 {
                     let first = words[0].to_lowercase();
                     let all_same = words.iter().all(|w: &&str| w.to_lowercase() == first);
                     if all_same {
                         eprintln!("[VAD] Dropping repetitive segment: \"{}\" [{:.2}s-{:.2}s]",
-                            text, seg.start, seg.end);
-                        return false;
+                            text, candidate.start, candidate.end);
+                        return None;
                     }
                 }
 
@@ -467,14 +513,13 @@ impl PostProcessing {
                 if max_run_len >= 10 {
                     eprintln!(
                         "[VAD] Dropping repeated-char segment: \"{}\" [{:.2}s-{:.2}s]",
-                        text, seg.start, seg.end
+                        text, candidate.start, candidate.end
                     );
-                    return false;
+                    return None;
                 }
 
-                true
+                Some(candidate)
             })
-            .cloned()
             .collect()
     }
 
@@ -882,5 +927,99 @@ mod tests {
         // First transcription segment [0-15] overlaps both speakers,
         // so it should be split - resulting in 3+ merged segments total
         assert!(merged.len() >= 3, "Long segments should be split at speaker boundaries, got {}", merged.len());
+    }
+
+    #[test]
+    fn align_segments_prefers_midpoint_anchor_for_textual_boundary_crossing() {
+        let transcription_segments = vec![segment_with_text(
+            0.0,
+            4.0,
+            "one two three four five six",
+            None,
+        )];
+        let turns = vec![
+            SpeakerTurn {
+                start: 0.0,
+                end: 2.0,
+                speaker: "SPEAKER_00".to_string(),
+            },
+            SpeakerTurn {
+                start: 2.0,
+                end: 4.0,
+                speaker: "SPEAKER_01".to_string(),
+            },
+        ];
+
+        let aligned = PostProcessing::align_segments_with_turns(&transcription_segments, &turns);
+        assert_eq!(aligned.len(), 1);
+        assert_eq!(aligned[0].speaker.as_deref(), Some("SPEAKER_01"));
+    }
+
+    #[test]
+    fn filter_hallucinations_boh_changes_only_text_not_timing_or_speaker() {
+        let unique = format!(
+            "boh_test_{}_{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be monotonic")
+                .as_nanos()
+        );
+        let dict_path = std::env::temp_dir().join(unique);
+        let dict_json = r#"{
+  "version": 1,
+  "languages": {
+    "en": ["please subscribe"],
+    "ru": [],
+    "multi": []
+  }
+}"#;
+        std::fs::write(&dict_path, dict_json).expect("test dictionary should be written");
+
+        std::env::set_var("TRANSCRIBE_BOH_ENABLED", "1");
+        std::env::set_var(
+            "TRANSCRIBE_BOH_DICT_PATH",
+            dict_path.to_string_lossy().to_string(),
+        );
+
+        let input = vec![TranscriptionSegment {
+            start: 12.5,
+            end: 18.25,
+            text: "hello there friends please subscribe right now to this awesome channel".to_string(),
+            speaker: Some("SPEAKER_00".to_string()),
+            confidence: 0.93,
+        }];
+
+        let output = PostProcessing::filter_hallucinations(&input);
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].start, input[0].start);
+        assert_eq!(output[0].end, input[0].end);
+        assert_eq!(output[0].speaker, input[0].speaker);
+        assert_eq!(output[0].confidence, input[0].confidence);
+        assert!(
+            !output[0].text.to_lowercase().contains("please subscribe"),
+            "BoH should remove configured hallucination substring"
+        );
+
+        let _ = std::fs::remove_file(dict_path);
+        std::env::remove_var("TRANSCRIBE_BOH_ENABLED");
+        std::env::remove_var("TRANSCRIBE_BOH_DICT_PATH");
+    }
+
+    #[test]
+    fn filter_hallucinations_boh_drops_segment_when_full_text_matches_dictionary() {
+        let input = vec![TranscriptionSegment {
+            start: 3.0,
+            end: 4.2,
+            text: "СМЕХ".to_string(),
+            speaker: Some("SPEAKER_00".to_string()),
+            confidence: 0.91,
+        }];
+
+        let output = PostProcessing::filter_hallucinations(&input);
+        assert!(
+            output.is_empty(),
+            "Segment should be dropped when BoH dictionary fully removes text"
+        );
     }
 }

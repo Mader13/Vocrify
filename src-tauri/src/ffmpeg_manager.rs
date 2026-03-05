@@ -2,6 +2,9 @@
 //!
 //! This module handles FFmpeg binary download and management.
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -51,7 +54,7 @@ fn find_file_in_dir(dir: &PathBuf, filename: &str) -> Option<PathBuf> {
 #[serde(rename_all = "camelCase")]
 pub enum FFmpegStatus {
     NotInstalled,
-    Available(String),
+    Installed(String),
     Error(String),
 }
 
@@ -308,14 +311,17 @@ pub async fn get_ffmpeg_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::er
 }
 
 /// Check if FFmpeg is installed
-#[tauri::command]
-pub async fn get_ffmpeg_status(app: AppHandle) -> Result<serde_json::Value, String> {
-    let path = get_ffmpeg_path(&app).await.map_err(|e| e.to_string())?;
-
-    Ok(serde_json::json!({
-        "status": "available",
-        "path": path.to_string_lossy().to_string()
-    }))
+pub async fn get_ffmpeg_status(app: AppHandle) -> Result<crate::FFmpegStatusResponse, String> {
+    match get_ffmpeg_path(&app).await {
+        Ok(path) => Ok(crate::FFmpegStatusResponse {
+            status: crate::FFmpegInstallState::Installed,
+            path: Some(path.to_string_lossy().to_string()),
+        }),
+        Err(_) => Ok(crate::FFmpegStatusResponse {
+            status: crate::FFmpegInstallState::NotInstalled,
+            path: None,
+        }),
+    }
 }
 
 /// Extract ZIP archive
@@ -370,7 +376,6 @@ fn extract_tar(archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<(), Stri
 }
 
 /// Download FFmpeg binary
-#[tauri::command]
 pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
     let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let ffmpeg_dir = app_data.join("Vocrify").join("ffmpeg");
@@ -516,6 +521,7 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
 
     let verify_result = std::process::Command::new(&target_path)
         .arg("-version")
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW: скрывает окно консоли на Windows
         .output();
 
     match verify_result {

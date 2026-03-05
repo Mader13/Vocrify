@@ -1,0 +1,13 @@
+pub mod app_commands;
+pub mod audio_commands;
+pub mod archive_commands;
+pub mod device_commands;
+pub mod diarization_commands;
+pub mod ffmpeg_commands;
+pub mod media_commands;
+pub mod model_commands;
+pub mod performance_commands;
+pub mod setup_commands;
+pub mod storage_commands;
+pub mod transcription_commands;
+pub mod transcription_runtime_commands;

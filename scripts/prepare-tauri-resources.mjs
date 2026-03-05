@@ -9,18 +9,13 @@ const scriptDir =
     : path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 const resourcesDir = path.join(repoRoot, "src-tauri", "resources");
-const targetDir = path.join(resourcesDir, "ai-engine");
 const ortDir = path.join(resourcesDir, "ort");
 const ortDllName = "onnxruntime.dll";
 const vadDir = path.join(resourcesDir, "vad");
 const sileroVadModelName = "silero_vad.onnx";
 
 function main() {
-  // Python ai-engine is no longer required at runtime.
-  // Ensure old bundled copies are removed from resources.
   mkdirSync(resourcesDir, { recursive: true });
-  rmSync(targetDir, { recursive: true, force: true });
-  console.log("[prepare-tauri-resources] Removed legacy ai-engine resources");
 }
 
 function listDirectories(directoryPath) {
@@ -196,7 +191,7 @@ function copyOrtDlls() {
   for (const file of files) {
     const srcPath = path.join(source.directory, file);
     const destPath = path.join(ortDir, file);
-    
+
     if (!statSync(srcPath).isFile()) {
       continue;
     }
