@@ -16,7 +16,7 @@ Vocrify is a Tauri app with a React frontend and a Rust backend.
 - Desktop shell and backend: Tauri 2 + Rust
 - Transcription engines: `transcribe-rs` (Whisper, Parakeet, Moonshine)
 - Diarization runtime: native Sherpa-ONNX (`sherpa-rs`) in Rust
-- Device priority: CUDA > MPS > Vulkan > CPU
+- Device priority: CUDA > Vulkan > CPU
 
 ## Tech Stack
 
