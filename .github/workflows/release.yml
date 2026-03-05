@@ -4,10 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+      - '[0-9]*.[0-9]*.[0-9]*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.0.0)'
+        description: 'Release tag (e.g. v1.0.0 or 1.0.0)'
         required: true
 
 concurrency:
@@ -114,7 +115,7 @@ jobs:
     needs: [prepare-release, promote-build-artifacts]
     uses: ./.github/workflows/windows-artifacts.yml
     with:
-      run_checks: false
+      run_checks: true
       installer_artifact_name: windows-installer
       portable_artifact_name: windows-portable
       tauri_target: x86_64-pc-windows-msvc

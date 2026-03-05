@@ -1,134 +1,259 @@
-# Vocrify (Transcribe Video)
 
-<img width="1610" height="949" alt="Vocrify" src="https://github.com/user-attachments/assets/6095647a-0776-4533-9e8c-8d5636e107a2" />
+<h1 align="center">Vocrify</h1>
 
-Desktop application for video and audio transcription with speaker diarization.
+<p align="center">
+Fast desktop transcription for audio & video
+</p>
 
-## Overview
+<p align="center">
+Local AI • Speaker diarization • GPU acceleration
+</p>
 
-Vocrify is a Windows-only Tauri app with a React frontend and a Rust backend.
+<p align="center">
+<img src="https://github.com/user-attachments/assets/6095647a-0776-4533-9e8c-8d5636e107a2" width="900"/>
+</p>
 
-- Transcription is handled by Rust `transcribe-rs`
-- Speaker diarization is handled by Sherpa-ONNX
-- GPU acceleration is supported with automatic device selection
+<p align="center">
 
-## Current Architecture
+![Rust](https://img.shields.io/badge/backend-Rust-orange)
+![React](https://img.shields.io/badge/frontend-React-blue)
+![Tauri](https://img.shields.io/badge/runtime-Tauri-purple)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
-- Frontend: React 19, TypeScript, Tailwind CSS 4, Zustand
-- Desktop shell and backend: Tauri 2 + Rust
-- Transcription engines: `transcribe-rs` (Whisper, Parakeet, Moonshine)
-- Diarization runtime: native Sherpa-ONNX (`sherpa-rs`) in Rust
-- Device priority: CUDA > Vulkan > CPU
+</p>
 
-## Tech Stack
+---
 
-- UI: React 19, TypeScript, Tailwind CSS 4, Zustand
-- Desktop: Tauri 2
-- Rust AI deps: `transcribe-rs`, `ort`, `sherpa-rs`
+# ✨ Features
 
-## Prerequisites
+- 🎙 **Fast local transcription**
+- 👥 **Speaker diarization**
+- ⚡ **GPU acceleration**
+- 🔒 **Runs fully locally**
+- 🎧 Supports **audio and video**
 
-### Required
+---
 
-1. Bun
-2. Rust toolchain
-3. Windows only: Visual Studio Build Tools with C++ workload
+# Overview
 
-### Optional for GPU
+Vocrify is a **Windows desktop application** for audio and video transcription with speaker diarization.
 
-- NVIDIA: CUDA 12.1+ drivers
-- Windows AMD/Intel: Vulkan SDK 1.3+
+The application runs **fully locally** and uses modern AI speech models.
 
-## Quick Start
+### Key capabilities
+
+- Accurate speech recognition
+- Automatic speaker separation
+- GPU acceleration
+- Clean transcript navigation
+
+---
+
+# Architecture
+
+Vocrify uses a **modern Rust + web stack**.
+
+| Layer | Technology |
+|-----|-----|
+| UI | React 19 |
+| State | Zustand |
+| Styling | Tailwind CSS 4 |
+| Desktop Runtime | Tauri 2 |
+| Backend | Rust |
+| Speech Recognition | transcribe-rs |
+| Speaker Diarization | Sherpa-ONNX |
+| Runtime | ONNX Runtime |
+
+---
+
+# Tech Stack
+
+- **React 19**
+- **TypeScript**
+- **Tailwind CSS 4**
+- **Zustand**
+- **Tauri 2**
+- **Rust**
+- **transcribe-rs**
+- **Sherpa-ONNX**
+- **ONNX Runtime**
+
+---
+
+# Project Structure
+
+```
+vocrify/
+  src/                 # React application
+  src-tauri/           # Rust backend (Tauri)
+  scripts/             # build/dev scripts
+  docs/                # architecture docs
+```
+
+---
+
+# Prerequisites
+
+## Required
+
+1. **Bun**
+2. **Rust toolchain**
+3. **Visual Studio Build Tools**  
+   with **Desktop development with C++**
+
+---
+
+## Optional (GPU acceleration)
+
+### NVIDIA
+
+CUDA **12.1+**
+
+### AMD / Intel
+
+Vulkan SDK **1.3+**
+
+---
+
+# Quick Start
 
 ```bash
-# 1) Install JS deps
+# install dependencies
 bun install
 
-# 2) Start app in dev mode
+# run in dev mode
 bun run tauri:dev
 ```
 
-## Development Commands
+---
+
+# Development Commands
 
 ```bash
-# Tauri + Vite dev
+# run desktop app
 bun run tauri:dev
 
-# Web dev only
+# web dev mode
 bun run dev
 
-# Production web build
+# production web build
 bun run build
 
-# Production desktop build
+# production desktop build
 bun run tauri:build
 
-# Production portable build (no installer)
+# portable build
 bun run tauri:build:portable
 
-# Type check
+# type checking
 bunx tsc --noEmit
 
-# Lint
+# lint
 bun run lint
 bun run lint:fix
 
-# Format
+# formatting
 bun run format
 
-# Tests
+# tests
 bun run test
 bun run test:coverage
 
-# Rust unit tests
+# rust tests
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-## Testing Layout (Short)
+---
 
-- Frontend tests live in nearest `__tests__/` folders under `src/`.
-- Rust crate-level tests live in `src-tauri/src/tests/*_tests.rs` and are wired from `src-tauri/src/lib.rs` via `#[cfg(test)]` + `#[path = ...]`.
-- Small module-local Rust tests may stay inline in `#[cfg(test)] mod tests`.
-- Legacy/experimental Rust tests are kept in `src-tauri/test-support/legacy-rust-tests/` and are not part of regular CI runs.
+# Testing Layout
 
-## Project Structure
+### Frontend
 
-```text
-vocrify/
-  src/                 # React app
-  src-tauri/           # Rust backend (Tauri)
-  scripts/             # Build/dev helper scripts
-  docs/                # Technical docs and reports
+```
+src/**/__tests__/
 ```
 
-## Troubleshooting
+### Rust tests
 
-### ONNX Runtime mismatch on Windows
+```
+src-tauri/src/tests/*_tests.rs
+```
 
-If diarization/transcription fails with ONNX version mismatch or CRT assertion errors,
-validate the bundled runtime and rebuild:
+Registered via
 
-Quick check:
+```
+src-tauri/src/lib.rs
+```
+
+### Experimental tests
+
+```
+src-tauri/test-support/legacy-rust-tests/
+```
+
+Not executed in CI.
+
+---
+
+# Troubleshooting
+
+## ONNX Runtime mismatch
+
+If diarization/transcription fails with runtime mismatch:
 
 ```powershell
 cargo check --manifest-path src-tauri/Cargo.toml
 (Get-Item src-tauri\target\debug\onnxruntime.dll).VersionInfo.FileVersion
 ```
 
-Expected: `onnxruntime.dll` version in `target/debug` should be `>= 1.22.x`.
+Expected:
 
-### link.exe not found (Windows)
+```
+onnxruntime.dll >= 1.22.x
+```
 
-Install Visual Studio Build Tools and enable `Desktop development with C++`.
+---
 
-### GPU not detected
+## link.exe not found
 
-- CUDA: check `nvidia-smi`
-- Vulkan: ensure Vulkan runtime/SDK is installed and GPU drivers are up to date
+Install:
 
-## Notes
+```
+Visual Studio Build Tools
+Desktop development with C++
+```
 
-- Use `bun`, not `npm`.
-- For architecture and coding rules, see `AGENTS.md`.
-- Portable archive output: `src-tauri/target/release/bundle/portable/`.
+---
+
+## GPU not detected
+
+Check GPU environment:
+
+### NVIDIA
+
+```
+nvidia-smi
+```
+
+### Vulkan
+
+Ensure GPU drivers and Vulkan runtime are installed.
+
+---
+
+# Notes
+
+- Use **bun**, not npm
+- Architecture and coding rules → `AGENTS.md`
+
+Portable build output:
+
+```
+src-tauri/target/release/bundle/portable/
+```
+
+---
+
+# License
+
+MIT
