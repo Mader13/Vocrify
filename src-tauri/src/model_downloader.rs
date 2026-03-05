@@ -23,6 +23,7 @@ use std::time::Instant;
 use bzip2::read::BzDecoder;
 use futures_util::StreamExt;
 use reqwest::Client;
+use sha2::{Digest, Sha256};
 use tar::Archive;
 use tauri::{AppHandle, Emitter};
 
@@ -32,6 +33,11 @@ use crate::{AppError, ModelDownloadProgress};
 /// Avoids flooding the React event bus without losing perceived smoothness.
 const PROGRESS_INTERVAL_MS: u128 = 150;
 const WHISPER_CPP_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+const WHISPER_CPP_REPO: &str = "ggerganov/whisper.cpp";
+const GIGAAM_REPO: &str = "istupakov/gigaam-v3-onnx";
+const PARAKEET_ARCHIVE_SHA256: &str = "43d37191602727524a7d8c6da0eef11c4ba24320f5b4730f1a2497befc2efa77";
+const SHERPA_SEGMENTATION_SHA256: &str = "615761e980be1688da0ef81618c056134d63aa55ea0a5f1494c47393b9398eab";
+const SHERPA_EMBEDDING_SHA256: &str = "1a331345f04805badbb495c775a6ddffcdd1a732567d5ec8b3d5749e3c7a5e4b";
 
 struct ParakeetRegistry {
     download_url: &'static str,
@@ -264,9 +270,13 @@ impl ModelDownloader {
         }
 
         let url = format!("{}/{}", WHISPER_CPP_BASE_URL, file_name);
+        let expected_sha256 = self
+            .fetch_huggingface_file_sha256(WHISPER_CPP_REPO, file_name)
+            .await?;
 
         eprintln!("[ModelDownloader] Whisper '{}' → {}", model_name, url);
         self.stream_to_file(&url, &dest, model_name, cancel).await?;
+        verify_sha256_file(&dest, &expected_sha256, "Whisper model")?;
         self.emit_complete(model_name, file_size_mb(&dest), &dest);
         Ok(())
     }
@@ -301,6 +311,11 @@ impl ModelDownloader {
             )
             .await
         {
+            let _ = std::fs::remove_dir_all(&tmp_extract_dir);
+            return Err(err);
+        }
+
+        if let Err(err) = verify_sha256_file(&archive_path, PARAKEET_ARCHIVE_SHA256, "Parakeet archive") {
             let _ = std::fs::remove_dir_all(&tmp_extract_dir);
             return Err(err);
         }
@@ -384,6 +399,10 @@ impl ModelDownloader {
             "[ModelDownloader] GigaAM '{}' -> {}",
             model_name, GIGAAM_REGISTRY.download_url
         );
+        let expected_sha256 = self
+            .fetch_huggingface_file_sha256(GIGAAM_REPO, GIGAAM_REGISTRY.filename)
+            .await?;
+
         self.stream_to_file(
             GIGAAM_REGISTRY.download_url,
             &target_file,
@@ -391,6 +410,8 @@ impl ModelDownloader {
             cancel,
         )
         .await?;
+
+        verify_sha256_file(&target_file, &expected_sha256, "GigaAM model")?;
 
         if !validate_non_empty_file(&target_file) {
             return Err(DownloadError::Other(format!(
@@ -466,6 +487,15 @@ impl ModelDownloader {
                 return Err(err);
             }
 
+            if let Err(err) = verify_sha256_file(
+                &seg_archive,
+                SHERPA_SEGMENTATION_SHA256,
+                "Sherpa segmentation archive",
+            ) {
+                let _ = std::fs::remove_dir_all(&seg_tmp_extract);
+                return Err(err);
+            }
+
             eprintln!(
                 "[ModelDownloader] Extracting segmentation archive to {:?}",
                 seg_tmp_extract
@@ -519,6 +549,12 @@ impl ModelDownloader {
                 cancel,
             )
             .await?;
+
+            verify_sha256_file(
+                &emb_dest,
+                SHERPA_EMBEDDING_SHA256,
+                "Sherpa embedding model",
+            )?;
 
             if !validate_non_empty_file(&emb_dest) {
                 return Err(DownloadError::Other(format!(
@@ -632,6 +668,63 @@ impl ModelDownloader {
         );
 
         Ok(downloaded)
+    }
+
+    async fn fetch_huggingface_file_sha256(
+        &self,
+        repo: &str,
+        file_name: &str,
+    ) -> Result<String, DownloadError> {
+        let metadata_url = format!(
+            "https://huggingface.co/api/models/{}/tree/main?recursive=1",
+            repo
+        );
+
+        let response = self
+            .client
+            .get(&metadata_url)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let body = response.bytes().await?;
+        let entries: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|e| DownloadError::Other(format!("Failed to parse HuggingFace metadata: {}", e)))?;
+        let files = entries
+            .as_array()
+            .ok_or_else(|| DownloadError::Other("Invalid HuggingFace metadata format".to_string()))?;
+
+        for entry in files {
+            let path = entry.get("path").and_then(|value| value.as_str());
+            if path != Some(file_name) {
+                continue;
+            }
+
+            if let Some(hash) = entry
+                .get("lfs")
+                .and_then(|lfs| lfs.get("oid"))
+                .and_then(|value| value.as_str())
+            {
+                return Ok(normalize_sha256(hash));
+            }
+
+            if let Some(hash) = entry.get("oid").and_then(|value| value.as_str()) {
+                let normalized = normalize_sha256(hash);
+                if normalized.len() == 64 {
+                    return Ok(normalized);
+                }
+            }
+
+            return Err(DownloadError::Other(format!(
+                "Missing checksum for {} in HuggingFace metadata",
+                file_name
+            )));
+        }
+
+        Err(DownloadError::Other(format!(
+            "File {} not found in HuggingFace metadata for {}",
+            file_name, repo
+        )))
     }
 
     // ── Event emitters ────────────────────────────────────────────────────
@@ -834,6 +927,45 @@ fn list_model_files(dir: &Path) -> Vec<String> {
     }
     found_files.sort();
     found_files
+}
+
+fn normalize_sha256(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches("sha256:")
+        .to_ascii_lowercase()
+}
+
+fn compute_sha256_hex(path: &Path) -> Result<String, DownloadError> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path).map_err(DownloadError::Io)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let bytes_read = file.read(&mut buffer).map_err(DownloadError::Io)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn verify_sha256_file(path: &Path, expected_sha256: &str, label: &str) -> Result<(), DownloadError> {
+    let expected = normalize_sha256(expected_sha256);
+    let actual = compute_sha256_hex(path)?;
+
+    if actual == expected {
+        return Ok(());
+    }
+
+    Err(DownloadError::Other(format!(
+        "{} checksum mismatch: expected {}, got {}",
+        label, expected, actual
+    )))
 }
 
 /// Size of a single file in MiB.

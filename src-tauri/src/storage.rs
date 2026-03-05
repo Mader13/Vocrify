@@ -14,6 +14,10 @@ use crate::types::{TranscriptionSegment, SpeakerTurn};
 
 const STORAGE_LOCATION_KEY: &str = "transcriptionDirectory";
 
+fn validate_task_id(task_id: &str) -> Result<String, AppError> {
+    crate::path_validation::validate_safe_path_component(task_id, "Task ID")
+}
+
 /// Alias for backward compatibility with existing serialized data
 pub type TaskSegment = TranscriptionSegment;
 
@@ -308,8 +312,9 @@ pub async fn open_storage_location(app: AppHandle) -> Result<(), AppError> {
 
 /// Save a transcription task to file
 pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Result<(), AppError> {
+    let safe_task_id = validate_task_id(&task.id)?;
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
-    let task_file = transcriptions_dir.join(format!("{}.json", task.id));
+    let task_file = transcriptions_dir.join(format!("{}.json", &safe_task_id));
     let index_file = transcriptions_dir.join("index.json");
 
     // Create metadata
@@ -317,7 +322,7 @@ pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Resu
     let segment_count = task.result.as_ref().map(|r| r.segments.len());
 
     let metadata = TaskMetadata {
-        id: task.id.clone(),
+        id: safe_task_id.clone(),
         file_name: task.file_name.clone(),
         file_path: task.file_path.clone().unwrap_or_default(),
         status: task.status.clone(),
@@ -330,7 +335,7 @@ pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Resu
     };
 
     // Atomic write for task file
-    let temp_file = transcriptions_dir.join(format!("{}.tmp", task.id));
+    let temp_file = transcriptions_dir.join(format!("{}.tmp", &safe_task_id));
     let task_json = serde_json::to_string_pretty(&task)
         .map_err(|e| AppError::JsonError(e))?;
     fs::write(&temp_file, task_json)
@@ -349,7 +354,11 @@ pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Resu
     };
 
     // Update or add metadata
-    if let Some(pos) = index.tasks.iter().position(|t| t.id == task.id) {
+    if let Some(pos) = index
+        .tasks
+        .iter()
+        .position(|t| t.id == safe_task_id.as_str())
+    {
         index.tasks[pos] = metadata;
     } else {
         index.tasks.push(metadata);
@@ -372,8 +381,9 @@ pub async fn save_transcription(app: AppHandle, task: TranscriptionTask) -> Resu
 
 /// Load a transcription task from file
 pub async fn load_transcription(app: AppHandle, task_id: String) -> Result<TranscriptionTask, AppError> {
+    let safe_task_id = validate_task_id(&task_id)?;
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
-    let task_file = transcriptions_dir.join(format!("{}.json", task_id));
+    let task_file = transcriptions_dir.join(format!("{}.json", &safe_task_id));
 
     if !task_file.exists() {
         return Err(AppError::NotFound(format!(
@@ -392,8 +402,9 @@ pub async fn load_transcription(app: AppHandle, task_id: String) -> Result<Trans
 
 /// Delete a transcription task file
 pub async fn delete_transcription(app: AppHandle, task_id: String) -> Result<(), AppError> {
+    let safe_task_id = validate_task_id(&task_id)?;
     let transcriptions_dir = PathBuf::from(get_transcription_dir(app).await?);
-    let task_file = transcriptions_dir.join(format!("{}.json", task_id));
+    let task_file = transcriptions_dir.join(format!("{}.json", &safe_task_id));
     let index_file = transcriptions_dir.join("index.json");
 
     // Delete task file
@@ -412,7 +423,7 @@ pub async fn delete_transcription(app: AppHandle, task_id: String) -> Result<(),
         };
 
         // Remove task from index
-        index.tasks.retain(|t| t.id != task_id);
+        index.tasks.retain(|t| t.id != safe_task_id.as_str());
 
         // Update timestamp
         index.last_updated = chrono::Utc::now().to_rfc3339();

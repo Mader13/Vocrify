@@ -22,21 +22,21 @@ pub async fn export_transcription(
 
 /// Get file metadata including size
 #[tauri::command]
-pub async fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMetadata>, AppError> {
-    crate::application::media::get_files_metadata(file_paths)
+pub async fn get_files_metadata(app: AppHandle, file_paths: Vec<String>) -> Result<Vec<FileMetadata>, AppError> {
+    crate::application::media::get_files_metadata(&app, file_paths)
 }
 
 /// Read a file as Base64 encoded string
 /// This is used for loading media files into WaveSurfer.js which cannot fetch from Tauri asset URLs
 #[tauri::command]
-pub async fn read_file_as_base64(file_path: String) -> Result<String, AppError> {
-    crate::application::media::read_file_as_base64(file_path)
+pub async fn read_file_as_base64(app: AppHandle, file_path: String) -> Result<String, AppError> {
+    crate::application::media::read_file_as_base64(&app, file_path)
 }
 
 /// Get file size in bytes
 #[tauri::command]
-pub async fn get_file_size(path: String) -> Result<u64, AppError> {
-    crate::application::media::get_file_size(path)
+pub async fn get_file_size(app: AppHandle, path: String) -> Result<u64, AppError> {
+    crate::application::media::get_file_size(&app, path)
 }
 
 /// Delete a file

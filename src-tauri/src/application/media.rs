@@ -290,13 +290,29 @@ mod tests {
     }
 }
 
-pub(crate) fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMetadata>, AppError> {
+pub(crate) fn get_files_metadata(app: &AppHandle, file_paths: Vec<String>) -> Result<Vec<FileMetadata>, AppError> {
     let mut metadata_list = Vec::new();
 
     for file_path in file_paths {
         let path = Path::new(&file_path);
 
-        if !path.exists() {
+        let scoped_path = match crate::path_validation::validate_scoped_existing_file_path(app, &file_path) {
+            Ok(valid_path) => valid_path,
+            Err(_) => {
+                metadata_list.push(FileMetadata {
+                    path: file_path.clone(),
+                    name: path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| file_path.clone()),
+                    size: 0,
+                    exists: false,
+                });
+                continue;
+            }
+        };
+
+        if !scoped_path.exists() {
             metadata_list.push(FileMetadata {
                 path: file_path.clone(),
                 name: path
@@ -309,9 +325,9 @@ pub(crate) fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMeta
             continue;
         }
 
-        let metadata = std::fs::metadata(path).map_err(AppError::IoError)?;
+        let metadata = std::fs::metadata(&scoped_path).map_err(AppError::IoError)?;
 
-        let file_name = path
+        let file_name = scoped_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| file_path.clone());
@@ -327,16 +343,16 @@ pub(crate) fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMeta
     Ok(metadata_list)
 }
 
-pub(crate) fn read_file_as_base64(file_path: String) -> Result<String, AppError> {
-    let validated_path = crate::path_validation::validate_file_path(&file_path)?;
+pub(crate) fn read_file_as_base64(app: &AppHandle, file_path: String) -> Result<String, AppError> {
+    let validated_path = crate::path_validation::validate_scoped_existing_file_path(app, &file_path)?;
     let bytes = std::fs::read(&validated_path).map_err(AppError::IoError)?;
 
     use base64::{engine::general_purpose, Engine as _};
     Ok(general_purpose::STANDARD.encode(&bytes))
 }
 
-pub(crate) fn get_file_size(path: String) -> Result<u64, AppError> {
-    let validated_path = crate::path_validation::validate_file_path(&path)?;
+pub(crate) fn get_file_size(app: &AppHandle, path: String) -> Result<u64, AppError> {
+    let validated_path = crate::path_validation::validate_scoped_existing_file_path(app, &path)?;
     let metadata = std::fs::metadata(&validated_path).map_err(AppError::IoError)?;
     Ok(metadata.len())
 }
@@ -357,7 +373,7 @@ pub(crate) async fn convert_to_mp3(
         input_path, output_path
     );
 
-    let validated_input = crate::path_validation::validate_file_path(&input_path)?;
+    let validated_input = crate::path_validation::validate_scoped_existing_file_path(app, &input_path)?;
     eprintln!("[DEBUG] validated input path: {}", validated_input.display());
 
     let validated_output = crate::path_validation::validate_scoped_output_path(app, &output_path)?;

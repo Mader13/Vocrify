@@ -35,6 +35,9 @@ pub(crate) async fn transcribe_rust(
     state: State<'_, TranscriptionManagerState>,
     rust_handles: State<'_, RustTaskHandles>,
 ) -> Result<TranscriptionResult, String> {
+    let task_id = crate::path_validation::validate_safe_path_component(&task_id, "Task ID")
+        .map_err(|e| e.to_string())?;
+
     eprintln!(
         "[INFO] transcribe_rust called: task_id={}, file={}, model={}",
         task_id,
@@ -52,8 +55,8 @@ pub(crate) async fn transcribe_rust(
     crate::application::transcription::ensure_manager_initialized(&state, &app).await?;
     let model_load_ms = model_load_start.elapsed().as_millis() as u64;
 
-    let validated_path =
-        crate::path_validation::validate_file_path(&file_path).map_err(|e| e.to_string())?;
+    let validated_path = crate::path_validation::validate_scoped_existing_file_path(&app, &file_path)
+        .map_err(|e| e.to_string())?;
 
     let decode_start = std::time::Instant::now();
 

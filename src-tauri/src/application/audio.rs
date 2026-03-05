@@ -1,19 +1,18 @@
-use std::path::PathBuf;
+use tauri::AppHandle;
 
 use crate::{AppError, AudioInfo};
 
 pub(crate) fn convert_audio_to_wav(
+    app: &AppHandle,
     input_path: String,
     output_path: String,
 ) -> Result<AudioInfo, String> {
-    let input = PathBuf::from(&input_path);
-    let output = PathBuf::from(&output_path);
+    let input = crate::path_validation::validate_scoped_existing_file_path(app, &input_path)
+        .map_err(|e| e.to_string())?;
+    let output = crate::path_validation::validate_scoped_output_path(app, &output_path)
+        .map_err(|e| e.to_string())?;
 
     eprintln!("[AUDIO CMD] Converting {:?} to WAV at {:?}", input, output);
-
-    if !input.exists() {
-        return Err(format!("Input file does not exist: {}", input_path));
-    }
 
     let audio = crate::audio::converter::convert_to_wav(&input, &output)
         .map_err(|e| format!("Failed to convert audio: {}", e))?;
@@ -26,28 +25,24 @@ pub(crate) fn convert_audio_to_wav(
     })
 }
 
-pub(crate) fn get_audio_duration(file_path: String) -> Result<f64, String> {
-    let path = PathBuf::from(&file_path);
-
-    if !path.exists() {
-        return Err(format!("File does not exist: {}", file_path));
-    }
+pub(crate) fn get_audio_duration(app: &AppHandle, file_path: String) -> Result<f64, String> {
+    let path = crate::path_validation::validate_scoped_existing_file_path(app, &file_path)
+        .map_err(|e| e.to_string())?;
 
     crate::audio::utils::get_duration(&path).map_err(|e| format!("Failed to get duration: {}", e))
 }
 
 pub(crate) fn extract_audio_segment(
+    app: &AppHandle,
     file_path: String,
     start_ms: u64,
     end_ms: u64,
     output_path: String,
 ) -> Result<AudioInfo, String> {
-    let input = PathBuf::from(&file_path);
-    let output = PathBuf::from(&output_path);
-
-    if !input.exists() {
-        return Err(format!("Input file does not exist: {}", file_path));
-    }
+    let input = crate::path_validation::validate_scoped_existing_file_path(app, &file_path)
+        .map_err(|e| e.to_string())?;
+    let output = crate::path_validation::validate_scoped_output_path(app, &output_path)
+        .map_err(|e| e.to_string())?;
 
     eprintln!(
         "[AUDIO CMD] Extracting segment from {}ms to {}ms",
@@ -68,12 +63,9 @@ pub(crate) fn extract_audio_segment(
     })
 }
 
-pub(crate) fn get_audio_metadata(file_path: String) -> Result<AudioInfo, String> {
-    let path = PathBuf::from(&file_path);
-
-    if !path.exists() {
-        return Err(format!("File does not exist: {}", file_path));
-    }
+pub(crate) fn get_audio_metadata(app: &AppHandle, file_path: String) -> Result<AudioInfo, String> {
+    let path = crate::path_validation::validate_scoped_existing_file_path(app, &file_path)
+        .map_err(|e| e.to_string())?;
 
     let audio = crate::audio::loader::load(&path)
         .map_err(|e| format!("Failed to load audio: {}", e))?;
@@ -91,6 +83,7 @@ pub(crate) fn get_audio_metadata(file_path: String) -> Result<AudioInfo, String>
 }
 
 pub(crate) async fn generate_waveform_peaks(
+    app: &AppHandle,
     file_path: String,
     target_peaks: usize,
 ) -> Result<Vec<f32>, AppError> {
@@ -98,7 +91,7 @@ pub(crate) async fn generate_waveform_peaks(
         "[AUDIO] Request to generate {} peaks for {}",
         target_peaks, file_path
     );
-    let path = crate::path_validation::validate_file_path(&file_path)?;
+    let path = crate::path_validation::validate_scoped_existing_file_path(app, &file_path)?;
 
     let peaks = tokio::task::spawn_blocking(move || {
         crate::audio::utils::generate_waveform_peaks(&path, target_peaks)

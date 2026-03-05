@@ -11,6 +11,8 @@ const ALLOWED_DIRS: &[&str] = &[];
 /// User directories allowed for client-provided destructive/export paths.
 const USER_ALLOWED_SUBDIRS: &[&str] = &["Downloads", "Documents", "Desktop", "Music", "Videos"];
 
+const SAFE_COMPONENT_MAX_LEN: usize = 120;
+
 /// Validate file path to prevent command injection and path traversal attacks
 ///
 /// This function performs security checks on user-provided file paths:
@@ -56,7 +58,9 @@ pub(crate) fn validate_file_path(file_path: &str) -> Result<PathBuf, AppError> {
             let allowed_path = Path::new(allowed_dir);
             // Try to canonicalize the allowed directory
             match allowed_path.canonicalize() {
-                Ok(allowed_canonical) => canonical.as_path().starts_with(allowed_canonical.as_path()),
+                Ok(allowed_canonical) => {
+                    canonical.as_path().starts_with(allowed_canonical.as_path())
+                }
                 Err(_) => false,
             }
         });
@@ -82,10 +86,6 @@ fn get_scoped_allowed_dirs(app: &AppHandle) -> Vec<PathBuf> {
         dirs.push(app_data_dir.join("archive"));
     }
 
-    if let Ok(home_dir) = app.path().home_dir() {
-        dirs.push(home_dir.clone());
-    }
-
     if let Ok(download_dir) = app.path().download_dir() {
         dirs.push(download_dir);
     }
@@ -109,7 +109,6 @@ fn get_scoped_allowed_dirs(app: &AppHandle) -> Vec<PathBuf> {
     if let Ok(user_profile) = std::env::var("USERPROFILE") {
         let user_root = PathBuf::from(user_profile);
         if user_root.exists() {
-            dirs.push(user_root.clone());
             for subdir in USER_ALLOWED_SUBDIRS {
                 dirs.push(user_root.join(subdir));
             }
@@ -141,16 +140,25 @@ fn ensure_path_in_scoped_allowlist(app: &AppHandle, path: &Path) -> Result<(), A
     }
 }
 
-pub(crate) fn validate_scoped_existing_file_path(app: &AppHandle, file_path: &str) -> Result<PathBuf, AppError> {
+pub(crate) fn validate_scoped_existing_file_path(
+    app: &AppHandle,
+    file_path: &str,
+) -> Result<PathBuf, AppError> {
     let canonical = validate_file_path(file_path)?;
     ensure_path_in_scoped_allowlist(app, &canonical)?;
     Ok(canonical)
 }
 
-pub(crate) fn validate_scoped_output_path(app: &AppHandle, output_path: &str) -> Result<PathBuf, AppError> {
+pub(crate) fn validate_scoped_output_path(
+    app: &AppHandle,
+    output_path: &str,
+) -> Result<PathBuf, AppError> {
     let output = PathBuf::from(output_path);
     let parent = output.parent().ok_or_else(|| {
-        AppError::AccessDenied(format!("Output path has no parent directory: {}", output_path))
+        AppError::AccessDenied(format!(
+            "Output path has no parent directory: {}",
+            output_path
+        ))
     })?;
 
     if !parent.exists() {
@@ -166,7 +174,10 @@ pub(crate) fn validate_scoped_output_path(app: &AppHandle, output_path: &str) ->
     ensure_path_in_scoped_allowlist(app, &canonical_parent)?;
 
     let file_name = output.file_name().ok_or_else(|| {
-        AppError::AccessDenied(format!("Output path must include a file name: {}", output_path))
+        AppError::AccessDenied(format!(
+            "Output path must include a file name: {}",
+            output_path
+        ))
     })?;
 
     Ok(canonical_parent.join(file_name))
@@ -200,4 +211,44 @@ pub(crate) fn validate_scoped_storage_directory_path(
 
     ensure_path_in_scoped_allowlist(app, &canonical)?;
     Ok(canonical)
+}
+
+pub(crate) fn validate_safe_path_component(
+    value: &str,
+    field_name: &str,
+) -> Result<String, AppError> {
+    let trimmed = value.trim();
+
+    if trimmed.is_empty() {
+        return Err(AppError::AccessDenied(format!(
+            "{} cannot be empty",
+            field_name
+        )));
+    }
+
+    if trimmed.len() > SAFE_COMPONENT_MAX_LEN {
+        return Err(AppError::AccessDenied(format!(
+            "{} exceeds maximum length ({})",
+            field_name, SAFE_COMPONENT_MAX_LEN
+        )));
+    }
+
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains("..") {
+        return Err(AppError::AccessDenied(format!(
+            "{} contains path traversal characters",
+            field_name
+        )));
+    }
+
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err(AppError::AccessDenied(format!(
+            "{} contains unsupported characters",
+            field_name
+        )));
+    }
+
+    Ok(trimmed.to_string())
 }
