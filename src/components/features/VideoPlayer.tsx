@@ -108,6 +108,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   showControls = true,
   className,
 }, forwardedRef) {
+  const readyManagedCopyPath = React.useMemo(() => {
+    if (task.managedCopyStatus === "done" && task.managedCopyPath) {
+      return task.managedCopyPath;
+    }
+    return undefined;
+  }, [task.managedCopyPath, task.managedCopyStatus]);
+
   const internalVideoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
@@ -139,8 +146,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   // Check if video element should be shown (needed for controller)
   // Show video if: not archived OR archived with keep_all mode (has video file)
   const showVideoElement = React.useMemo(() => {
-    if (task.managedCopyPath) {
-      return isVideoFile(task.managedCopyPath);
+    if (readyManagedCopyPath) {
+      return isVideoFile(readyManagedCopyPath);
     }
 
     if (!task.archived) {
@@ -148,7 +155,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     }
     // For archived tasks, show video only if keep_all mode (filePath contains archived video)
     return task.archiveMode === "keep_all" && !!task.filePath && task.filePath.length > 0;
-  }, [task.managedCopyPath, task.filePath, task.archived, task.archiveMode]);
+  }, [readyManagedCopyPath, task.filePath, task.archived, task.archiveMode]);
   // Playback controller - Single Source of Truth for playback
   // Replaces usePlaybackSync to prevent bidirectional seek loops
   const {
@@ -327,8 +334,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   // Use filePath if task is archived with keep_all mode
   // Otherwise use original file path
   const mediaPath = React.useMemo(() => {
-    if (task.managedCopyPath) {
-      return task.managedCopyPath;
+    if (readyManagedCopyPath) {
+      return readyManagedCopyPath;
     }
 
     // If task is archived with keep_all mode, use archived filePath
@@ -341,7 +348,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     }
     // Otherwise use the original file path
     return task.filePath || "";
-  }, [task.managedCopyPath, task.filePath, task.audioPath, task.archived, task.archiveMode]);
+  }, [readyManagedCopyPath, task.filePath, task.audioPath, task.archived, task.archiveMode]);
 
   const assetUrl = React.useMemo(() => {
     if (!mediaPath) return "";
@@ -484,7 +491,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     setIsWaveformReady(false);
 
     // Check for cached peaks - use mediaPath for archived tasks
-    const peaksPath = task.archived && task.audioPath ? task.audioPath : task.filePath;
+    const peaksPath = mediaPath;
     const cachedPeaks = getCachedWaveformPeaks(peaksPath ?? "");
 
     const themeColors = getThemeColors();
@@ -519,7 +526,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         if (isUnmounted) return;
 
         let initialPeaks = cachedPeaks;
-        const peaksPath = task.archived && task.audioPath ? task.audioPath : task.filePath;
+        const peaksPath = mediaPath;
 
         // Fetch peaks if not cached and prevent UI freeze
         if (!initialPeaks && mediaPath) {

@@ -170,7 +170,12 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const hasSpeakerData =
     sanitizedSpeakerSegments.length > 0 || (mappedResult?.speakerTurns && mappedResult.speakerTurns.length > 0);
 
-  const mediaSourcePath = task.managedCopyPath ?? (!task.archived
+  const readyManagedCopyPath =
+    task.managedCopyStatus === "done" && task.managedCopyPath
+      ? task.managedCopyPath
+      : undefined;
+
+  const mediaSourcePath = readyManagedCopyPath ?? (!task.archived
     ? task.filePath
     : task.archiveMode === "keep_all"
       ? task.filePath
