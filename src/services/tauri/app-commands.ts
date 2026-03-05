@@ -4,6 +4,17 @@ import { logger } from "@/lib/logger";
 import type { CloseBehavior } from "@/types";
 import type { CommandResult } from "./core";
 
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+function isAllowedExternalUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ALLOWED_EXTERNAL_PROTOCOLS.has(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
 export async function getAppVersion(): Promise<CommandResult<string>> {
   try {
     const version = await getVersion();
@@ -25,6 +36,11 @@ export async function openAppDirectory(): Promise<CommandResult<void>> {
 }
 
 export async function openExternalUrl(url: string): Promise<CommandResult<void>> {
+  if (!isAllowedExternalUrl(url)) {
+    logger.error("Blocked unsupported external URL protocol", { url });
+    return { success: false, error: "Unsupported URL protocol" };
+  }
+
   try {
     await invoke("plugin:opener|open_url", { url });
     return { success: true };
