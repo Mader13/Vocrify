@@ -63,10 +63,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: windows-cargo-${{ inputs.tauri_target }}-${{ hashFiles('**/Cargo.lock') }}
+          key: windows-cargo-vocrify-${{ inputs.tauri_target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            windows-cargo-${{ inputs.tauri_target }}-
-            windows-cargo-
+            windows-cargo-vocrify-${{ inputs.tauri_target }}-
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
