@@ -457,7 +457,6 @@ export async function saveTranscription(
   if (isTauriEnvironment()) {
     try {
       await invoke("save_transcription", { task: serializeTask(task) });
-      saveTaskToFallback(task);
       logger.info("Transcription saved successfully", { taskId: task.id });
       return { success: true };
     } catch (error) {
@@ -465,7 +464,6 @@ export async function saveTranscription(
         taskId: task.id,
         error: String(error),
       });
-      saveTaskToFallback(task);
       return { success: false, error: String(error) };
     }
   }
@@ -519,14 +517,12 @@ export async function deleteTranscription(
   if (isTauriEnvironment()) {
     try {
       await invoke("delete_transcription", { taskId });
-      deleteTaskFromFallback(taskId);
       return { success: true };
     } catch (error) {
       logger.error("Failed to delete transcription", {
         taskId,
         error: String(error),
       });
-      deleteTaskFromFallback(taskId);
       return { success: false, error: String(error) };
     }
   }

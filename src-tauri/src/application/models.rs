@@ -30,6 +30,10 @@ async fn spawn_model_download(
 		.map_err(|e| e.to_string())
 }
 
+fn validate_model_name(model_name: &str) -> Result<String, AppError> {
+	crate::path_validation::validate_safe_path_component(model_name, "Model name")
+}
+
 fn open_dir_in_file_manager(path: &str) -> Result<(), AppError> {
 	#[cfg(target_os = "windows")]
 	{
@@ -156,6 +160,8 @@ pub(crate) async fn download_model(
 	model_type: String,
 	hugging_face_token: Option<String>,
 ) -> Result<String, AppError> {
+	let model_name = validate_model_name(&model_name)?;
+
 	{
 		let manager = task_manager.lock().await;
 		if manager.downloading_models.len() >= MAX_CONCURRENT_DOWNLOADS {
@@ -261,6 +267,7 @@ pub(crate) fn get_local_models(app: &AppHandle) -> Result<Vec<LocalModel>, AppEr
 }
 
 pub(crate) async fn delete_model(app: &AppHandle, model_name: String) -> Result<(), AppError> {
+	let model_name = validate_model_name(&model_name)?;
 	let models_dir = crate::models_dir::get_models_dir(app)?;
 
 	eprintln!("Deleting model: {}", model_name);
@@ -349,6 +356,8 @@ pub(crate) async fn cancel_model_download(
 	task_manager: &State<'_, TaskManagerState>,
 	model_name: String,
 ) -> Result<(), AppError> {
+	let model_name = validate_model_name(&model_name)?;
+
 	let (handle, child_arc, cancel_token) = {
 		let mut manager = task_manager.lock().await;
 		let handle = manager.downloading_models.remove(&model_name);

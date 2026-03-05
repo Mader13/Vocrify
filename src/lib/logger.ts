@@ -13,6 +13,14 @@ export enum LogLevel {
   ERROR = 3,
 }
 
+function shouldPersistLogs(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return !("__TAURI__" in window);
+}
+
 export interface LogEntry {
   id: string;
   timestamp: Date;
@@ -62,7 +70,7 @@ class Logger {
     this.config = {
       level: LogLevel.INFO,
       enableConsole: true,
-      enableStorage: true,
+      enableStorage: shouldPersistLogs(),
       maxStorageEntries: 1000,
       ...config,
     };

@@ -7,8 +7,9 @@ use std::os::windows::process::CommandExt;
 
 use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Read};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
@@ -149,24 +150,68 @@ fn validate_ffmpeg_extraction(extract_dir: &PathBuf, ffmpeg_name: &str) -> Resul
         .ok_or_else(|| format!("FFmpeg not found in archive. Archive may be corrupted."))
 }
 
-/// Get download URLs for FFmpeg (static builds from gyan.dev)
-fn get_ffmpeg_urls() -> (String, String) {
-    // gyan.dev provides static builds that don't require DLL dependencies
+struct FFmpegDownloadSource {
+    url: &'static str,
+    version: &'static str,
+    archive_ext: &'static str,
+    expected_sha256: &'static str,
+}
+
+/// Get pinned FFmpeg source with SHA256 checksum verification.
+fn get_ffmpeg_download_source() -> FFmpegDownloadSource {
     if cfg!(windows) {
-        // Using release essentials build (version 8.0.1)
-        let url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip".to_string();
-        let version = "8.0.1".to_string();
-        (url, version)
-    } else if cfg!(target_os = "macos") {
-        // For macOS, use homebrew-style or BtbN static
-        let url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-macos64-gpl.zip".to_string();
-        let version = "latest".to_string();
-        (url, version)
+        return FFmpegDownloadSource {
+            url: "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+            version: "8.0.1",
+            archive_ext: "zip",
+            expected_sha256: "e2aaeaa0fdbc397d4794828086424d4aaa2102cef1fb6874f6ffd29c0b88b673",
+        };
+    }
+
+    if cfg!(target_os = "macos") {
+        return FFmpegDownloadSource {
+            url: "https://evermeet.cx/ffmpeg/ffmpeg-8.0.1.zip",
+            version: "8.0.1",
+            archive_ext: "zip",
+            expected_sha256: "470e482f6e290eac92984ac12b2d67bad425b1e5269fd75fb6a3536c16e824e4",
+        };
+    }
+
+    FFmpegDownloadSource {
+        url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-03-04-13-03/ffmpeg-n8.0.1-66-g27b8d1a017-linux64-gpl-8.0.tar.xz",
+        version: "8.0.1-66-g27b8d1a017",
+        archive_ext: "tar.xz",
+        expected_sha256: "34ea087695d2509c202996ef20e5d290b40bb2feeb777abdc42df4f0256c0a4d",
+    }
+}
+
+fn compute_sha256_hex(path: &PathBuf) -> Result<String, String> {
+    let mut file = File::open(path).map_err(|e| format!("Failed to open file for checksum: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let bytes_read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Failed to read file for checksum: {}", e))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn verify_archive_checksum(archive_path: &PathBuf, expected_sha256: &str) -> Result<(), String> {
+    let actual = compute_sha256_hex(archive_path)?;
+    if actual.eq_ignore_ascii_case(expected_sha256) {
+        Ok(())
     } else {
-        // Linux - use BtbN static build
-        let url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz".to_string();
-        let version = "latest".to_string();
-        (url, version)
+        Err(format!(
+            "Checksum verification failed. Expected {}, got {}",
+            expected_sha256, actual
+        ))
     }
 }
 
@@ -383,17 +428,14 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
     std::fs::create_dir_all(&ffmpeg_dir)
         .map_err(|e| format!("Failed to create directory: {}", e))?;
 
-    // Derive archive extension from URL so ZIP validation works correctly
-    let (url, _version) = get_ffmpeg_urls();
-    let archive_ext = if url.ends_with(".tar.xz") {
-        "tar.xz"
-    } else {
-        "zip"
-    };
-    let archive_path = ffmpeg_dir.join(format!("ffmpeg_archive.{}", archive_ext));
+    let source = get_ffmpeg_download_source();
+    let archive_path = ffmpeg_dir.join(format!("ffmpeg_archive.{}", source.archive_ext));
 
-    eprintln!("[DEBUG] Downloading FFmpeg from: {}", url);
-    eprintln!("[DEBUG] This may take a few minutes (file size ~80MB)...");
+    eprintln!(
+        "[DEBUG] Downloading FFmpeg {} from: {}",
+        source.version, source.url
+    );
+    eprintln!("[DEBUG] This may take a few minutes depending on platform package size...");
 
     emit_ffmpeg_status(&app, "downloading", "Starting FFmpeg download...");
 
@@ -403,7 +445,8 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
     // Download directly to disk with retry (3 attempts) - no in-memory buffer
-    let downloaded_bytes = match download_with_retry(&client, &url, &archive_path, &app, 3).await {
+    let downloaded_bytes =
+        match download_with_retry(&client, source.url, &archive_path, &app, 3).await {
         Ok(bytes) => bytes,
         Err(e) => {
             cleanup_on_error(&ffmpeg_dir);
@@ -428,8 +471,16 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
         downloaded_bytes
     );
 
-    // Validate ZIP integrity before extraction (now always works - archive has .zip extension)
-    if archive_ext == "zip" {
+    if let Err(e) = verify_archive_checksum(&archive_path, source.expected_sha256) {
+        cleanup_on_error(&ffmpeg_dir);
+        emit_ffmpeg_status(&app, "failed", &e);
+        return Err(e);
+    }
+
+    eprintln!("[DEBUG] Archive checksum verified successfully");
+
+    // Validate ZIP integrity before extraction
+    if source.archive_ext == "zip" {
         match validate_zip_archive(&archive_path) {
             Ok(count) => eprintln!("[DEBUG] ZIP archive valid, {} entries", count),
             Err(e) => {
@@ -450,9 +501,9 @@ pub async fn download_ffmpeg(app: AppHandle) -> Result<(), String> {
         format!("Failed to create extraction directory: {}", e)
     })?;
 
-    let extraction_result = if url.ends_with(".zip") {
+    let extraction_result = if source.archive_ext == "zip" {
         extract_zip(&archive_path, &extract_dir)
-    } else if url.ends_with(".tar.xz") || url.ends_with(".tar.gz") {
+    } else if source.archive_ext == "tar.xz" || source.archive_ext == "tar.gz" {
         extract_tar(&archive_path, &extract_dir)
     } else {
         Err("Unknown archive format".to_string())

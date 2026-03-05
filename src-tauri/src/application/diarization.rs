@@ -55,8 +55,8 @@ pub(crate) async fn diarize_native(
         task_id, audio_path
     );
 
-    let validated_path =
-        crate::path_validation::validate_file_path(&audio_path).map_err(|e| e.to_string())?;
+    let validated_path = crate::path_validation::validate_scoped_existing_file_path(app, &audio_path)
+        .map_err(|e| e.to_string())?;
 
     let models_dir = crate::models_dir::get_models_dir(app).map_err(|e| e.to_string())?;
     if let Err(msg) = check_sherpa_models_present(&models_dir) {

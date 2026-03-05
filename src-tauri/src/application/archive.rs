@@ -63,7 +63,7 @@ pub(crate) fn copy_file(
     source_path: String,
     dest_path: String,
 ) -> Result<String, AppError> {
-    let validated_source = crate::path_validation::validate_file_path(&source_path)?;
+    let validated_source = crate::path_validation::validate_scoped_existing_file_path(app, &source_path)?;
     let validated_dest = crate::path_validation::validate_scoped_output_path(app, &dest_path)?;
 
     if let Some(parent) = validated_dest.parent() {
@@ -88,7 +88,7 @@ pub(crate) async fn compress_media(
         )));
     }
 
-    let validated_input = crate::path_validation::validate_file_path(&input_path)?;
+    let validated_input = crate::path_validation::validate_scoped_existing_file_path(app, &input_path)?;
     let validated_output = crate::path_validation::validate_scoped_output_path(app, &output_path)?;
 
     if level == "none" {
