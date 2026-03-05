@@ -68,11 +68,10 @@ jobs:
           targets: x86_64-pc-windows-msvc
 
       - name: Configure Vulkan SDK
-        uses: humbletim/setup-vulkan-sdk@v1.2.1
+        uses: humbletim/install-vulkan-sdk@v1.2
         with:
-          vulkan-query-version: 1.3.296.0
-          vulkan-components: Vulkan-Headers, Vulkan-Loader
-          vulkan-use-cache: true
+          version: 1.4.309.0
+          cache: true
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
