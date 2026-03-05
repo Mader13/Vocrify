@@ -5848,7 +5848,7 @@ dependencies = [
  "audrey",
  "base64 0.22.1",
  "biquad",
- "bzip2 0.4.4",
+ "bzip2 0.6.1",
  "chrono",
  "dunce",
  "flate2",

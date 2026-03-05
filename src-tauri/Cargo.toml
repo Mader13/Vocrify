@@ -39,7 +39,7 @@ tar = "0.4.44"
 base64 = "0.22.1"
 sha2 = "0.10"
 chrono = "0.4.43"
-bzip2 = "0.4"
+bzip2 = "0.6"
 
 # ============================================================================
 # Phase 3: transcribe-rs - Unified Rust Transcription Engine
