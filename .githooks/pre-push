@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -e
+
+echo "Running pre-push checks (typecheck + tests)..."
+bunx tsc --noEmit
+bun run test

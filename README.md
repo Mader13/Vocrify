@@ -4,7 +4,7 @@ Desktop application for video and audio transcription with speaker diarization.
 
 ## Overview
 
-Vocrify is a Tauri app with a React frontend and a Rust backend.
+Vocrify is a Windows-only Tauri app with a React frontend and a Rust backend.
 
 - Transcription is handled by Rust `transcribe-rs`
 - Speaker diarization is handled by Sherpa-ONNX
@@ -123,7 +123,7 @@ Install Visual Studio Build Tools and enable `Desktop development with C++`.
 ### GPU not detected
 
 - CUDA: check `nvidia-smi`
-- MPS: use Apple Silicon with macOS 12.3+ and keep model/device settings on `auto`
+- Vulkan: ensure Vulkan runtime/SDK is installed and GPU drivers are up to date
 
 ## Notes
 
