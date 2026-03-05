@@ -35,8 +35,7 @@ Vocrify is a Tauri app with a React frontend and a Rust backend.
 ### Optional for GPU
 
 - NVIDIA: CUDA 12.1+ drivers
-- Apple Silicon: macOS 12.3+ (MPS)
-- Windows/Linux AMD/Intel: Vulkan SDK 1.3+
+- Windows AMD/Intel: Vulkan SDK 1.3+
 
 ## Quick Start
 
@@ -79,7 +78,17 @@ bun run format
 # Tests
 bun run test
 bun run test:coverage
+
+# Rust unit tests
+cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
+
+## Testing Layout (Short)
+
+- Frontend tests live in nearest `__tests__/` folders under `src/`.
+- Rust crate-level tests live in `src-tauri/src/tests/*_tests.rs` and are wired from `src-tauri/src/lib.rs` via `#[cfg(test)]` + `#[path = ...]`.
+- Small module-local Rust tests may stay inline in `#[cfg(test)] mod tests`.
+- Legacy/experimental Rust tests are kept in `src-tauri/test-support/legacy-rust-tests/` and are not part of regular CI runs.
 
 ## Project Structure
 
@@ -95,9 +104,8 @@ transcribe-video/
 
 ### ONNX Runtime mismatch on Windows
 
-If diarization/transcription fails with ONNX version mismatch or CRT assertion errors, see:
-
-- `docs/ONNX_RUNTIME_COMPATIBILITY.md`
+If diarization/transcription fails with ONNX version mismatch or CRT assertion errors,
+validate the bundled runtime and rebuild:
 
 Quick check:
 

@@ -1,5 +1,3 @@
-.vscode
-
 # Logs
 logs
 *.log
@@ -9,6 +7,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 tauri-*.log
+
+# Editor backup / patch leftovers
+*.bak
+*.backup
+*.orig
+*.rej
 
 # Test scratch files (root only)
 /test_*.py
@@ -57,12 +61,11 @@ src-tauri/WixTools/
 src-tauri/bundle/
 src-tauri/gen/
 src-tauri/capabilities/generated/
-src-tauri/resources/ai-engine/
 src-tauri/resources/ort/
 src-tauri/resources/vad/
 src-tauri/test_parakeet_validation/
 
-# Python
+# Script/tooling caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -77,7 +80,6 @@ venv.bak/
 .venv.bak/
 virtualenv/
 *.egg
-.Python
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -90,29 +92,13 @@ htmlcov/
 .ipynb_checkpoints/
 
 # AI models (large files, downloaded separately)
-ai-engine/**/*.pt
-ai-engine/**/*.bin
-ai-engine/**/*.onnx
-ai-engine/**/*.safetensors
 *.ct2
-checkpoints/
 models/
 downloads/
 datasets/
 data/
 wandb/
 mlruns/
-
-# Python environments inside ai-engine
-ai-engine/venv/
-ai-engine/.venv/
-ai-engine/venv_parakeet/
-ai-engine/.venv_parakeet/
-
-# Pip/installer logs or artifacts accidentally saved in ai-engine
-ai-engine/=*
-ai-engine/pip-*.log
-ai-engine/*-install.log
 
 # Editor directories and files
 .vscode/*
@@ -150,6 +136,7 @@ worktrees/
 # Plans
 /plans/
 /my-plans/
+/docs/plans/
 .planning/
 
 # Claude Code / OpenCode / Claude Flow

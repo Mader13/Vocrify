@@ -24,9 +24,5 @@ logs/
 src-tauri/Cargo.lock
 src-tauri/target/
 
-# Python
-ai-engine/*.pyc
-ai-engine/__pycache__/
-
 # Config files that don't need formatting
 .vite-env.d.ts
