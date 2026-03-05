@@ -33,10 +33,11 @@ tempfile = "3.25.0"
 reqwest = { version = "0.12", features = ["stream"] }
 futures-util = "0.3"
 which = "8.0.0"
-zip = "7.4.0"
+zip = "8.2.0"
 flate2 = "1.1.9"
 tar = "0.4.44"
 base64 = "0.22.1"
+sha2 = "0.10"
 chrono = "0.4.43"
 bzip2 = "0.4"
 
