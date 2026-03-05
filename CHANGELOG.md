@@ -5,7 +5,7 @@ All notable changes to Vocrify are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] - 2026-02-28
+## [v1.0.0] - 2026-03-05
 
 ### Added
 
@@ -24,4 +24,4 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 - Tauri 2 + React 19 + TypeScript + Tailwind CSS 4 + Zustand
 - Content Security Policy configured for production
-- 91 frontend unit tests (Vitest)
+- 110 frontend unit tests (Vitest)

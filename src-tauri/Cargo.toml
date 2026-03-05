@@ -1,6 +1,6 @@
 [package]
 name = "vocrify"
-version = "0.1.0"
+version = "1.0.0"
 description = "Vocrify — cross-platform transcription with diarization"
 authors = ["Minti"]
 edition = "2021"
