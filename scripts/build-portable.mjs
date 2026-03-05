@@ -51,7 +51,7 @@ function createPortableReadme(productName) {
     "",
     "How to run:",
     "1. Extract this folder to any location.",
-    "2. Run transcribe-video.exe.",
+    "2. Run Vocrify.exe.",
     "",
     "Notes:",
     "- Keep all files and the resources directory together.",
@@ -76,7 +76,7 @@ function main() {
   const productName = config.productName ?? "App";
   const safeProductName = sanitizeName(productName);
 
-  const appExeName = "transcribe-video.exe";
+  const appExeName = "Vocrify.exe";
   const appExePath = path.join(releaseDir, appExeName);
   ensureFile(appExePath, "Main executable");
   ensureFile(resourcesDir, "Resources directory");

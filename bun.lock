@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "transcribe-video",
+      "name": "vocrify",
       "dependencies": {
         "@tailwindcss/vite": "^4.1.18",
         "@tauri-apps/api": "^2",

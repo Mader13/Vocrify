@@ -1,8 +1,8 @@
 [package]
-name = "transcribe-video"
+name = "vocrify"
 version = "0.1.0"
-description = "A cross-platform video transcription app with speaker diarization"
-authors = ["Transcribe Video Team"]
+description = "Vocrify — cross-platform transcription with diarization"
+authors = ["Minti"]
 edition = "2021"
 
 [lib]

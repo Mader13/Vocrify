@@ -93,7 +93,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib
 ## Project Structure
 
 ```text
-transcribe-video/
+vocrify/
   src/                 # React app
   src-tauri/           # Rust backend (Tauri)
   scripts/             # Build/dev helper scripts

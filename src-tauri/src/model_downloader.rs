@@ -139,7 +139,7 @@ impl ModelDownloader {
         // Policy::limited(10) follows up to 10 redirects - needed for HuggingFace CDN.
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::limited(10))
-            .user_agent("Mozilla/5.0 transcribe-video/1.0")
+            .user_agent("Mozilla/5.0 Vocrify/1.0")
             .build()
             .expect("Failed to build reqwest client");
         Self {
