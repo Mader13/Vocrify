@@ -9,7 +9,7 @@ import {
   isTaskBlockingModelDeletion,
   PENDING_MODEL_DELETIONS_STORAGE_KEY,
   persistPendingModelDeletions,
-} from "./model-deletion";
+} from "../model-deletion";
 
 function createTask(overrides: Partial<TranscriptionTask>): TranscriptionTask {
   return {

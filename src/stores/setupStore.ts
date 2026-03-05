@@ -70,7 +70,7 @@ interface SetupStore {
   backgroundValidate: () => Promise<void>;
 }
 
-const STEPS: SetupStep[] = ["language", "ffmpeg", "device", "model", "summary"];
+const STEPS: SetupStep[] = ["language", "storage", "ffmpeg", "device", "model", "summary"];
 
 const initialState = {
   currentStep: "language" as SetupStep,

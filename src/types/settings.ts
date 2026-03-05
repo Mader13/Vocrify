@@ -1,8 +1,16 @@
+import type { DeviceType } from "./devices";
+import type { AIModel } from "./models";
+import type { Language } from "./transcription";
+
 export type DiarizationProvider = "none" | "native" | "sherpa-onnx";
 
 export type EnginePreference = "auto" | "rust";
 
 export type AppLocale = "en" | "ru";
+
+export type AppTheme = "light" | "dark" | "system";
+
+export type CloseBehavior = "hide_to_tray" | "exit";
 
 export const APP_LOCALE_NAMES: Record<AppLocale, string> = {
   en: "English",
@@ -12,6 +20,8 @@ export const APP_LOCALE_NAMES: Record<AppLocale, string> = {
 export type ArchiveCompression = "none" | "light" | "medium" | "heavy";
 
 export type ArchiveMode = "keep_all" | "delete_video" | "text_only";
+
+export type ManagedCopyLifecycle = "on_complete" | "on_archive";
 
 export type AudioProfile = "standard" | "noisy";
 
@@ -34,16 +44,25 @@ export const ARCHIVE_COMPRESSION_LABELS: Record<ArchiveCompression, string> = {
 };
 
 export interface AppSettings {
-  defaultModel: string;
-  defaultDevice: string;
-  defaultLanguage: string;
+  defaultModel: AIModel;
+  defaultDevice: DeviceType;
+  defaultLanguage: Language;
+  theme: AppTheme;
   language: AppLocale;
   enableDiarization: boolean;
   diarizationProvider: DiarizationProvider;
+  closeBehavior: CloseBehavior;
   maxConcurrentTasks: number;
   outputDirectory: string;
+  managedCopyEnabled: boolean;
+  managedCopyDirectory: string;
+  managedCopyCompression: ArchiveCompression;
+  managedCopyLifecycle: ManagedCopyLifecycle;
   lastDiarizationProvider: DiarizationProvider;
   enginePreference: EnginePreference;
+  autoSave: boolean;
+  exportFormat: string;
+  numSpeakers: number;
   audioProfile: AudioProfile;
 }
 
@@ -51,13 +70,22 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultModel: "whisper-base",
   defaultDevice: "auto",
   defaultLanguage: "auto",
+  theme: "system",
   language: "en",
-  enableDiarization: true,
+  enableDiarization: false,
   diarizationProvider: "none",
-  maxConcurrentTasks: 2,
+  closeBehavior: "hide_to_tray",
+  maxConcurrentTasks: 3,
   outputDirectory: "",
+  managedCopyEnabled: true,
+  managedCopyDirectory: "",
+  managedCopyCompression: "medium",
+  managedCopyLifecycle: "on_complete",
   lastDiarizationProvider: "none",
   enginePreference: "auto",
+  autoSave: true,
+  exportFormat: "txt",
+  numSpeakers: 2,
   audioProfile: "standard",
 };
 

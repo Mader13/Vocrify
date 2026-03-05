@@ -73,9 +73,9 @@ export function SystemStatusCard({ title, icon, status, details, onRetry, isLoad
         hidden: { opacity: 0, y: 20 },
         visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } },
       }}
-      className={`${config.bg} ${config.border} border bg-card/40 backdrop-blur-md rounded-2xl p-4 transition-all hover:shadow-md hover:bg-card/60`}
+      className={`${config.bg} ${config.border} border bg-card/60 backdrop-blur-xl rounded-3xl p-5 transition-all hover:shadow-md hover:bg-card/80`}
     >
-      <div className="flex items-start justify-between gap-2 mb-3">
+      <div className="flex items-start justify-between gap-2 mb-4">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className={`p-2 rounded-lg ${config.bgBadge} ${config.color} shrink-0`}>{icon}</div>
           <span className="font-semibold text-sm truncate">{title}</span>
@@ -86,7 +86,7 @@ export function SystemStatusCard({ title, icon, status, details, onRetry, isLoad
         </div>
       </div>
 
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {details.map((detail, idx) => (
           <div key={idx} className="flex items-center gap-1.5">
             <div className={`w-1 h-1 rounded-full ${DETAIL_DOT_COLOR[status]}`} />

@@ -1,5 +1,7 @@
 /* eslint-disable no-console, @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion */
 
+import { MAX_JSON_SIZE_BYTES } from "./utils";
+
 /**
  * Logger utility for transcription and upload processes
  */
@@ -76,7 +78,7 @@ class Logger {
       const stored = localStorage.getItem("vocrify-logs");
       if (stored) {
         // Basic size check for HIGH-10
-        if (stored.length > 1_000_000) {
+        if (stored.length > MAX_JSON_SIZE_BYTES) {
           console.warn("Log data too large, clearing");
           localStorage.removeItem("vocrify-logs");
           return;

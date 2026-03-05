@@ -63,6 +63,11 @@ export interface TranscriptionTask {
   archiveMode?: ArchiveMode;
   audioPath?: string;
   archiveSize?: number;
+  managedCopyPath?: string;
+  managedCopySize?: number;
+  managedCopyStatus?: "pending" | "done" | "failed";
+  managedCopyError?: string;
+  managedCopyCreatedAt?: Date;
   videoDeleted?: boolean;
   lastProgressUpdate?: number;
   speakerNameMap?: Record<string, string>;

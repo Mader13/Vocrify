@@ -1,7 +1,9 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { z } from "zod";
-import type { SpeakerCount } from "@/types";
+
+export const MAX_JSON_SIZE_BYTES = 1_000_000;
+export const WAVEFORM_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Schema for cached audio peaks data
@@ -10,15 +12,6 @@ export const AudioPeaksSchema = z.object({
   peaks: z.array(z.number()),
   timestamp: z.number(),
   ttl: z.number(),
-});
-
-// HIGH-10: Schema for log entries validation
-export const LogEntrySchema = z.object({
-  id: z.string(),
-  timestamp: z.string().datetime(),
-  level: z.enum(["debug", "info", "warn", "error"]),
-  message: z.string(),
-  data: z.any().optional(),
 });
 
 /**
@@ -30,7 +23,7 @@ export function safeJsonParse<T>(
 ): T | null {
   try {
     // Size limit check (1MB)
-    if (data.length > 1_000_000) {
+    if (data.length > MAX_JSON_SIZE_BYTES) {
       console.warn("JSON data too large:", data.length);
       return null;
     }
@@ -139,34 +132,6 @@ export function isMediaFile(path: string): boolean {
 }
 
 /**
- * Format time for SRT subtitles (HH:MM:SS,mmm)
- */
-export function formatSRTTime(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 1000);
-
-  return `${hours.toString().padStart(2, "0")}:${minutes
-    .toString()
-    .padStart(2, "0")}:${secs.toString().padStart(2, "0")},${ms.toString().padStart(3, "0")}`;
-}
-
-/**
- * Format time for VTT subtitles (HH:MM:SS.mmm)
- */
-export function formatVTTTime(seconds: number): string {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  const ms = Math.floor((seconds % 1) * 1000);
-
-  return `${hours.toString().padStart(2, "0")}:${minutes
-    .toString()
-    .padStart(2, "0")}:${secs.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
-}
-
-/**
  * Get theme colors from CSS variables
  */
 export function getThemeColors(): {
@@ -200,7 +165,7 @@ export function cacheWaveformPeaks(filePath: string, peaks: Float32Array): void 
     const cacheData = {
       peaks: Array.from(peaks),
       timestamp: Date.now(),
-      ttl: 24 * 60 * 60 * 1000, // 24 hours
+      ttl: WAVEFORM_CACHE_TTL_MS,
     };
     localStorage.setItem(cacheKey, JSON.stringify(cacheData));
   } catch (error) {
@@ -234,29 +199,6 @@ export function getCachedWaveformPeaks(filePath: string): Float32Array | null {
     console.warn("Failed to get cached waveform peaks:", error);
     return null;
   }
-}
-
-/**
- * Download file with given content and filename
- */
-export function downloadFile(content: string, filename: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-/**
- * Get speaker count label for display
- */
-export function getSpeakerCountLabel(count: SpeakerCount): string {
-  if (count === "auto") return "Auto";
-  return count.toString();
 }
 
 /**

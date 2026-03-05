@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  RuntimeCheckResult,
   FFmpegCheckResult,
   ModelCheckResult,
   EnvironmentStatus,
@@ -7,6 +8,20 @@ import type {
 } from "@/types/setup";
 import { logger } from "@/lib/logger";
 import type { CommandResult } from "./core";
+
+export async function checkRuntimeEnvironment(): Promise<CommandResult<RuntimeCheckResult>> {
+  try {
+    const result = await invoke<RuntimeCheckResult>("check_runtime_environment");
+    logger.info("Runtime environment checked", {
+      status: result.status,
+      inVirtualEnv: result.inVirtualEnv,
+    });
+    return { success: true, data: result };
+  } catch (error) {
+    logger.error("Failed to check runtime environment", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
 
 export async function checkFFmpegStatus(): Promise<CommandResult<FFmpegCheckResult>> {
   try {

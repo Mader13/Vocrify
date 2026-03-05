@@ -40,13 +40,16 @@ export interface FFmpegStatusEvent {
 
 export async function getFFmpegStatus(): Promise<CommandResult<FFmpegStatus>> {
   try {
-    const result = await invoke<{ status: string; path?: string }>("get_ffmpeg_status");
+    const result = await invoke<{
+      status?: "installed" | "not_installed";
+      path?: string;
+    }>("get_ffmpeg_status");
 
     if (result.status === "installed" && result.path) {
       return { success: true, data: { tag: "Installed", path: result.path } };
-    } else {
-      return { success: true, data: { tag: "NotInstalled" } };
     }
+
+    return { success: true, data: { tag: "NotInstalled" } };
   } catch (error) {
     logger.error("Failed to check FFmpeg status", { error: String(error) });
     return { success: false, error: String(error) };

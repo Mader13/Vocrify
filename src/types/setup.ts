@@ -8,6 +8,7 @@ import type { DeviceInfo, LocalModel } from "./index";
 /**
  * Steps in the setup wizard
  * - language: Select application language
+ * - storage: Choose transcription storage directory
  * - ffmpeg: Check FFmpeg installation
  * - device: Check available compute devices (GPU/CPU)
  * - model: Check AI models
@@ -15,6 +16,7 @@ import type { DeviceInfo, LocalModel } from "./index";
  */
 export type SetupStep =
   | "language"
+  | "storage"
   | "ffmpeg"
   | "device"
   | "model"
@@ -82,6 +84,22 @@ export interface ModelCheckResult {
 }
 
 /**
+ * Result of runtime environment check
+ */
+export interface RuntimeCheckResult {
+  /** Current status of the check */
+  status: CheckStatus;
+  /** Runtime version (if applicable) */
+  version: string | null;
+  /** Runtime executable/path (if applicable) */
+  executable: string | null;
+  /** Whether running in a virtual environment */
+  inVirtualEnv: boolean;
+  /** Human-readable message about the check result */
+  message: string;
+}
+
+/**
  * Complete state of the setup wizard
  */
 export interface SetupWizardState {
@@ -102,14 +120,16 @@ export interface SetupWizardState {
  * Combines all check results in a single response
  */
 export interface EnvironmentStatus {
+  /** Runtime check result */
+  runtime: RuntimeCheckResult;
   /** FFmpeg check result */
   ffmpeg: FFmpegCheckResult;
+  /** Models check result */
+  models: ModelCheckResult;
   /** Device check result */
-  device: DeviceCheckResult;
-  /** Model check result */
-  model: ModelCheckResult;
-  /** Whether all required components are ready */
-  isReady: boolean;
+  devices: DeviceCheckResult;
+  /** Overall status */
+  overallStatus: string;
   /** Overall message about environment status */
   message: string;
 }

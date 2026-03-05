@@ -1,16 +1,16 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-non-null-assertion, react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 
 import * as React from "react";
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import type WaveSurfer from "wavesurfer.js";
 import type RegionsPlugin from "wavesurfer.js/dist/plugins/regions.js";
 import { Loader2, Play, Pause, Maximize, Volume2, VolumeX, FastForward } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, isVideoFile } from "@/lib/utils";
 import { getThemeColors, cacheWaveformPeaks, getCachedWaveformPeaks, formatTime } from "@/lib/utils";
 import { WaveformControls } from "@/components/features/WaveformControls";
 import {
-  DEFAULT_VIDEO_ASPECT_RATIO,
-  normalizeVideoAspectRatio,
+  VIDEO_OVERLAY_COMPACT_WIDTH,
+  VIDEO_OVERLAY_MICRO_WIDTH,
 } from "@/components/features/completed-view-layout";
 import { sanitizeSegments } from "@/lib/segment-utils";
 import { getAssetUrl } from "@/services/tauri";
@@ -51,6 +51,8 @@ type SpeakerRegion = {
   end: number;
   speaker: string;
 };
+
+type PlayerControlsMode = "regular" | "compact" | "micro";
 
 /**
  * Merge adjacent regions of the same speaker if the gap is tiny.
@@ -117,8 +119,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const [hoverPreviewTime, setHoverPreviewTime] = React.useState<number | null>(null);
   const [waveformWidth, setWaveformWidth] = React.useState(0);
   const [overlayWidth, setOverlayWidth] = React.useState(0);
-  const [videoAspectRatio, setVideoAspectRatio] = React.useState(DEFAULT_VIDEO_ASPECT_RATIO);
   const [isVideoHovered, setIsVideoHovered] = React.useState(false);
+  const [canHover, setCanHover] = React.useState(true);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const lastReportedTimeRef = useRef(-1);
@@ -137,14 +139,16 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   // Check if video element should be shown (needed for controller)
   // Show video if: not archived OR archived with keep_all mode (has video file)
   const showVideoElement = React.useMemo(() => {
+    if (task.managedCopyPath) {
+      return isVideoFile(task.managedCopyPath);
+    }
+
     if (!task.archived) {
       return !!task.filePath && task.filePath.length > 0;
     }
     // For archived tasks, show video only if keep_all mode (filePath contains archived video)
     return task.archiveMode === "keep_all" && !!task.filePath && task.filePath.length > 0;
-  }, [task.filePath, task.archived, task.archiveMode]);
-  const hasVisibleVideoElement = showVideoElement && isVideoVisible;
-
+  }, [task.managedCopyPath, task.filePath, task.archived, task.archiveMode]);
   // Playback controller - Single Source of Truth for playback
   // Replaces usePlaybackSync to prevent bidirectional seek loops
   const {
@@ -163,7 +167,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     videoRef: internalVideoRef,
     wavesurferRef: wavesurferRef,
     isWaveformReady,
-    hasVideoElement: hasVisibleVideoElement,
+    // Pass showVideoElement (not hasVisibleVideoElement) so the controller keeps
+    // the video as authoritative source even when it's hidden in transcript-focus mode.
+    hasVideoElement: showVideoElement,
   });
 
   const PLAYBACK_RATES = React.useMemo(() => [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], []);
@@ -194,6 +200,24 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       unregisterForegroundPlayer(task.id);
     };
   }, [task.id, registerForegroundPlayer, unregisterForegroundPlayer]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return;
+    }
+
+    const media = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const update = () => setCanHover(media.matches);
+    update();
+
+    if (media.addEventListener) {
+      media.addEventListener("change", update);
+      return () => media.removeEventListener("change", update);
+    }
+
+    media.addListener(update);
+    return () => media.removeListener(update);
+  }, []);
 
   // Lazy initialization flag - only load waveform when component is visible
   const [shouldInitializeWaveform, setShouldInitializeWaveform] = React.useState(false);
@@ -303,6 +327,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   // Use filePath if task is archived with keep_all mode
   // Otherwise use original file path
   const mediaPath = React.useMemo(() => {
+    if (task.managedCopyPath) {
+      return task.managedCopyPath;
+    }
+
     // If task is archived with keep_all mode, use archived filePath
     if (task.archived && task.archiveMode === "keep_all" && task.filePath) {
       return task.filePath;
@@ -313,7 +341,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     }
     // Otherwise use the original file path
     return task.filePath || "";
-  }, [task.filePath, task.audioPath, task.archived, task.archiveMode]);
+  }, [task.managedCopyPath, task.filePath, task.audioPath, task.archived, task.archiveMode]);
 
   const assetUrl = React.useMemo(() => {
     if (!mediaPath) return "";
@@ -321,29 +349,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   }, [mediaPath]);
 
   useEffect(() => {
-    if (!hasVisibleVideoElement) {
-      setVideoAspectRatio(DEFAULT_VIDEO_ASPECT_RATIO);
+    if (!showVideoElement) {
       return;
     }
 
     const videoElement = internalVideoRef.current;
     if (!videoElement) return;
     videoElement.muted = false;
-
-    const updateAspectRatio = () => {
-      const nextRatio = normalizeVideoAspectRatio(videoElement.videoWidth, videoElement.videoHeight);
-      setVideoAspectRatio(nextRatio);
-    };
-
-    updateAspectRatio();
-    videoElement.addEventListener("loadedmetadata", updateAspectRatio);
-    videoElement.addEventListener("resize", updateAspectRatio);
-
-    return () => {
-      videoElement.removeEventListener("loadedmetadata", updateAspectRatio);
-      videoElement.removeEventListener("resize", updateAspectRatio);
-    };
-  }, [assetUrl, hasVisibleVideoElement]);
+  }, [assetUrl, showVideoElement]);
 
   /**
    * Generate regions based on color mode and speaker diarization data
@@ -480,7 +493,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     // Peaks are provided directly by backend, so WaveSurfer only draws - no audio decoding needed.
     const wsOptions: any = {
       container,
-      height: 120,
+      height: 60,
       normalize: true,
       waveColor: themeColors.waveColor,
       progressColor: themeColors.progressColor,
@@ -603,7 +616,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       isWaveformReadyRef.current = false;
       ws?.destroy();
     };
-  }, [generateRegions, mediaPath, shouldInitializeWaveform, hasVisibleVideoElement, controllerSeekTo]);
+  }, [generateRegions, mediaPath, shouldInitializeWaveform, showVideoElement, controllerSeekTo]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -682,21 +695,47 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     pointerEvents: "none",
   } satisfies React.CSSProperties;
   const displayedTime = isWaveformHovered ? (hoverPreviewTime ?? currentTime) : currentTime;
+  const controlsMode: PlayerControlsMode = React.useMemo(() => {
+    if (waveformWidth <= 0) {
+      return "regular";
+    }
+
+    if (waveformWidth <= VIDEO_OVERLAY_MICRO_WIDTH) {
+      return "micro";
+    }
+
+    if (waveformWidth <= VIDEO_OVERLAY_COMPACT_WIDTH) {
+      return "compact";
+    }
+
+    return "regular";
+  }, [waveformWidth]);
+  const isCompactControls = controlsMode !== "regular";
+  const isMicroControls = controlsMode === "micro";
+  const canDeferSecondaryControls = showControls;
+  const showOverlaySpeed = !canDeferSecondaryControls || !isMicroControls;
+  const showOverlayVolumeSlider = !canDeferSecondaryControls || controlsMode === "regular";
+  const showOverlayDuration = !isMicroControls;
+  const shouldAutoHideOverlay = canHover && !isCompactControls;
+  const isOverlayVisible = !shouldAutoHideOverlay || isVideoHovered;
+  const overlayTimeLabel = showOverlayDuration
+    ? `${formatTime(currentTime)} / ${formatTime(duration)}`
+    : formatTime(currentTime);
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {/* Video Player - render only when explicitly visible */}
-      {showVideoElement && isVideoVisible && (
+      {/* Video Player - always in DOM when task has video so playback is not interrupted.
+          Hidden via CSS when in transcript-focus mode; the <video> element keeps playing. */}
+      {showVideoElement && (
         <div
           ref={videoContainerRef}
           className={cn(
-            "relative mx-auto w-full max-w-5xl overflow-hidden rounded-2xl border border-border/60 bg-black/95 shadow-sm transition-all duration-300",
-            "animate-in fade-in slide-in-from-top-2 group/video"
+            "relative mx-auto w-full flex-1 min-h-[160px] overflow-hidden rounded-2xl border border-border/60 bg-black/95 shadow-sm transition-all duration-300",
+            "animate-in fade-in slide-in-from-top-2 group/video flex items-center justify-center",
+            !isVideoVisible && "hidden"
           )}
           style={{
-            aspectRatio: videoAspectRatio,
-            minHeight: "clamp(128px, 22vh, 240px)",
-            maxHeight: "min(46vh, 540px)",
+            maxHeight: "clamp(220px, 46vh, 520px)",
           }}
           onMouseEnter={() => setIsVideoHovered(true)}
           onMouseLeave={() => setIsVideoHovered(false)}
@@ -712,101 +751,147 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           {/* Custom Floating Control Overlay */}
           <div 
             className={cn(
-              "absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 px-5 py-3",
-              "rounded-full border border-white/20 bg-black/40 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.5)]",
-              "transition-all duration-300 ease-out",
-              isVideoHovered ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4 pointer-events-none"
+              "absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none px-2 sm:px-4",
+              "transition-all duration-300 ease-out z-10",
+              isOverlayVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             )}
           >
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                controllerTogglePlayPause();
-              }}
-              className="group/btn relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-all hover:bg-primary/90 active:scale-90"
-              title={controllerIsPlaying ? "Pause" : "Play"}
+            <div 
+              className={cn(
+                "pointer-events-auto flex items-center max-w-full overflow-hidden",
+                "rounded-full border border-white/20 bg-black/65 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.5)] text-white",
+                isCompactControls ? "gap-1.5 px-2 py-1.5" : "gap-3 px-4 py-2.5"
+              )}
             >
-              {controllerIsPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 fill-current ml-0.5" />}
-            </button>
-            
-            <div className="flex items-center whitespace-nowrap">
-              <span className="text-[15px] font-mono font-bold text-white tabular-nums">
-                {formatTime(currentTime)} <span className="mx-1 text-white/30 font-medium">/</span> {formatTime(duration)}
-              </span>
-            </div>
-
-            <div className="w-px h-6 bg-white/10 mx-1" />
-
-            <div className="flex items-center gap-1">
+              {/* Play/Pause Button */}
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  cyclePlaybackRate();
+                  controllerTogglePlayPause();
                 }}
-                className="flex h-10 items-center justify-center gap-1.5 rounded-full bg-white/5 px-3 text-xs font-bold text-white/80 transition-all hover:bg-white/20 hover:text-white active:scale-95"
-                title={`Playback Speed: ${controllerPlaybackRate}x`}
+                className={cn(
+                  "group/btn relative flex shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-all hover:bg-primary/90 active:scale-95",
+                  isMicroControls ? "h-8 w-8" : "h-10 w-10",
+                )}
+                title={controllerIsPlaying ? "Pause" : "Play"}
               >
-                <FastForward className="h-4 w-4" />
-                <span className="w-[40px] text-center">{controllerPlaybackRate}x</span>
+                {controllerIsPlaying ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4 ml-0.5 fill-current" />
+                )}
               </button>
+              
+              {/* Time Label */}
+              <div className="flex shrink-0 items-center px-1">
+                <span className={cn(
+                  "font-mono font-medium tracking-tight text-white/90 tabular-nums whitespace-nowrap",
+                  isMicroControls ? "text-[12px]" : "text-[14px]",
+                )}>
+                  {overlayTimeLabel}
+                </span>
+              </div>
 
-              <div className="group/volume flex h-10 items-center overflow-hidden rounded-full bg-white/5 transition-all duration-300 ease-out w-10 hover:w-[130px] hover:bg-white/10">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    controllerSetVolume(controllerVolume === 0 ? 1 : 0);
-                  }}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/70 transition-all hover:text-white active:scale-95"
+              {/* Speed Button (hidden in micro mode) */}
+              {showOverlaySpeed && (
+                <div className="flex shrink-0 items-center">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cyclePlaybackRate();
+                    }}
+                    className={cn(
+                      "flex items-center justify-center gap-1 rounded-full bg-white/10 text-xs font-bold text-white/90 transition-all hover:bg-white/20 hover:text-white active:scale-95",
+                      isCompactControls ? "h-8 px-2" : "h-10 px-3",
+                    )}
+                    title={`Playback Speed: ${controllerPlaybackRate}x`}
+                  >
+                    <FastForward className="h-4 w-4" />
+                    <span className={cn("text-center", isCompactControls ? "w-6" : "w-8")}>
+                      {controllerPlaybackRate}x
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Volume Control */}
+              <div className="flex shrink items-center min-w-0">
+                <div
+                  className={cn(
+                    "group/volume flex items-center rounded-full bg-white/5 transition-all duration-300",
+                    isMicroControls ? "h-8" : "h-10"
+                  )}
                 >
-                  {controllerVolume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                </button>
-                
-                <div className="flex h-full flex-1 items-center px-2 opacity-0 transition-opacity duration-300 delay-100 group-hover/volume:opacity-100">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={controllerVolume}
-                    onChange={(e) => {
+                  <button
+                    onClick={(e) => {
                       e.stopPropagation();
-                      controllerSetVolume(parseFloat(e.target.value));
+                      controllerSetVolume(controllerVolume === 0 ? 1 : 0);
                     }}
-                    onClick={(e) => e.stopPropagation()}
-                    onWheel={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const delta = -Math.sign(e.deltaY) * 0.05;
-                      const newVolume = Math.max(0, Math.min(1, controllerVolume + delta));
-                      controllerSetVolume(newVolume);
-                    }}
-                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-125 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:transition-transform hover:[&::-moz-range-thumb]:scale-125"
-                    style={{
-                      background: `linear-gradient(to right, white ${controllerVolume * 100}%, rgba(255,255,255,0.2) ${controllerVolume * 100}%)`,
-                    }}
-                  />
+                    className={cn(
+                      "flex shrink-0 items-center justify-center rounded-full text-white/80 transition-all hover:text-white active:scale-95",
+                      isMicroControls ? "h-8 w-8" : "h-10 w-10",
+                    )}
+                    title={controllerVolume === 0 ? "Unmute" : "Mute"}
+                  >
+                    {controllerVolume === 0 ? (
+                      <VolumeX className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4" />
+                    )}
+                  </button>
+
+                  {/* Volume Slider - expands on hover */}
+                  {showOverlayVolumeSlider && (
+                    <div className="flex h-full items-center overflow-hidden transition-all duration-300 w-0 opacity-0 group-hover/volume:w-20 group-hover/volume:opacity-100 group-hover/volume:px-1.5">
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={controllerVolume}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          controllerSetVolume(parseFloat(e.target.value));
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onWheel={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const delta = -Math.sign(e.deltaY) * 0.05;
+                          const newVolume = Math.max(0, Math.min(1, controllerVolume + delta));
+                          controllerSetVolume(newVolume);
+                        }}
+                        className="h-1.5 w-full min-w-[60px] cursor-pointer appearance-none rounded-full bg-white/20 outline-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-125"
+                        style={{
+                          background: `linear-gradient(to right, white ${controllerVolume * 100}%, rgba(255,255,255,0.2) ${controllerVolume * 100}%)`,
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Fullscreen Button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFullscreen();
+                }}
+                className={cn(
+                  "flex shrink-0 items-center justify-center rounded-full bg-white/5 text-white/80 transition-all hover:bg-white/20 hover:text-white active:scale-95",
+                  isMicroControls ? "h-8 w-8" : "h-10 w-10",
+                )}
+                title="Toggle Fullscreen"
+              >
+                <Maximize className="h-4 w-4" />
+              </button>
             </div>
-
-            <div className="w-px h-6 bg-white/10 mx-1" />
-
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleFullscreen();
-              }}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/5 text-white/70 transition-all hover:bg-white/20 hover:text-white active:scale-90"
-              title="Toggle Fullscreen"
-            >
-              <Maximize className="h-5 w-5" />
-            </button>
           </div>
         </div>
       )}
 
       {/* Waveform Container */}
-      <div className="relative h-[120px] overflow-hidden rounded-lg border bg-card">
+      <div className="relative h-15 shrink-0 overflow-hidden rounded-lg border bg-card">
         {/* Waveform */}
         <div
           ref={containerRef}
@@ -860,16 +945,19 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
 
       {/* Waveform Controls */}
       {showControls && (
-        <WaveformControls
-          isPlaying={controllerIsPlaying}
-          currentTime={currentTime}
-          duration={duration}
-          volume={controllerVolume}
-          playbackRate={controllerPlaybackRate}
-          onTogglePlayPause={handleTogglePlayPause}
-          onVolumeChange={handleVolumeChange}
-          onPlaybackRateChange={handlePlaybackRateChange}
-        />
+        <div className="shrink-0">
+          <WaveformControls
+            isPlaying={controllerIsPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            volume={controllerVolume}
+            playbackRate={controllerPlaybackRate}
+            density={controlsMode}
+            onTogglePlayPause={handleTogglePlayPause}
+            onVolumeChange={handleVolumeChange}
+            onPlaybackRateChange={handlePlaybackRateChange}
+          />
+        </div>
       )}
     </div>
   );

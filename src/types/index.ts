@@ -11,6 +11,7 @@ export type {
   FFmpegCheckResult,
   DeviceCheckResult,
   ModelCheckResult,
+  RuntimeCheckResult,
   RuntimeReadinessStatus,
   SetupWizardState,
 } from "./setup";

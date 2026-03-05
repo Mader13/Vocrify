@@ -444,7 +444,7 @@ export const TranscriptionSegments = React.memo(
           onWheel={(e) => e.stopPropagation()}
           className={cn(
             "flex flex-col overflow-y-auto",
-            shouldCapHeight ? "max-h-[44vh] sm:max-h-[400px]" : "h-full"
+            shouldCapHeight ? "max-h-[44vh] sm:max-h-[400px]" : "h-full min-h-0"
           )}
         >
           {segments.map((segment, index) => {
@@ -489,7 +489,7 @@ export const TranscriptionSegments = React.memo(
 
     return (
       <div
-        className={cn(shouldCapHeight ? "max-h-[44vh] sm:max-h-[400px]" : "h-full")}
+        className={cn(shouldCapHeight ? "max-h-[44vh] sm:max-h-[400px]" : "h-full min-h-0")}
         onWheel={(e) => e.stopPropagation()}
       >
         <List

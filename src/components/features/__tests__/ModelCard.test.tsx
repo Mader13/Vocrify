@@ -67,4 +67,25 @@ describe("ModelCard", () => {
     expect(handleDelete).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("heading", { name: /delete model/i })).not.toBeInTheDocument();
   });
+
+  it("shows cancelled status instead of failed when download is cancelled", () => {
+    render(
+      <ModelCard
+        model={{ ...installedModel, installed: false }}
+        onDownload={() => {}}
+        onDelete={() => {}}
+        download={{
+          modelName: installedModel.name,
+          progress: 42,
+          currentMb: 60,
+          totalMb: 142,
+          speedMbS: 0,
+          status: "cancelled",
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/cancelled/i)).toBeInTheDocument();
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
+  });
 });

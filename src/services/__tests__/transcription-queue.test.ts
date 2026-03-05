@@ -61,4 +61,24 @@ describe("getQueuedTaskIdsToStart", () => {
     const startIds = getQueuedTaskIdsToStart(tasks, 0);
     expect(startIds).toEqual(["q1"]);
   });
+
+  it("does not let archived processing tasks block queue slots", () => {
+    const tasks: TranscriptionTask[] = [
+      createTask({ id: "p-archived", status: "processing", archived: true }),
+      createTask({ id: "q1", status: "queued" }),
+    ];
+
+    const startIds = getQueuedTaskIdsToStart(tasks, 1);
+    expect(startIds).toEqual(["q1"]);
+  });
+
+  it("does not let processing tasks without filePath block queue slots", () => {
+    const tasks: TranscriptionTask[] = [
+      createTask({ id: "p-broken", status: "processing", filePath: undefined }),
+      createTask({ id: "q1", status: "queued" }),
+    ];
+
+    const startIds = getQueuedTaskIdsToStart(tasks, 1);
+    expect(startIds).toEqual(["q1"]);
+  });
 });

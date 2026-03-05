@@ -25,7 +25,7 @@ import {
   onModelDownloadStageComplete,
 } from "@/services/tauri";
 import { AVAILABLE_MODELS } from "@/types";
-import { useSettingsStore } from "./_store";
+import { useSettingsStore } from "./settingsStore";
 import { logger } from "@/lib/logger";
 import {
   countBlockingTasksForModel,
@@ -40,6 +40,15 @@ function isModelMissingError(errorMessage: string | undefined): boolean {
   }
 
   return errorMessage.toLowerCase().includes("model not found");
+}
+
+function isDownloadCancellationError(errorMessage: string | undefined): boolean {
+  if (!errorMessage) {
+    return false;
+  }
+
+  const normalizedError = errorMessage.toLowerCase();
+  return normalizedError.includes("cancelled") || normalizedError.includes("canceled") || normalizedError.includes("cancelled by user") || normalizedError.includes("aborted");
 }
 
 interface ModelsState {
@@ -92,6 +101,8 @@ const getModelSizeMb = (modelName: string): number => {
   const model = AVAILABLE_MODELS.find((m) => m.name === modelName);
   return model?.sizeMb || 0;
 };
+
+const CANCELLED_DOWNLOAD_CLEANUP_DELAY_MS = 2500;
 
 /**
  * Setup model download event listeners
@@ -292,16 +303,36 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
       // This prevents showing "installed" before backend confirms all files exist
       // The 1 second delay in setDownloadCompleted gives time for multi-stage downloads to complete
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const status: ModelDownloadState["status"] = isDownloadCancellationError(errorMessage)
+        ? "cancelled"
+        : "error";
+
       set((state) => ({
         downloads: {
           ...state.downloads,
           [name]: {
             ...state.downloads[name],
-            status: "error",
-            error: error instanceof Error ? error.message : String(error),
+            status,
+            error: status === "error" ? errorMessage : undefined,
           },
         },
       }));
+
+      if (status === "cancelled") {
+        setTimeout(() => {
+          set((state) => {
+            const download = state.downloads[name];
+            if (!download || download.status !== "cancelled") {
+              return state;
+            }
+
+            const newDownloads = { ...state.downloads };
+            delete newDownloads[name];
+            return { downloads: newDownloads };
+          });
+        }, CANCELLED_DOWNLOAD_CLEANUP_DELAY_MS);
+      }
     }
   },
 
@@ -317,6 +348,19 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
           },
         },
       }));
+
+      setTimeout(() => {
+        set((state) => {
+          const download = state.downloads[name];
+          if (!download || download.status !== "cancelled") {
+            return state;
+          }
+
+          const newDownloads = { ...state.downloads };
+          delete newDownloads[name];
+          return { downloads: newDownloads };
+        });
+      }, CANCELLED_DOWNLOAD_CLEANUP_DELAY_MS);
 
       // Call the cancel service
       const result = await cancelDownloadService(name);
@@ -667,16 +711,35 @@ export const useModelsStore = create<ModelsState>()((set, get) => ({
   },
 
   setDownloadError: (modelName: string, error: string) => {
+    const status: ModelDownloadState["status"] = isDownloadCancellationError(error)
+      ? "cancelled"
+      : "error";
+
     set((state) => ({
       downloads: {
         ...state.downloads,
         [modelName]: {
           ...state.downloads[modelName],
-          status: "error",
-          error,
+          status,
+          error: status === "error" ? error : undefined,
         },
       },
     }));
+
+    if (status === "cancelled") {
+      setTimeout(() => {
+        set((state) => {
+          const download = state.downloads[modelName];
+          if (!download || download.status !== "cancelled") {
+            return state;
+          }
+
+          const newDownloads = { ...state.downloads };
+          delete newDownloads[modelName];
+          return { downloads: newDownloads };
+        });
+      }, CANCELLED_DOWNLOAD_CLEANUP_DELAY_MS);
+    }
   },
 
   updateDownloadStage: (

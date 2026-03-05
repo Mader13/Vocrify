@@ -7,6 +7,7 @@ interface WaveformControlsProps {
   duration: number;
   volume: number;
   playbackRate: number;
+  density?: "regular" | "compact" | "micro";
   onTogglePlayPause: () => void;
   onVolumeChange: (volume: number) => void;
   onPlaybackRateChange: (rate: number) => void;
@@ -21,6 +22,7 @@ export function WaveformControls({
   duration,
   volume,
   playbackRate,
+  density = "regular",
   onTogglePlayPause,
   onVolumeChange,
   onPlaybackRateChange,
@@ -28,6 +30,8 @@ export function WaveformControls({
 }: WaveformControlsProps) {
   const isMuted = volume === 0;
   const volumePercent = Math.round(volume * 100);
+  const isCompact = density !== "regular";
+  const isMicro = density === "micro";
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVolume = parseFloat(e.target.value);
@@ -55,7 +59,10 @@ export function WaveformControls({
         className,
       )}
     >
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+      <div className={cn(
+        "flex flex-wrap items-center",
+        isMicro ? "gap-1.5" : "gap-2 sm:gap-3",
+      )}>
         <button
           onClick={onTogglePlayPause}
           className={cn(
@@ -67,7 +74,10 @@ export function WaveformControls({
           {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 fill-current ml-0.5" />}
         </button>
 
-        <div className="flex min-w-[96px] items-center justify-center gap-1.5 rounded-md border border-border/20 bg-background/40 px-2.5 py-1 text-[11px] font-mono text-muted-foreground sm:min-w-[108px] sm:px-3 sm:text-xs">
+        <div className={cn(
+          "flex items-center justify-center gap-1.5 rounded-md border border-border/20 bg-background/40 px-2.5 py-1 text-[11px] font-mono text-muted-foreground sm:px-3 sm:text-xs",
+          isMicro ? "min-w-[72px]" : "min-w-[96px] sm:min-w-[108px]",
+        )}>
           <span className="font-semibold text-foreground">{formatTime(currentTime)}</span>
           <span className="text-muted-foreground/40">/</span>
           <span>{formatTime(duration)}</span>
@@ -75,16 +85,19 @@ export function WaveformControls({
 
         <button
           onClick={cyclePlaybackRate}
-          className="ml-auto inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-background/80 sm:ml-0 sm:h-8 sm:text-sm"
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-background/80 sm:text-sm",
+            isMicro ? "h-7" : "ml-auto sm:ml-0 h-7 sm:h-8",
+          )}
           title={`Playback speed: ${playbackRate}x (click to change)`}
         >
           <FastForward className="h-3.5 w-3.5" />
           <span className="w-[40px] text-center">{playbackRate}x</span>
         </button>
 
-        <div className="hidden h-6 w-px bg-border sm:block" />
+        <div className={cn("hidden h-6 w-px bg-border sm:block", isMicro && "hidden")} />
 
-        <div className="flex w-full items-center gap-2 sm:w-auto">
+        <div className={cn("flex w-full items-center gap-2", isMicro ? "sm:w-full" : "sm:w-auto")}>
           <button
             onClick={toggleMute}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background/80 hover:text-foreground"
@@ -96,7 +109,7 @@ export function WaveformControls({
               <Volume2 className="h-4 w-4" />
             )}
           </button>
-          <div className="group flex h-6 w-full items-center sm:w-24">
+          <div className={cn("group flex h-6 w-full items-center", isCompact ? "sm:w-20" : "sm:w-24")}>
             <input
               type="range"
               min="0"

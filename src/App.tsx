@@ -7,6 +7,7 @@ import { subscribeToTranscriptionRuntime } from "@/services/transcription";
 import { orchestrator } from "@/services/transcription-orchestrator";
 import { initializeModelsStore, useModelsStore } from "@/stores/modelsStore";
 import { initializeNotifications as initNotificationEmitter, destroyNotifications } from "@/services/notifications";
+import { setCloseBehavior } from "@/services/tauri";
 import { Button } from "@/components/ui/button";
 import { NotificationProvider } from "@/components/ui/notifications";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,6 @@ import type { DiarizationProvider, AIModel, DeviceType, Language } from "@/types
 import type { FileWithSettings } from "@/components/features/DiarizationOptionsModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useModelValidation, useDropZone, useI18n } from "@/hooks";
-import "./index.css";
 
 interface SelectedFile {
   path: string;
@@ -60,6 +60,7 @@ function MainApplication() {
     defaultLanguage,
     diarizationProvider,
     enableDiarization,
+    closeBehavior,
     theme,
   } = useTasks((s) => s.settings);
 
@@ -78,6 +79,17 @@ function MainApplication() {
   useEffect(() => {
     window.document.documentElement.lang = locale;
   }, [locale]);
+
+  useEffect(() => {
+    void setCloseBehavior(closeBehavior).then((result) => {
+      if (!result.success) {
+        logger.error("Failed to sync close behavior with backend", {
+          closeBehavior,
+          error: result.error,
+        });
+      }
+    });
+  }, [closeBehavior]);
 
   const handleFilesDropped = useCallback((files: SelectedFile[]) => {
     setPendingFiles((prev) => [...prev, ...files]);

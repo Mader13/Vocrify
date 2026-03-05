@@ -14,7 +14,7 @@ export {
   getTaskStatusById,
   type ViewType,
   type AppSettings,
-} from "./_store";
+} from "./tasksStore";
 
 // ---------------------------------------------------------------------------
 // Settings store (focused selectors)
@@ -46,9 +46,6 @@ export { useSetupStore } from "./setupStore";
 // Notification settings store (renamed to fix collision - see Phase 3.5)
 // ---------------------------------------------------------------------------
 export { useNotificationSettingsStore } from "@/services/notifications";
-
-// Backward-compatible alias - will be removed in a future release
-export { useNotificationSettingsStore as useNotificationStore } from "@/services/notifications";
 
 // ---------------------------------------------------------------------------
 // Playback store

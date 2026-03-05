@@ -20,6 +20,7 @@ export interface ModelsSummary {
   downloading: number;
   whisper: ModelSectionSummary;
   parakeet: ModelSectionSummary;
+  gigaam: ModelSectionSummary;
   diarization: ModelSectionSummary;
 }
 
@@ -61,6 +62,7 @@ export function buildModelsSummary(
     downloading,
     whisper: summarizeSection(models, "whisper"),
     parakeet: summarizeSection(models, "parakeet"),
+    gigaam: summarizeSection(models, "gigaam"),
     diarization: summarizeSection(models, "diarization"),
   };
 }

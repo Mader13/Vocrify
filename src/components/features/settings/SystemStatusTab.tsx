@@ -54,42 +54,44 @@ export function SystemStatusTab({ onRerunSetupClick }: SystemStatusTabProps) {
         <p className="text-sm text-muted-foreground">{t("settings.systemDescription")}</p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <SystemStatusCard
-          title={t("settings.ffmpegEngine")}
-          icon={<Film className="h-4 w-4 text-purple-500" />}
-          status={ffmpegStatus}
-          details={ffmpegDetails}
-          onRetry={checkAll}
-          isLoading={isChecking}
-        />
-        <SystemStatusCard
-          title={t("settings.computeDevices")}
-          icon={<Zap className="h-4 w-4 text-blue-500" />}
-          status={deviceStatus}
-          details={deviceDetails}
-          onRetry={checkAll}
-          isLoading={isChecking}
-        />
-      </div>
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <SystemStatusCard
+            title={t("settings.ffmpegEngine")}
+            icon={<Film className="h-4 w-4 text-purple-500" />}
+            status={ffmpegStatus}
+            details={ffmpegDetails}
+            onRetry={checkAll}
+            isLoading={isChecking}
+          />
+          <SystemStatusCard
+            title={t("settings.computeDevices")}
+            icon={<Zap className="h-4 w-4 text-blue-500" />}
+            status={deviceStatus}
+            details={deviceDetails}
+            onRetry={checkAll}
+            isLoading={isChecking}
+          />
+        </div>
 
-      <div className="mt-4 p-5 rounded-[1.5rem] bg-gradient-to-br from-yellow-500/10 to-transparent border border-yellow-500/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] hover:border-yellow-500/30 transition-all group">
-        <div className="flex items-start gap-4">
-          <div className="p-3 rounded-2xl bg-yellow-500/20 shrink-0 group-hover:scale-105 transition-transform">
-            <Sparkles className="h-5 w-5 text-yellow-500" />
-          </div>
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold mb-1 text-foreground/90">{t("settings.systemWizardTitle")}</h3>
-            <p className="text-xs text-muted-foreground mb-4 max-w-sm">{t("settings.systemWizardDescription")}</p>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={onRerunSetupClick}
-              className="bg-yellow-500/10 hover:bg-yellow-500/30 text-yellow-600 dark:text-yellow-400 border-yellow-500/20"
-            >
-              <RotateCcw className="h-4 w-4 mr-2" />
-              {t("settings.relaunchSetup")}
-            </Button>
+        <div className="p-5 rounded-[1.5rem] bg-gradient-to-br from-yellow-500/10 to-transparent border border-yellow-500/20 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] hover:border-yellow-500/30 transition-all group">
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-2xl bg-yellow-500/20 shrink-0 group-hover:scale-105 transition-transform">
+              <Sparkles className="h-5 w-5 text-yellow-500" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold mb-1 text-foreground/90">{t("settings.systemWizardTitle")}</h3>
+              <p className="text-xs text-muted-foreground mb-4 max-w-sm">{t("settings.systemWizardDescription")}</p>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={onRerunSetupClick}
+                className="h-8 min-h-8 bg-yellow-500/10 hover:bg-yellow-500/30 text-yellow-600 dark:text-yellow-400 border-yellow-500/20"
+              >
+                <RotateCcw className="h-4 w-4 mr-2" />
+                {t("settings.relaunchSetup")}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

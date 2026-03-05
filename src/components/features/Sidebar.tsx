@@ -3,7 +3,7 @@ import { TaskList, ModelWarning, SidebarToggle, AddFilesButton } from "@/compone
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores";
 import { selectMediaFiles } from "@/services/tauri";
-import { useNotificationStore } from "@/services/notifications";
+import { useNotificationSettingsStore } from "@/services/notifications";
 import { useModelValidation, useResizable, useI18n } from "@/hooks";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -40,7 +40,7 @@ export function Sidebar({ onFilesSelected }: SidebarProps) {
 
   const handleAddFiles = useCallback(async () => {
     if (!validateModelSelection()) {
-      useNotificationStore.getState().addNotification({
+      useNotificationSettingsStore.getState().addNotification({
         title: t("sidebar.noModelTitle"),
         message: t("sidebar.noModelMessage"),
         type: "warning",

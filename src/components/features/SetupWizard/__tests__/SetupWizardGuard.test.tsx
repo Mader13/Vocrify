@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { SetupWizardGuard } from "./SetupWizard";
+import { SetupWizardGuard } from "../SetupWizard";
 import { useSetupStore } from "@/stores/setupStore";
 
 function resetSetupStoreState() {

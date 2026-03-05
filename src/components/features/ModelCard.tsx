@@ -54,6 +54,7 @@ function useStatusChip() {
 
   return function renderStatusChip(
     isInstalled: boolean,
+    isCancelled: boolean,
     isError: boolean,
     isDownloading: boolean,
     isPendingDeletion: boolean,
@@ -81,6 +82,15 @@ function useStatusChip() {
         <span className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
           <TriangleAlert className="h-3 w-3" />
           {t("models.failed")}
+        </span>
+      );
+    }
+
+    if (isCancelled) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md border border-muted-foreground/30 bg-muted/40 px-2 py-0.5 text-xs text-muted-foreground">
+          <Clock3 className="h-3 w-3" />
+          {t("models.cancelled")}
         </span>
       );
     }
@@ -124,7 +134,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
   ) => {
     const isDownloading = download?.status === "downloading";
     const isCancelled = download?.status === "cancelled";
-    const isError = download?.status === "error" || isCancelled;
+    const isError = download?.status === "error";
     const isInstalled = model.installed;
     const isPendingDeletion = pendingDeletion;
 
@@ -166,7 +176,7 @@ export const ModelCard = React.forwardRef<HTMLDivElement, ModelCardProps>(
               <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="truncate text-sm font-semibold leading-tight sm:text-base">{model.name}</h3>
-                {renderStatusChip(isInstalled, isError, isDownloading, isPendingDeletion)}
+                {renderStatusChip(isInstalled, isCancelled, isError, isDownloading, isPendingDeletion)}
                 <span className="rounded-md border border-border/70 bg-background/80 px-2 py-0.5 text-xs text-muted-foreground">
                   {formatSizeMb(model.sizeMb)}
                 </span>

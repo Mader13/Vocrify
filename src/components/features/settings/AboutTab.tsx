@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, FolderOpen, Heart, Sparkles } from "lucide-react";
+import { ExternalLink, FolderOpen, Heart } from "lucide-react";
 import { Button } from "@/components/ui";
 import { useI18n } from "@/hooks";
 import { logger } from "@/lib/logger";
@@ -84,10 +84,7 @@ export function AboutTab() {
               <span className="text-sm font-semibold">{t("settings.aboutBuiltByTitle")}</span>
             </div>
             <p className="text-sm leading-relaxed text-foreground/90">{t("settings.aboutBuiltByDescription")}</p>
-            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-              <Sparkles className="h-3.5 w-3.5" />
-              {t("settings.aboutBuiltByFootnote")}
-            </p>
+            
           </div>
         </div>
 

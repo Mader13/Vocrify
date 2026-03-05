@@ -1,15 +1,57 @@
-import { Settings, Mic, Database, Archive } from "lucide-react";
+import { useState } from "react";
+import { Settings, Mic, Database, Archive, Power, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUIStore } from "@/stores";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { useI18n } from "@/hooks";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { hasActiveWorkNow, quitApplication } from "@/services/tauri";
+import { logger } from "@/lib/logger";
 
 export function Header() {
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const currentView = useUIStore((s) => s.currentView);
   const setCurrentView = useUIStore((s) => s.setCurrentView);
   const { t } = useI18n();
+  const [isExitDialogOpen, setIsExitDialogOpen] = useState(false);
+  const [hasActiveTranscriptions, setHasActiveTranscriptions] = useState(false);
+  const [isCheckingActiveWork, setIsCheckingActiveWork] = useState(false);
+  const [isQuitting, setIsQuitting] = useState(false);
+
+  async function handleOpenExitDialog() {
+    setIsCheckingActiveWork(true);
+    const activeWorkResult = await hasActiveWorkNow();
+    setHasActiveTranscriptions(Boolean(activeWorkResult.data));
+    if (!activeWorkResult.success) {
+      logger.error("Failed to check active transcriptions before app quit", {
+        error: activeWorkResult.error,
+      });
+    }
+    setIsCheckingActiveWork(false);
+    setIsExitDialogOpen(true);
+  }
+
+  async function handleConfirmQuit() {
+    setIsQuitting(true);
+    const result = await quitApplication();
+    if (!result.success) {
+      logger.error("Failed to quit application from header", {
+        error: result.error,
+      });
+      setIsQuitting(false);
+      setIsExitDialogOpen(false);
+    }
+  }
 
   const tabs = [
     { id: "transcription", label: t("header.transcription"), icon: Mic },
@@ -27,7 +69,7 @@ export function Header() {
         className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex h-14 items-center justify-between rounded-full border border-border/50 bg-background/60 px-6 backdrop-blur-xl shadow-2xl w-[calc(100%-2rem)] max-w-5xl"
       >
         <div className="flex items-center gap-6">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent drop-shadow-sm">Vocrify</h1>
+          <h1 className="text-xl font-bold bg-linear-to-r from-primary to-primary/70 bg-clip-text text-transparent drop-shadow-sm">Vocrify</h1>
 
           <nav className="flex items-center gap-2">
             {tabs.map((tab) => {
@@ -59,6 +101,8 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2">
+          
+
           <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
             <Button
               variant="ghost"
@@ -71,8 +115,54 @@ export function Header() {
               <Settings className="h-5 w-5" />
             </Button>
           </motion.div>
+
+          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+              onClick={handleOpenExitDialog}
+              title={t("header.quitApp")}
+              aria-label={t("header.quitApp")}
+              disabled={isCheckingActiveWork || isQuitting}
+            >
+              {isCheckingActiveWork ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Power className="h-5 w-5" />
+              )}
+            </Button>
+          </motion.div>
         </div>
       </motion.header>
+
+      <AlertDialog open={isExitDialogOpen} onOpenChange={setIsExitDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("header.quitConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("header.quitConfirmDescription")}
+            </AlertDialogDescription>
+            {hasActiveTranscriptions ? (
+              <AlertDialogDescription className="text-destructive font-medium pt-2">
+                {t("header.quitActiveTranscriptionsWarning")}
+              </AlertDialogDescription>
+            ) : null}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmQuit}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isQuitting}
+            >
+              {t("header.quitConfirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

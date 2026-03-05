@@ -10,7 +10,7 @@ vi.mock("@/services/tauri", async (importOriginal) => {
   };
 });
 
-import { SetupWizard } from "./SetupWizard";
+import { SetupWizard } from "../SetupWizard";
 import { useSetupStore } from "@/stores/setupStore";
 
 function setHappyPathState() {

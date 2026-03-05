@@ -4,6 +4,7 @@ import { Rocket, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ProgressBar } from "./ProgressBar";
 import { LanguageStep, LanguageStepFooter } from "./steps/LanguageStep";
+import { StorageStep, StorageStepFooter } from "./steps/StorageStep";
 import { FFmpegStep, FFmpegStepFooter } from "./steps/FFmpegStep";
 import { DeviceStep, DeviceStepFooter } from "./steps/DeviceStep";
 import { ModelStep, ModelStepFooter } from "./steps/ModelStep";
@@ -11,12 +12,13 @@ import { SummaryStep, SummaryStepFooter } from "./steps/SummaryStep";
 import { useSetupStore } from "@/stores/setupStore";
 import { useI18n } from "@/hooks";
 import { cn } from "@/lib/utils";
+import type { I18nKey } from "@/i18n";
 import type { SetupStep } from "@/types/setup";
 
 /**
  * Step order for navigation
  */
-const STEPS: SetupStep[] = ["language", "ffmpeg", "device", "model", "summary"];
+const STEPS: SetupStep[] = ["language", "storage", "ffmpeg", "device", "model", "summary"];
 
 /**
  * Props for SetupWizard component
@@ -61,14 +63,17 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
     }
   }, [ffmpegCheck, modelCheck, deviceCheck, checkAll, fetchDevices]);
 
-  const stepNames = useMemo(() => [
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    t("settings.language" as any),
-    t("setup.ffmpeg"),
-    t("setup.devices"),
-    t("setup.modelsStep"),
-    t("setup.start"),
-  ], [t]);
+  const stepNames = useMemo(() => {
+    const stepNameKeys: readonly I18nKey[] = [
+      "settings.language",
+      "setup.storage",
+      "setup.ffmpeg",
+      "setup.devices",
+      "setup.modelsStep",
+      "setup.start",
+    ];
+    return stepNameKeys.map((key) => t(key));
+  }, [t]);
 
 
   // Get current step index
@@ -109,6 +114,8 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
     switch (currentStep) {
       case "language":
         return <LanguageStep />;
+      case "storage":
+        return <StorageStep />;
       case "ffmpeg":
         return <FFmpegStep />;
       case "device":
@@ -128,6 +135,13 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       case "language":
         return (
           <LanguageStepFooter
+            onNext={handleNext}
+          />
+        );
+      case "storage":
+        return (
+          <StorageStepFooter
+            onBack={handleBack}
             onNext={handleNext}
           />
         );
@@ -234,7 +248,7 @@ export function SetupWizard({ onComplete, onSkip, className }: SetupWizardProps)
       <div className="px-8 py-5 border-t bg-card/50 backdrop-blur-sm">
         {renderStepFooter()}
         {error && (
-          <motion.p 
+          <motion.p
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             className="mt-4 text-sm text-destructive font-medium bg-destructive/10 p-3 rounded-lg border border-destructive/20"

@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CircleDashed,
   ChevronDown,
   ChevronUp,
   Clock3,
   FileText,
+  HardDrive,
   Languages,
   LocateFixed,
   Pencil,
@@ -132,7 +134,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
         }
         return width >= splitThreshold + LAYOUT_MODE_HYSTERESIS_PX
           ? "split"
-          : getCompletedViewLayoutMode(width, options);
+          : getCompletedViewLayoutMode(width, undefined, options);
       });
     };
 
@@ -167,8 +169,20 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const hasSpeakerData =
     sanitizedSpeakerSegments.length > 0 || (mappedResult?.speakerTurns && mappedResult.speakerTurns.length > 0);
 
+  const mediaSourcePath = task.managedCopyPath ?? (!task.archived
+    ? task.filePath
+    : task.archiveMode === "keep_all"
+      ? task.filePath
+      : task.archiveMode === "delete_video"
+        ? task.audioPath
+        : undefined);
+
+  const hasMediaSource = Boolean(mediaSourcePath);
+
+  const canUseSpeakerWaveform = hasSpeakerData && hasMediaSource;
+
   const waveformMode: WaveformColorMode =
-    displayMode === "speakers" && !hasSpeakerData ? "clean" : displayMode;
+    displayMode === "speakers" && canUseSpeakerWaveform ? "speakers" : "clean";
 
   const displaySegments = useMemo(() => {
     if (waveformMode === "clean") {
@@ -225,11 +239,26 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
     return task.options.language.toUpperCase();
   }, [task.options.language, task.result?.language]);
 
+  const managedCopyLabel = useMemo(() => {
+    if (task.managedCopyStatus === "done" && task.managedCopyPath) {
+      return t("completed.managedCopyReady");
+    }
+    if (task.managedCopyStatus === "pending") {
+      return t("completed.managedCopyPending");
+    }
+    if (task.managedCopyStatus === "failed") {
+      return t("completed.managedCopyFailed");
+    }
+    return t("completed.managedCopyLegacy");
+  }, [task.managedCopyPath, task.managedCopyStatus, t]);
+
+  const managedCopyIcon = task.managedCopyStatus === "pending" ? CircleDashed : HardDrive;
+
   useEffect(() => {
-    if (displayMode === "speakers" && !hasSpeakerData) {
+    if (displayMode === "speakers" && !canUseSpeakerWaveform) {
       setDisplayMode("clean");
     }
-  }, [displayMode, hasSpeakerData, setDisplayMode]);
+  }, [displayMode, canUseSpeakerWaveform, setDisplayMode]);
 
   const handleSegmentClick = useCallback((index: number, startTime: number) => {
     setSelectedSegmentIndex(index);
@@ -347,14 +376,13 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
   const actionButtonClass =
     "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 px-2.5 text-xs font-medium text-foreground transition-colors motion-safe:duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:px-3";
-  const hasVideoSource = task.filePath ? isVideoFile(task.filePath) : false;
-  const canRenderVideoElement = !task.archived
-    ? Boolean(task.filePath)
-    : task.archiveMode === "keep_all" && Boolean(task.filePath);
+  const hasVideoSource = mediaSourcePath ? isVideoFile(mediaSourcePath) : false;
+  const canRenderVideoElement = Boolean(mediaSourcePath) && hasVideoSource;
   const hasVisibleVideoSource = hasVideoSource && canRenderVideoElement;
   const effectiveViewMode = hasVisibleVideoSource ? viewMode : "transcript-focus";
   const isVideoVisible = effectiveViewMode !== "transcript-focus";
-  const showMediaColumn = effectiveViewMode === "balanced" && (layoutMode === "stacked" || layoutMode === "split");
+  const showMediaDock = hasMediaSource;
+  const showMediaColumn = showMediaDock && effectiveViewMode === "balanced" && (layoutMode === "stacked" || layoutMode === "split");
   const shouldShowWaveformControls = !isVideoVisible || !canRenderVideoElement;
 
   const handleConfirmDelete = useCallback(() => {
@@ -422,7 +450,7 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                         }
                       }}
                       className={cn(
-                        "h-auto min-h-[1.75rem] w-full border-0 border-b border-border/60 bg-transparent px-0 py-0 text-[15px] font-semibold leading-tight tracking-tight text-foreground",
+                        "h-auto min-h-7 w-full border-0 border-b border-border/60 bg-transparent px-0 py-0 text-[15px] font-semibold leading-tight tracking-tight text-foreground",
                         "rounded-none align-top transition-[border-color,color,box-shadow] motion-safe:duration-200",
                         "focus:border-foreground focus:outline-none focus:ring-0 sm:text-lg",
                       )}
@@ -485,10 +513,11 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
                     <MetaPill icon={UserRound} label={t("completed.speakers")} value={String(speakerCount)} />
                   )}
                   <MetaPill icon={Languages} label={t("completed.language")} value={languageLabel} />
+                  <MetaPill icon={managedCopyIcon} label={t("completed.mediaSource")} value={managedCopyLabel} />
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {hasSpeakerData && (
+                  {canUseSpeakerWaveform && (
                     <div className="flex items-center gap-1 rounded-full border border-border/70 bg-background/60 px-1.5 py-1">
                       {(["clean", "speakers"] as const).map((mode) => (
                         <button
@@ -693,26 +722,28 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
         </div>
       ) : (
         <>
-          <Card className="border border-border/60 bg-card/40 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_12px_48px_rgba(0,0,0,0.4)]">
-            <CardHeader className="shrink-0 border-b border-border/10 px-3 py-2.5 sm:px-5 sm:py-3">
-              <CardTitle className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80">
-                {t("completed.mediaDock")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-2.5 sm:p-4 lg:p-5">
-              <PlayerErrorBoundary>
-                <VideoPlayer
-                  ref={videoRef}
-                  task={task}
-                  colorMode={waveformMode}
-                  onTimeUpdate={handlePlayerTimeUpdate}
-                  isVideoVisible={false}
-                  showControls={shouldShowWaveformControls}
-                  className="w-full"
-                />
-              </PlayerErrorBoundary>
-            </CardContent>
-          </Card>
+          {showMediaDock && (
+            <Card className="border border-border/60 bg-card/40 backdrop-blur-md shadow-[0_8px_32px_rgba(0,0,0,0.12)] dark:shadow-[0_12px_48px_rgba(0,0,0,0.4)]">
+              <CardHeader className="shrink-0 border-b border-border/10 px-3 py-2.5 sm:px-5 sm:py-3">
+                <CardTitle className="text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground/80">
+                  {t("completed.mediaDock")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-2.5 sm:p-4 lg:p-5">
+                <PlayerErrorBoundary>
+                  <VideoPlayer
+                    ref={videoRef}
+                    task={task}
+                    colorMode={waveformMode}
+                    onTimeUpdate={handlePlayerTimeUpdate}
+                    isVideoVisible={false}
+                    showControls={shouldShowWaveformControls}
+                    className="w-full"
+                  />
+                </PlayerErrorBoundary>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="flex min-h-0 flex-col border-transparent bg-transparent shadow-none">
             <CardHeader className="shrink-0 border-b border-border/30 px-3 py-3 sm:px-5 sm:py-4">

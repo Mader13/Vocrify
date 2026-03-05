@@ -16,6 +16,11 @@ import type {
 } from "@/types";
 import {
   onTranscriptionComplete,
+  copyFile,
+  compressMedia,
+  convertToMp3,
+  getFileSize,
+  getFFmpegStatus,
   loadModelRust,
   transcribeRust,
   initTranscriptionManager as initTranscriptionManagerCommand,
@@ -24,8 +29,146 @@ import type { RustTranscriptionOptions } from "./tauri/transcription-commands";
 import { subscribeToTranscriptionTransportEvents } from "./tauri/events";
 import { logger } from "@/lib/logger";
 import { normalizeNumSpeakers } from "@/lib/speaker-utils";
+import { getManagedCopyStorageDirectory } from "@/services/storage";
+import { useTasks } from "@/stores";
 
 let loadedRustModel: string | null = null;
+const managedCopyInFlight = new Set<string>();
+
+function getFileExtension(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext ?? "";
+}
+
+function isAudioExtension(ext: string): boolean {
+  return ["mp3", "wav", "m4a", "flac", "ogg", "aac"].includes(ext);
+}
+
+async function processManagedCopy(taskId: string): Promise<void> {
+  if (managedCopyInFlight.has(taskId)) {
+    return;
+  }
+
+  const state = useTasks.getState();
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task?.filePath) {
+    return;
+  }
+
+  if (!state.settings.managedCopyEnabled) {
+    return;
+  }
+
+  if (state.settings.managedCopyLifecycle !== "on_complete") {
+    return;
+  }
+
+  if (task.managedCopyStatus === "done" && task.managedCopyPath) {
+    return;
+  }
+
+  managedCopyInFlight.add(taskId);
+
+  const setManagedCopyTaskState = (
+    patch: Partial<Pick<typeof task, "managedCopyPath" | "managedCopySize" | "managedCopyStatus" | "managedCopyError" | "managedCopyCreatedAt">>,
+  ) => {
+    const currentTask = useTasks.getState().tasks.find((item) => item.id === taskId);
+    if (!currentTask) {
+      return;
+    }
+
+    useTasks.getState().upsertTask({
+      ...currentTask,
+      ...patch,
+    });
+  };
+
+  try {
+    setManagedCopyTaskState({
+      managedCopyStatus: "pending",
+      managedCopyError: undefined,
+    });
+
+    const directoryResult = await getManagedCopyStorageDirectory();
+    if (!directoryResult.success || !directoryResult.data) {
+      throw new Error(directoryResult.error || "Failed to resolve storage directory");
+    }
+
+    const compression = state.settings.managedCopyCompression;
+    const sourcePath = task.filePath;
+    const sourceExt = getFileExtension(sourcePath);
+    const isAudio = isAudioExtension(sourceExt);
+
+    let targetPath = "";
+
+    const needsFfmpeg = compression !== "none";
+    if (needsFfmpeg) {
+      const ffmpegStatusResult = await getFFmpegStatus();
+      if (!ffmpegStatusResult.success || ffmpegStatusResult.data?.tag !== "Installed") {
+        throw new Error("FFmpeg is required for managed media compression but is not installed");
+      }
+    }
+
+    if (isAudio && compression !== "none") {
+      targetPath = `${directoryResult.data}/${task.id}.mp3`;
+      const convertResult = await convertToMp3(sourcePath, targetPath);
+      if (!convertResult.success || !convertResult.data) {
+        throw new Error(convertResult.error || "Failed to convert managed copy to mp3");
+      }
+      targetPath = convertResult.data;
+    } else {
+      const extension = sourceExt || "bin";
+      targetPath = `${directoryResult.data}/${task.id}.${extension}`;
+
+      if (compression === "none") {
+        const copyResult = await copyFile(sourcePath, targetPath);
+        if (!copyResult.success || !copyResult.data) {
+          throw new Error(copyResult.error || "Failed to copy managed media");
+        }
+        targetPath = copyResult.data;
+      } else {
+        const compressResult = await compressMedia(sourcePath, targetPath, compression);
+        if (!compressResult.success || !compressResult.data) {
+          throw new Error(compressResult.error || "Failed to compress managed media");
+        }
+        targetPath = compressResult.data;
+      }
+    }
+
+    const fileSizeResult = await getFileSize(targetPath);
+    const managedCopySize = fileSizeResult.success && typeof fileSizeResult.data === "number"
+      ? fileSizeResult.data
+      : undefined;
+
+    setManagedCopyTaskState({
+      managedCopyPath: targetPath,
+      managedCopySize,
+      managedCopyStatus: "done",
+      managedCopyError: undefined,
+      managedCopyCreatedAt: new Date(),
+    });
+
+    logger.transcriptionInfo("Managed copy generated", {
+      taskId,
+      managedCopyPath: targetPath,
+      managedCopySize,
+      compression,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setManagedCopyTaskState({
+      managedCopyStatus: "failed",
+      managedCopyError: message,
+    });
+
+    logger.transcriptionError("Managed copy generation failed", {
+      taskId,
+      error: message,
+    });
+  } finally {
+    managedCopyInFlight.delete(taskId);
+  }
+}
 
 type UpdateTaskStatus = (
   taskId: string,
@@ -55,6 +198,7 @@ function completeTask(
 ): void {
   logCompletion(payload.taskId, payload.result);
   updateTaskStatus(payload.taskId, "completed", payload.result);
+  void processManagedCopy(payload.taskId);
 }
 
 export async function subscribeToTranscriptionCompletion(
@@ -125,13 +269,6 @@ export async function subscribeToTranscriptionRuntime(
     unlistenTransport();
     unlistenCompletion();
   };
-}
-
-/**
- * Get the engine name for display purposes
- */
-export function getEngineName(_model: string, _preference: EnginePreference): string {
-  return "transcribe-rs";
 }
 
 /**

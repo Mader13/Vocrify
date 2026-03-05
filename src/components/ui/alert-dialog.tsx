@@ -9,11 +9,19 @@ interface AlertDialogProps {
   children: React.ReactNode;
 }
 
+interface AlertDialogContextValue {
+  onOpenChange: (open: boolean) => void;
+}
+
+const AlertDialogContext = React.createContext<AlertDialogContextValue | null>(null);
+
 const AlertDialog = ({ open, onOpenChange, children }: AlertDialogProps) => {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      {children}
-    </Dialog>
+    <AlertDialogContext.Provider value={{ onOpenChange }}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        {children}
+      </Dialog>
+    </AlertDialogContext.Provider>
   );
 };
 
@@ -103,14 +111,27 @@ AlertDialogAction.displayName = "AlertDialogAction";
 const AlertDialogCancel = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement>
->(({ className, ...props }, ref) => (
-  <Button
-    ref={ref}
-    variant="outline"
-    className={cn(className)}
-    {...props}
-  />
-));
+>(({ className, onClick, ...props }, ref) => {
+  const context = React.useContext(AlertDialogContext);
+
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    onClick?.(event);
+
+    if (!event.defaultPrevented) {
+      context?.onOpenChange(false);
+    }
+  };
+
+  return (
+    <Button
+      ref={ref}
+      variant="outline"
+      className={cn(className)}
+      onClick={handleClick}
+      {...props}
+    />
+  );
+});
 AlertDialogCancel.displayName = "AlertDialogCancel";
 
 export {

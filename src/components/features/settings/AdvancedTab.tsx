@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Loader2 } from "lucide-react";
 
-import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui";
+import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Switch } from "@/components/ui";
+import { Select } from "@/components/ui";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,12 +16,20 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { useI18n } from "@/hooks";
 import { logger } from "@/lib/logger";
+import {
+  getManagedCopyStorageDirectory,
+  openManagedCopyStorageDirectory,
+  setManagedCopyStorageDirectory,
+} from "@/services/storage";
 import { clearCache, getModelsDir, onModelsDirMoveProgress, openModelsFolder, selectOutputDirectory, setModelsDir } from "@/services/tauri";
 import { useTasks } from "@/stores";
 import { useModelsStore } from "@/stores/modelsStore";
+import type { ArchiveCompression, CloseBehavior } from "@/types";
 
 export function AdvancedTab() {
   const resetSettings = useTasks((s) => s.resetSettings);
+  const settings = useTasks((s) => s.settings);
+  const updateSettings = useTasks((s) => s.updateSettings);
   const loadModels = useModelsStore((s) => s.loadModels);
   const loadDiskUsage = useModelsStore((s) => s.loadDiskUsage);
 
@@ -37,6 +46,12 @@ export function AdvancedTab() {
   const [modelsMoveCounts, setModelsMoveCounts] = React.useState<{ moved: number; total: number }>({ moved: 0, total: 0 });
   const [isModelsDirectoryLoading, setIsModelsDirectoryLoading] = React.useState(true);
   const [isModelsDirectoryUpdating, setIsModelsDirectoryUpdating] = React.useState(false);
+  const [transcriptionStorageDirectory, setTranscriptionStorageDirectory] = React.useState("");
+  const [transcriptionStorageError, setTranscriptionStorageError] = React.useState<string | null>(null);
+  const [transcriptionStorageNotice, setTranscriptionStorageNotice] = React.useState<string | null>(null);
+  const [isTranscriptionStorageLoading, setIsTranscriptionStorageLoading] = React.useState(true);
+  const [isTranscriptionStorageUpdating, setIsTranscriptionStorageUpdating] = React.useState(false);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = React.useState(false);
 
   const loadModelsDirectory = React.useCallback(async () => {
     setIsModelsDirectoryLoading(true);
@@ -56,6 +71,26 @@ export function AdvancedTab() {
   React.useEffect(() => {
     void loadModelsDirectory();
   }, [loadModelsDirectory]);
+
+  const loadTranscriptionStorageDirectory = React.useCallback(async () => {
+    setIsTranscriptionStorageLoading(true);
+    setTranscriptionStorageError(null);
+
+    const result = await getManagedCopyStorageDirectory();
+    if (result.success && result.data) {
+      setTranscriptionStorageDirectory(result.data);
+      updateSettings({ outputDirectory: result.data, managedCopyDirectory: result.data });
+    } else {
+      logger.error("Failed to load transcription storage directory", { error: result.error });
+      setTranscriptionStorageError(t("settings.transcriptionStorageLoadError"));
+    }
+
+    setIsTranscriptionStorageLoading(false);
+  }, [t, updateSettings]);
+
+  React.useEffect(() => {
+    void loadTranscriptionStorageDirectory();
+  }, [loadTranscriptionStorageDirectory]);
 
   React.useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -153,6 +188,59 @@ export function AdvancedTab() {
     }
   };
 
+  const handleSelectTranscriptionStorageDirectory = async () => {
+    setTranscriptionStorageError(null);
+    setTranscriptionStorageNotice(null);
+
+    const selectedResult = await selectOutputDirectory();
+    if (!selectedResult.success) {
+      logger.error("Failed to open transcription storage directory picker", { error: selectedResult.error });
+      setTranscriptionStorageError(t("settings.transcriptionStorageSetError"));
+      return;
+    }
+
+    const selectedDirectory = selectedResult.data;
+    if (!selectedDirectory) {
+      return;
+    }
+
+    const normalizedCurrent = transcriptionStorageDirectory.trim().toLowerCase();
+    const normalizedSelected = selectedDirectory.trim().toLowerCase();
+    if (normalizedCurrent && normalizedCurrent === normalizedSelected) {
+      return;
+    }
+
+    setIsTranscriptionStorageUpdating(true);
+
+    try {
+      const updateResult = await setManagedCopyStorageDirectory(selectedDirectory);
+      if (!updateResult.success || !updateResult.data) {
+        logger.error("Failed to set transcription storage directory", { error: updateResult.error });
+        setTranscriptionStorageError(updateResult.error || t("settings.transcriptionStorageSetError"));
+        return;
+      }
+
+      setTranscriptionStorageDirectory(updateResult.data);
+      updateSettings({ outputDirectory: updateResult.data, managedCopyDirectory: updateResult.data });
+      setTranscriptionStorageNotice(t("settings.transcriptionStorageUpdated"));
+    } catch (error) {
+      logger.error("Unexpected error while updating transcription storage directory", { error: String(error) });
+      setTranscriptionStorageError(t("settings.transcriptionStorageSetError"));
+    } finally {
+      setIsTranscriptionStorageUpdating(false);
+    }
+  };
+
+  const handleOpenTranscriptionStorageDirectory = async () => {
+    setTranscriptionStorageError(null);
+
+    const result = await openManagedCopyStorageDirectory();
+    if (!result.success) {
+      logger.error("Failed to open transcription storage directory", { error: result.error });
+      setTranscriptionStorageError(t("settings.transcriptionStorageOpenError"));
+    }
+  };
+
   const handleClearCache = async () => {
     const result = await clearCache();
     if (result.success) {
@@ -160,6 +248,27 @@ export function AdvancedTab() {
     } else {
       logger.error("Failed to clear cache", { error: result.error });
     }
+  };
+
+  const handleOpenResetConfirm = () => {
+    setIsResetConfirmOpen(true);
+  };
+
+  const handleConfirmResetSettings = () => {
+    resetSettings();
+    setIsResetConfirmOpen(false);
+  };
+
+  const handleCloseBehaviorChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    updateSettings({ closeBehavior: event.target.value as CloseBehavior });
+  };
+
+  const handleManagedCopyEnabledChange = (checked: boolean) => {
+    updateSettings({ managedCopyEnabled: checked });
+  };
+
+  const handleManagedCopyCompressionChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    updateSettings({ managedCopyCompression: event.target.value as ArchiveCompression });
   };
 
   return (
@@ -170,6 +279,28 @@ export function AdvancedTab() {
       </div>
 
       <div className="space-y-4">
+        <div className="flex flex-col gap-3 p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-border/50 hover:border-border transition-colors">
+          <div>
+            <h3 className="text-sm font-medium">{t("settings.closeBehaviorTitle")}</h3>
+            <p className="text-xs text-muted-foreground mt-1">{t("settings.closeBehaviorDescription")}</p>
+          </div>
+
+          <div className="space-y-2 max-w-xs">
+            <label htmlFor="close-behavior" className="text-xs font-medium text-muted-foreground">
+              {t("settings.closeBehaviorLabel")}
+            </label>
+            <Select
+              id="close-behavior"
+              value={settings.closeBehavior}
+              onChange={handleCloseBehaviorChange}
+              className="bg-background/80 dark:bg-background/50 backdrop-blur-sm border-border/50 dark:border-white/10 hover:border-border dark:hover:border-white/20 transition-colors"
+            >
+              <option value="hide_to_tray">{t("settings.closeBehaviorHideToTray")}</option>
+              <option value="exit">{t("settings.closeBehaviorExit")}</option>
+            </Select>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-4 p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-border/50 hover:border-border transition-colors">
           <div>
             <h3 className="text-sm font-medium">{t("settings.modelsDirectoryTitle")}</h3>
@@ -204,6 +335,74 @@ export function AdvancedTab() {
           </div>
         </div>
 
+        <div className="flex flex-col gap-4 p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-border/50 hover:border-border transition-colors">
+          <div>
+            <h3 className="text-sm font-medium">{t("settings.transcriptionStorageTitle")}</h3>
+            <p className="text-xs text-muted-foreground mt-1">{t("settings.transcriptionStorageDescription")}</p>
+            <p className="mt-3 text-xs font-mono break-all text-foreground/90">
+              {isTranscriptionStorageLoading ? t("common.loading") : transcriptionStorageDirectory || "-"}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-2">{t("settings.transcriptionStorageHint")}</p>
+            {transcriptionStorageError && (
+              <p className="text-[11px] mt-2 text-destructive">{transcriptionStorageError}</p>
+            )}
+            {transcriptionStorageNotice && (
+              <p className="text-[11px] mt-2 text-emerald-600 dark:text-emerald-400">{transcriptionStorageNotice}</p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border border-border/40 bg-background/40 px-3 py-2.5">
+            <div className="pr-4">
+              <p className="text-sm font-medium">{t("settings.managedCopyEnabledTitle")}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{t("settings.managedCopyEnabledDescription")}</p>
+            </div>
+            <Switch
+              checked={settings.managedCopyEnabled}
+              onCheckedChange={handleManagedCopyEnabledChange}
+            />
+          </div>
+
+          <div className="space-y-2 max-w-xs">
+            <label htmlFor="managed-copy-compression" className="text-xs font-medium text-muted-foreground">
+              {t("settings.managedCopyCompressionLabel")}
+            </label>
+            <Select
+              id="managed-copy-compression"
+              value={settings.managedCopyCompression}
+              onChange={handleManagedCopyCompressionChange}
+              disabled={!settings.managedCopyEnabled}
+              className="bg-background/80 dark:bg-background/50 backdrop-blur-sm border-border/50 dark:border-white/10 hover:border-border dark:hover:border-white/20 transition-colors"
+            >
+              <option value="none">{t("settings.archiveNoCompression")}</option>
+              <option value="light">{t("settings.archiveLight")}</option>
+              <option value="medium">{t("settings.archiveMedium")}</option>
+              <option value="heavy">{t("settings.archiveHeavy")}</option>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">{t("settings.managedCopyCompressionHint")}</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleSelectTranscriptionStorageDirectory}
+              disabled={isTranscriptionStorageLoading || isTranscriptionStorageUpdating}
+              className="bg-background/80 dark:bg-background/50 hover:bg-background border border-border/50 dark:border-white/10 hover:border-border dark:hover:border-white/20 text-foreground"
+            >
+              {t("settings.transcriptionStorageSelectAction")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleOpenTranscriptionStorageDirectory}
+              disabled={isTranscriptionStorageLoading || isTranscriptionStorageUpdating}
+            >
+              {t("settings.transcriptionStorageOpenAction")}
+            </Button>
+          </div>
+          {isTranscriptionStorageUpdating && (
+            <p className="text-[11px] text-muted-foreground">{t("common.loading")}</p>
+          )}
+        </div>
+
         <div className="flex items-center justify-between p-4 rounded-2xl bg-black/5 dark:bg-white/5 border border-border/50 hover:border-border transition-colors">
           <div>
             <h3 className="text-sm font-medium">{t("settings.clearCacheTitle")}</h3>
@@ -225,7 +424,7 @@ export function AdvancedTab() {
           </div>
           <Button
             variant="destructive"
-            onClick={resetSettings}
+            onClick={handleOpenResetConfirm}
             className="shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:shadow-[0_0_25px_rgba(239,68,68,0.4)]"
           >
             {t("settings.resetAction")}
@@ -263,6 +462,25 @@ export function AdvancedTab() {
             <AlertDialogCancel onClick={handleCancelModelsMove}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmModelsMove}>
               {t("settings.modelsDirectoryMoveConfirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isResetConfirmOpen} onOpenChange={setIsResetConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("settings.resetConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("settings.resetConfirmDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmResetSettings}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t("settings.resetAction")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

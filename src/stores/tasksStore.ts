@@ -8,11 +8,13 @@
  *   import { useArchivedTasks } from "@/stores/archiveStore";
  */
 
+import { useSettingsStore } from "./settingsStore";
+export { useSettingsStore };
+
 export {
   useTasks,
   useTasksByView,
   useArchivedTasks,
-  useSettingsStore,
   useUIStore,
   getTaskStatusById,
   type ViewType,

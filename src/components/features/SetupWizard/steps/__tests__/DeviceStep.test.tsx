@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { DeviceStep } from "./DeviceStep";
+import { DeviceStep } from "../DeviceStep";
 import { useSetupStore } from "@/stores/setupStore";
 
 describe("DeviceStep", () => {

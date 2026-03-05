@@ -8,8 +8,7 @@
  */
 
 import { useTasks } from "./_store";
-import type { AppSettings } from "./_store";
-import type { ArchiveSettings } from "@/types";
+import type { AppSettings, ArchiveSettings } from "@/types";
 
 // ---------------------------------------------------------------------------
 // Re-export the core type so consumers don't need to reach into tasksStore

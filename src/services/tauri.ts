@@ -10,8 +10,8 @@ export { getAvailableDevices, getFFmpegStatus, downloadFFmpeg } from "./tauri/de
 export type { FFmpegStatus, FFmpegProgress, FFmpegStatusEvent } from "./tauri/device-commands";
 export { getFilesMetadata, selectMediaFiles, selectOutputDirectory, selectExportPath, exportTranscription, getModelsDir, getAssetUrl, readFileAsBase64, readFileAsArrayBuffer, generateWaveformPeaks } from "./tauri/dialog-commands";
 export { onProgressUpdate, onTranscriptionComplete, onTranscriptionError, onSegmentUpdate, onModelDownloadProgress, onModelDownloadComplete, onModelDownloadError, onModelDownloadRetrying, onModelDownloadStage, onModelDownloadStageComplete, onModelsDirMoveProgress, onBackendLogs, onDevicesDetected, onFFmpegProgress, onFFmpegStatus } from "./tauri/events";
-export { checkFFmpegStatus, checkModelsStatus, getEnvironmentStatus, checkRuntimeReadiness, isSetupComplete, isSetupCompleteFast, markSetupComplete, resetSetup } from "./tauri/setup-commands";
+export { checkRuntimeEnvironment, checkFFmpegStatus, checkModelsStatus, getEnvironmentStatus, checkRuntimeReadiness, isSetupComplete, isSetupCompleteFast, markSetupComplete, resetSetup } from "./tauri/setup-commands";
 export { getFileSize, deleteFile, copyFile, compressMedia, convertToMp3, getArchiveDir, openArchiveFolder } from "./tauri/archive-commands";
-export { getAppVersion, openAppDirectory } from "./tauri/app-commands";
+export { getAppVersion, openAppDirectory, setCloseBehavior, getCloseBehavior, hasActiveWorkNow, quitApplication } from "./tauri/app-commands";
 export { getPerformanceConfig, updatePerformanceConfig } from "./tauri/performance-commands";
 export type { PerformanceConfig } from "@/types/settings";

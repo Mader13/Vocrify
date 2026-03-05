@@ -115,6 +115,7 @@ export function ModelsManagement(): React.JSX.Element {
   const [isLoading, setIsLoading] = React.useState(true);
   const [layoutMode, setLayoutMode] = React.useState<ModelsPageLayoutMode>("stacked");
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
 
   React.useEffect(() => {
     const init = async () => {
@@ -169,6 +170,17 @@ export function ModelsManagement(): React.JSX.Element {
     () => availableModels.filter((model) => model.modelType === "parakeet"),
     [availableModels],
   );
+  const gigaamModels = React.useMemo(
+    () =>
+      availableModels
+        .filter((model) => model.modelType === "gigaam")
+        .map((model) =>
+          model.name === "gigaam-v3"
+            ? { ...model, description: t("models.gigaamModelNote") }
+            : model,
+        ),
+    [availableModels, t],
+  );
   const diarizationModels = React.useMemo(
     () => availableModels.filter((model) => model.modelType === "diarization"),
     [availableModels],
@@ -177,9 +189,6 @@ export function ModelsManagement(): React.JSX.Element {
     () => diarizationModels.some((model) => model.installed),
     [diarizationModels],
   );
-
-  const { t } = useI18n();
-
   const selectedModelLabel = selectedTranscriptionModel
     ? MODEL_NAMES[selectedTranscriptionModel as keyof typeof MODEL_NAMES] ?? selectedTranscriptionModel
     : t("models.noModelSelected");
@@ -307,6 +316,23 @@ export function ModelsManagement(): React.JSX.Element {
                 onCancelDownload={cancelModelDownload}
                 onDeleteModel={deleteModel}
                 animationOffsetMs={120}
+              />
+
+              <ModelSectionPanel
+                title={t("models.gigaamTitle")}
+                description={t("models.gigaamDesc")}
+                icon={<Waves className="h-4 w-4 text-muted-foreground" />}
+                models={gigaamModels}
+                downloads={downloads}
+                deletingModels={deletingModels}
+                pendingModelDeletions={pendingModelDeletions}
+                selectedModelName={selectedTranscriptionModel}
+                canSelect
+                onSelectModel={setSelectedTranscriptionModel}
+                onDownloadModel={downloadModel}
+                onCancelDownload={cancelModelDownload}
+                onDeleteModel={deleteModel}
+                animationOffsetMs={200}
               />
             </div>
           </TabsContent>

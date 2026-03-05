@@ -17,12 +17,13 @@ const TASK_STATUSES: TaskStatus[] = [
 
 type SerializedTask = Omit<
   TranscriptionTask,
-  "createdAt" | "startedAt" | "completedAt" | "archivedAt"
+  "createdAt" | "startedAt" | "completedAt" | "archivedAt" | "managedCopyCreatedAt"
 > & {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
   archivedAt?: string;
+  managedCopyCreatedAt?: string;
 };
 
 interface RustTaskMetadata {
@@ -68,6 +69,11 @@ export interface StorageInfo {
   directory: string;
   taskCount: number;
   totalSizeBytes: number;
+}
+
+export interface StorageLocation {
+  directory: string;
+  isDefault: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -203,6 +209,9 @@ function normalizeTask(rawTask: unknown): TranscriptionTask | null {
   const startedAt = parseDate(rawTask.startedAt ?? rawTask.started_at);
   const completedAt = parseDate(rawTask.completedAt ?? rawTask.completed_at);
   const archivedAt = parseDate(rawTask.archivedAt ?? rawTask.archived_at);
+  const managedCopyCreatedAt = parseDate(
+    rawTask.managedCopyCreatedAt ?? rawTask.managed_copy_created_at,
+  );
   const archiveMode = normalizeArchiveMode(rawTask.archiveMode ?? rawTask.archive_mode);
   const result =
     rawTask.result === null || rawTask.result === undefined
@@ -243,6 +252,22 @@ function normalizeTask(rawTask: unknown): TranscriptionTask | null {
     archiveMode,
     audioPath: toOptionalString(rawTask.audioPath ?? rawTask.audio_path),
     archiveSize: toOptionalNumber(rawTask.archiveSize ?? rawTask.archive_size),
+    managedCopyPath: toOptionalString(rawTask.managedCopyPath ?? rawTask.managed_copy_path),
+    managedCopySize: toOptionalNumber(rawTask.managedCopySize ?? rawTask.managed_copy_size),
+    managedCopyStatus:
+      rawTask.managedCopyStatus === "pending" ||
+      rawTask.managedCopyStatus === "done" ||
+      rawTask.managedCopyStatus === "failed"
+        ? rawTask.managedCopyStatus
+        : rawTask.managed_copy_status === "pending" ||
+            rawTask.managed_copy_status === "done" ||
+            rawTask.managed_copy_status === "failed"
+          ? rawTask.managed_copy_status
+          : undefined,
+    managedCopyError:
+      toOptionalString(rawTask.managedCopyError) ??
+      toOptionalString(rawTask.managed_copy_error),
+    managedCopyCreatedAt: managedCopyCreatedAt ?? undefined,
     videoDeleted:
       typeof rawTask.videoDeleted === "boolean"
         ? rawTask.videoDeleted
@@ -267,6 +292,7 @@ function serializeTask(task: TranscriptionTask): SerializedTask {
     startedAt: toIsoString(startedAt),
     completedAt: toIsoString(completedAt),
     archivedAt: toIsoString(archivedAt) ?? undefined,
+    managedCopyCreatedAt: toIsoString(task.managedCopyCreatedAt) ?? undefined,
   };
 }
 
@@ -681,4 +707,67 @@ export async function getStorageInfo(): Promise<CommandResult<StorageInfo>> {
       totalSizeBytes,
     },
   };
+}
+
+export async function getManagedCopyStorageDirectory(): Promise<CommandResult<string>> {
+  try {
+    const location = await invoke<unknown>("get_storage_location");
+    if (!isRecord(location)) {
+      return { success: false, error: "Invalid get_storage_location response" };
+    }
+
+    const directory = toStringValue(location.directory);
+    if (!directory) {
+      return { success: false, error: "Storage directory is empty" };
+    }
+
+    return { success: true, data: directory };
+  } catch (error) {
+    logger.warn("Failed to get managed storage directory via get_storage_location, falling back", {
+      error: String(error),
+    });
+
+    try {
+      const fallbackDir = await invoke<string>("get_transcription_dir");
+      if (typeof fallbackDir === "string" && fallbackDir.length > 0) {
+        return { success: true, data: fallbackDir };
+      }
+      return { success: false, error: "Failed to resolve fallback transcription directory" };
+    } catch (fallbackError) {
+      logger.error("Failed to get managed storage directory", {
+        error: String(error),
+        fallbackError: String(fallbackError),
+      });
+      return { success: false, error: String(fallbackError) };
+    }
+  }
+}
+
+export async function setManagedCopyStorageDirectory(directory: string): Promise<CommandResult<string>> {
+  try {
+    const location = await invoke<unknown>("set_storage_location", { directory });
+    if (!isRecord(location)) {
+      return { success: false, error: "Invalid set_storage_location response" };
+    }
+
+    const normalizedDirectory = toStringValue(location.directory);
+    if (!normalizedDirectory) {
+      return { success: false, error: "Storage directory is empty" };
+    }
+
+    return { success: true, data: normalizedDirectory };
+  } catch (error) {
+    logger.error("Failed to set managed storage directory", { directory, error: String(error) });
+    return { success: false, error: String(error) };
+  }
+}
+
+export async function openManagedCopyStorageDirectory(): Promise<CommandResult<void>> {
+  try {
+    await invoke("open_storage_location_command");
+    return { success: true };
+  } catch (error) {
+    logger.error("Failed to open managed storage directory", { error: String(error) });
+    return { success: false, error: String(error) };
+  }
 }

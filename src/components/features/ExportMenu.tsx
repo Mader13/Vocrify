@@ -243,7 +243,7 @@ export function ExportMenu({ task, iconOnly = false }: ExportMenuProps) {
         className={cn(
           "inline-flex items-center justify-center rounded-lg border border-border/70 text-xs font-medium transition-colors duration-150",
           iconOnly ? "h-8 w-8 sm:h-9 sm:w-9" : "h-8 gap-1.5 px-2.5 sm:h-9 sm:px-3",
-          "text-foreground hover:bg-muted/70",
+          "text-foreground hover:bg-primary/10 hover:text-primary",
           isExporting && "opacity-50 cursor-not-allowed",
         )}
       >

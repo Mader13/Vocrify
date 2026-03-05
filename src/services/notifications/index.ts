@@ -10,9 +10,22 @@
 // ---------------------------------------------------------------------------
 export {
   useNotificationSettingsStore,
-  useNotificationStore,
   type NotificationSettingsState,
+  showNotificationWithSettings,
 } from "./notification-settings";
+
+export {
+  dispatchNotification,
+  updateDispatchedNotification,
+  dismissDispatchedNotification,
+  clearDispatchedNotifications,
+  getDispatchedPosition,
+  setDispatchedPosition,
+  setNotificationDispatcher,
+  type NotificationDispatcher,
+  type NotificationInput,
+  type NotificationUpdate,
+} from "./notification-dispatcher";
 
 // ---------------------------------------------------------------------------
 // Emitter (Tauri event → UI toast bridge)

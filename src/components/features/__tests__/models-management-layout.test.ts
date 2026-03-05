@@ -12,6 +12,7 @@ const sampleModels: AvailableModel[] = [
   { name: "whisper-base", modelType: "whisper", description: "Base", sizeMb: 139, installed: true },
   { name: "whisper-small", modelType: "whisper", description: "Small", sizeMb: 466, installed: false },
   { name: "parakeet-tdt-0.6b-v3", modelType: "parakeet", description: "Parakeet", sizeMb: 640, installed: true },
+  { name: "gigaam-v3", modelType: "gigaam", description: "GigaAM", sizeMb: 225, installed: false },
   { name: "sherpa-onnx-diarization", modelType: "diarization", description: "Sherpa", sizeMb: 45, installed: false },
 ];
 
@@ -49,13 +50,15 @@ describe("buildModelsSummary", () => {
   it("calculates installed/total/downloading counts per section", () => {
     const summary = buildModelsSummary(sampleModels, sampleDownloads);
 
-    expect(summary.total).toBe(4);
+    expect(summary.total).toBe(5);
     expect(summary.installed).toBe(2);
     expect(summary.downloading).toBe(1);
     expect(summary.whisper.installed).toBe(1);
     expect(summary.whisper.total).toBe(2);
     expect(summary.parakeet.installed).toBe(1);
     expect(summary.parakeet.total).toBe(1);
+    expect(summary.gigaam.installed).toBe(0);
+    expect(summary.gigaam.total).toBe(1);
     expect(summary.diarization.installed).toBe(0);
     expect(summary.diarization.total).toBe(1);
   });

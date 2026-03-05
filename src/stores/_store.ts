@@ -9,6 +9,7 @@
 import { create } from "zustand";
 import { useMemo } from "react";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { DEFAULT_SETTINGS } from "@/types";
 import type {
   TranscriptionTask,
   TranscriptionOptions,
@@ -18,21 +19,19 @@ import type {
   ProgressStage,
   ProgressMetrics,
   SpeakerTurn,
-  AIModel,
-  DeviceType,
-  Language,
   DiarizationProvider,
   EnginePreference,
   ArchiveMode,
   ArchiveCompression,
   ArchiveSettings,
-  AudioProfile,
-  AppLocale,
+  AppSettings,
+  CloseBehavior,
 } from "@/types";
 import { logger } from "@/lib/logger";
 import { recoverInterruptedTasks } from "@/stores/utils/task-recovery";
 import { canArchiveTask } from "@/stores/utils/archive-eligibility";
 import { isModelPendingDeletion } from "@/stores/utils/model-deletion";
+import { getStoredMediaPathsForDeletion } from "@/stores/utils/task-media-cleanup";
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from "@/i18n";
 
 // ============================================================================
@@ -44,26 +43,7 @@ export type ViewType = "transcription" | "models" | "settings" | "archive";
 /**
  * UI-specific AppSettings extending base types with additional fields
  */
-export interface AppSettings {
-  // Core settings (typed properly)
-  defaultModel: AIModel;
-  defaultDevice: DeviceType;
-  defaultLanguage: Language;
-  enableDiarization: boolean;
-  diarizationProvider: DiarizationProvider;
-  maxConcurrentTasks: number;
-  outputDirectory: string;
-  lastDiarizationProvider: DiarizationProvider;
-  enginePreference: EnginePreference;
-
-  // UI-specific fields
-  autoSave: boolean;
-  exportFormat: string;
-  theme: "light" | "dark" | "system";
-  language: AppLocale;
-  numSpeakers: number;
-  audioProfile: AudioProfile;
-}
+export type { AppSettings } from "@/types";
 
 interface TasksState {
   tasks: TranscriptionTask[];
@@ -122,21 +102,7 @@ const initialState: Pick<TasksState, "tasks" | "view" | "options" | "settings" |
     audioProfile: "standard",
   },
   settings: {
-    autoSave: true,
-    exportFormat: "txt",
-    theme: "system",
-    language: "en",
-    outputDirectory: "",
-    maxConcurrentTasks: 3,
-    enableDiarization: false,
-    defaultModel: "whisper-base",
-    defaultDevice: "auto",
-    defaultLanguage: "auto",
-    diarizationProvider: "none",
-    numSpeakers: 2,
-    lastDiarizationProvider: "none",
-    enginePreference: "auto",
-    audioProfile: "standard",
+    ...DEFAULT_SETTINGS,
   },
   archiveSettings: {
     defaultMode: "delete_video",
@@ -180,22 +146,51 @@ let taskStorageInitialized = false;
 let taskStorageInitializationPromise: Promise<void> | null = null;
 
 function persistTaskSnapshot(task: TranscriptionTask): void {
-  void (async () => {
-    const { saveTranscription } = await import("@/services/storage");
-    const result = await saveTranscription(task);
+  (async () => {
+    try {
+      const { saveTranscription } = await import("@/services/storage");
+      const result = await saveTranscription(task);
 
-    if (!result.success) {
-      logger.warn("Failed to persist task snapshot", {
+      if (!result.success) {
+        logger.warn("Failed to persist task snapshot", {
+          taskId: task.id,
+          error: result.error,
+        });
+      }
+    } catch (error) {
+      logger.error("Unexpected task persistence error", {
         taskId: task.id,
-        error: result.error,
+        error: String(error),
       });
     }
-  })().catch((error) => {
-    logger.error("Unexpected task persistence error", {
-      taskId: task.id,
-      error: String(error),
-    });
-  });
+  })();
+}
+
+type PersistedTasksState = Partial<TasksState> & {
+  settings?: Partial<AppSettings>;
+};
+
+export function migratePersistedTasksState(persistedState: unknown, version: number): PersistedTasksState {
+  if (!persistedState || typeof persistedState !== "object") {
+    return {};
+  }
+
+  const typedPersisted = persistedState as PersistedTasksState;
+  if (version < 2) {
+    return {
+      ...typedPersisted,
+      settings: {
+        ...DEFAULT_SETTINGS,
+        ...(typedPersisted.settings ?? {}),
+        closeBehavior:
+          typedPersisted.settings?.closeBehavior === "exit"
+            ? "exit"
+            : DEFAULT_SETTINGS.closeBehavior,
+      },
+    };
+  }
+
+  return typedPersisted;
 }
 
 // ============================================================================
@@ -209,7 +204,8 @@ export const useTasks = create<TasksState>()(
         if (!state.settings) return;
         const { settings } = state;
         const validEnginePrefs: EnginePreference[] = ["auto", "rust"];
-        const validDevices: DeviceType[] = ["auto", "cpu", "cuda", "mps", "vulkan"];
+        const validDevices = ["auto", "cpu", "cuda", "mps", "vulkan"] as const;
+        const validCloseBehaviors: CloseBehavior[] = ["hide_to_tray", "exit"];
 
         if (settings.enginePreference && !validEnginePrefs.includes(settings.enginePreference)) {
           logger.warn("Invalid enginePreference in localStorage, resetting to default", {
@@ -220,12 +216,21 @@ export const useTasks = create<TasksState>()(
           }));
         }
 
-        if (settings.defaultDevice && !validDevices.includes(settings.defaultDevice)) {
+        if (settings.defaultDevice && !(validDevices as readonly string[]).includes(settings.defaultDevice)) {
           logger.warn("Invalid defaultDevice in localStorage, resetting to default", {
             invalid: settings.defaultDevice
           });
           set((state) => ({
             settings: { ...state.settings, defaultDevice: "auto" }
+          }));
+        }
+
+        if (settings.closeBehavior && !validCloseBehaviors.includes(settings.closeBehavior)) {
+          logger.warn("Invalid closeBehavior in localStorage, resetting to default", {
+            invalid: settings.closeBehavior,
+          });
+          set((state) => ({
+            settings: { ...state.settings, closeBehavior: DEFAULT_SETTINGS.closeBehavior },
           }));
         }
 
@@ -589,19 +594,12 @@ export const useTasks = create<TasksState>()(
 
         resetSettings: () => {
           logger.info("Settings reset to defaults");
-          set(() => ({ settings: initialState.settings }));
+          set(() => ({ settings: { ...DEFAULT_SETTINGS } }));
         },
 
         removeTask: async (taskId) => {
           const task = get().tasks.find((t) => t.id === taskId);
-
-          let fileToDelete: string | undefined;
-
-          if (task?.archiveMode === "keep_all") {
-            fileToDelete = task.filePath;
-          } else if (task?.archiveMode === "delete_video") {
-            fileToDelete = task.audioPath;
-          }
+          const filesToDelete = task ? getStoredMediaPathsForDeletion(task) : [];
 
           const { deleteTranscription } = await import("@/services/storage");
           const deletionResult = await deleteTranscription(taskId);
@@ -617,17 +615,20 @@ export const useTasks = create<TasksState>()(
           logger.info("Task removed", { taskId });
           set((state) => ({ tasks: state.tasks.filter((t) => t.id !== taskId) }));
 
-          if (fileToDelete) {
-            try {
-              const { deleteFile } = await import("@/services/tauri");
-              const result = await deleteFile(fileToDelete);
-              if (result.success) {
-                logger.transcriptionInfo("Archived file deleted", { taskId, filePath: fileToDelete });
-              } else {
-                logger.warn("Failed to delete archived file", { taskId, filePath: fileToDelete, error: result.error });
+          if (filesToDelete.length > 0) {
+            const { deleteFile } = await import("@/services/tauri");
+
+            for (const filePath of filesToDelete) {
+              try {
+                const result = await deleteFile(filePath);
+                if (result.success) {
+                  logger.transcriptionInfo("Stored media file deleted", { taskId, filePath });
+                } else {
+                  logger.warn("Failed to delete stored media file", { taskId, filePath, error: result.error });
+                }
+              } catch (error) {
+                logger.error("Error deleting stored media file", { taskId, filePath, error: String(error) });
               }
-            } catch (error) {
-              logger.error("Error deleting archived file", { taskId, error: String(error) });
             }
           }
         },
@@ -698,13 +699,16 @@ export const useTasks = create<TasksState>()(
             throw new Error(`Task status '${task.status}' cannot be archived`);
           }
 
-          const { convertToMp3, getArchiveDir, getFileSize, copyFile, compressMedia } = await import("@/services/tauri");
+          const { convertToMp3, getArchiveDir, getFileSize, copyFile, compressMedia, deleteFile } = await import("@/services/tauri");
 
           logger.transcriptionInfo("Task archiving with mode", { taskId, mode, fileName: task.fileName });
 
           let audioPath: string | undefined;
           let archiveSize: number | undefined;
           let taskToPersist: TranscriptionTask | null = null;
+          const sourcePath = task.managedCopyPath ?? task.filePath;
+          const sourceWasManagedCopy = Boolean(task.managedCopyPath && sourcePath === task.managedCopyPath);
+          const sourceExt = sourcePath?.split(".").pop()?.toLowerCase();
 
           const readArchiveSize = async (filePath: string): Promise<number> => {
             const sizeResult = await getFileSize(filePath);
@@ -727,22 +731,28 @@ export const useTasks = create<TasksState>()(
 
             switch (mode) {
               case "keep_all": {
-                if (task.filePath && archiveDirResult.success) {
-                  const ext = task.filePath.split(".").pop()?.toLowerCase() || "";
+                if (sourcePath && archiveDirResult.success) {
+                  const ext = sourceExt || "";
                   const compression = compressionOverride ?? get().archiveSettings.compression;
                   const destPath = `${archiveDirResult.data}/${task.id}.${ext}`;
 
                   if (compression === "none") {
-                    const copyResult = await copyFile(task.filePath, destPath);
+                    const copyResult = await copyFile(sourcePath, destPath);
                     if (copyResult.success && copyResult.data) {
                       audioPath = copyResult.data;
-                      logger.transcriptionInfo("keep_all: copied original file to archive", { taskId, audioPath, ext, compression });
+                      logger.transcriptionInfo("keep_all: copied media file to archive", {
+                        taskId,
+                        audioPath,
+                        ext,
+                        compression,
+                        source: sourceWasManagedCopy ? "managed_copy" : "original",
+                      });
                       archiveSize = await readArchiveSize(copyResult.data);
                     } else {
                       logger.warn("keep_all: copy failed", { taskId, error: copyResult.error });
                     }
                   } else {
-                    const compressResult = await compressMedia(task.filePath, destPath, compression);
+                    const compressResult = await compressMedia(sourcePath, destPath, compression);
                     if (compressResult.success && compressResult.data) {
                       audioPath = compressResult.data;
                       logger.transcriptionInfo("keep_all: compressed file to archive", { taskId, audioPath, ext, compression });
@@ -756,13 +766,27 @@ export const useTasks = create<TasksState>()(
               }
 
               case "delete_video": {
-                if (task.filePath && archiveDirResult.success) {
-                  const ext = task.filePath.split(".").pop()?.toLowerCase();
+                if (sourcePath && archiveDirResult.success) {
+                  const ext = sourceExt;
                   const isAudioFile = ext && ["mp3", "wav", "m4a", "flac", "ogg"].includes(ext);
 
-                  if (isAudioFile) {
+                  if (isAudioFile && ext === "mp3") {
                     const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
-                    const convertResult = await convertToMp3(task.filePath, mp3Path);
+                    const copyResult = await copyFile(sourcePath, mp3Path);
+                    if (copyResult.success && copyResult.data) {
+                      audioPath = copyResult.data;
+                      logger.transcriptionInfo("delete_video: copied managed MP3 to archive", {
+                        taskId,
+                        audioPath,
+                        source: sourceWasManagedCopy ? "managed_copy" : "original",
+                      });
+                      archiveSize = await readArchiveSize(copyResult.data);
+                    } else {
+                      logger.warn("delete_video: mp3 copy failed", { taskId, error: copyResult.error });
+                    }
+                  } else if (isAudioFile) {
+                    const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
+                    const convertResult = await convertToMp3(sourcePath, mp3Path);
                     if (convertResult.success && convertResult.data) {
                       audioPath = convertResult.data;
                       logger.transcriptionInfo("delete_video: copied audio to archive", { taskId, audioPath });
@@ -770,7 +794,7 @@ export const useTasks = create<TasksState>()(
                     }
                   } else {
                     const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
-                    const convertResult = await convertToMp3(task.filePath, mp3Path);
+                    const convertResult = await convertToMp3(sourcePath, mp3Path);
                     if (convertResult.success && convertResult.data) {
                       audioPath = convertResult.data;
                       logger.transcriptionInfo("delete_video: converted to MP3", { taskId, audioPath });
@@ -790,6 +814,17 @@ export const useTasks = create<TasksState>()(
               }
             }
 
+            if (sourceWasManagedCopy && audioPath && task.managedCopyPath && task.managedCopyPath !== audioPath) {
+              const deleteManagedCopyResult = await deleteFile(task.managedCopyPath);
+              if (!deleteManagedCopyResult.success) {
+                logger.warn("Archive task: failed to cleanup old managed copy after transfer", {
+                  taskId,
+                  managedCopyPath: task.managedCopyPath,
+                  error: deleteManagedCopyResult.error,
+                });
+              }
+            }
+
             set((state) => ({
               tasks: state.tasks.map((t) => {
                 if (t.id !== taskId) {
@@ -804,6 +839,11 @@ export const useTasks = create<TasksState>()(
                   filePath: mode === "keep_all" && audioPath ? audioPath : undefined,
                   audioPath: mode === "delete_video" ? audioPath : undefined,
                   archiveSize: archiveSize ?? task.fileSize,
+                  managedCopyPath: sourceWasManagedCopy && audioPath ? audioPath : t.managedCopyPath,
+                  managedCopySize:
+                    sourceWasManagedCopy && archiveSize !== undefined ? archiveSize : t.managedCopySize,
+                  managedCopyStatus: sourceWasManagedCopy && audioPath ? "done" : t.managedCopyStatus,
+                  managedCopyError: sourceWasManagedCopy && audioPath ? undefined : t.managedCopyError,
                 };
 
                 taskToPersist = updatedTask;
@@ -910,10 +950,8 @@ export const useTasks = create<TasksState>()(
     },
     {
       name: "vocrify-tasks",
-      version: 1,
-      migrate: (persistedState: unknown, _version: number) => {
-        return persistedState as TasksState;
-      },
+      version: 2,
+      migrate: migratePersistedTasksState,
       merge: (persistedState: unknown, currentState: TasksState): TasksState => {
         const typedPersisted = persistedState as Partial<TasksState> | undefined;
 
@@ -959,9 +997,6 @@ export function useArchivedTasks(): TranscriptionTask[] {
   const tasks = useTasks((state) => state.tasks);
   return useMemo(() => getArchivedTasks(tasks), [tasks]);
 }
-
-/** @deprecated Use `useTasks` directly - this alias exists for backward compat */
-export const useSettingsStore = useTasks;
 
 // ============================================================================
 // UI Store

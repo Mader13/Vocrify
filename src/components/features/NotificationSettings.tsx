@@ -1,6 +1,6 @@
 import { Bell, Volume2, Monitor, Download, FileText, AlertCircle, Info, Play } from "lucide-react";
 import { Switch, Select, Slider, Button } from "@/components/ui";
-import { useNotificationStore } from "@/services/notifications";
+import { useNotificationSettingsStore } from "@/services/notifications";
 import {
   NOTIFICATION_POSITION_LABELS,
   NOTIFICATION_CATEGORY_LABELS,
@@ -12,15 +12,16 @@ import {
 import { cn } from "@/lib/utils";
 
 export function NotificationSettings() {
-  const { settings, updateSettings, addNotification } = useNotificationStore();
+  const { settings, updateSettings, addNotification } = useNotificationSettingsStore();
 
   const handlePositionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     updateSettings({ position: e.target.value as NotificationPosition });
   };
 
   const handleDurationChange = (value: number) => {
-    // Convert 0-100 slider to: 0 = infinite, 1-100 = 2-10 seconds
-    const duration: NotificationDuration = value === 0 ? "infinite" : 2 + (value / 100) * 8;
+    // Convert 0-100 slider to: 0 = infinite, 1-100 = 2000-10000ms
+    const duration: NotificationDuration =
+      value === 0 ? "infinite" : Math.round(2000 + (value / 100) * 8000);
     updateSettings({ duration });
   };
 
@@ -43,8 +44,14 @@ export function NotificationSettings() {
   };
 
   // Convert duration back to slider value
-  const sliderValue = settings.duration === "infinite" ? 0 : ((settings.duration as number) - 2) / 8 * 100;
-  const durationDisplay = settings.duration === "infinite" ? "Until dismissed" : `${Math.round(settings.duration as number)}s`;
+  const sliderValue =
+    settings.duration === "infinite"
+      ? 0
+      : (((settings.duration as number) - 2000) / 8000) * 100;
+  const durationDisplay =
+    settings.duration === "infinite"
+      ? "Until dismissed"
+      : `${Math.round((settings.duration as number) / 1000)}s`;
 
   return (
     <div className="space-y-6">
@@ -102,7 +109,7 @@ export function NotificationSettings() {
         <p className="text-xs text-muted-foreground">
           {settings.duration === "infinite"
             ? "Notifications will stay until manually dismissed"
-            : `Notifications auto-hide after ${settings.duration} seconds`}
+            : `Notifications auto-hide after ${Math.round((settings.duration as number) / 1000)} seconds`}
         </p>
       </div>
 

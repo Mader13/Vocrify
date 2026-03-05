@@ -12,7 +12,7 @@ import type {
   TranscriptionTask,
 } from "@/types";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { useNotificationStore as useUINotificationStore } from "@/components/ui/notifications";
+import { showNotificationWithSettings } from "./notification-settings";
 
 // ============================================================================
 // Types
@@ -173,12 +173,11 @@ export class NotificationEmitter {
 
   private onModelDownloadComplete(modelName: string): void {
     logger.modelInfo("onModelDownloadComplete called", { modelName });
-    const uiStore = useUINotificationStore.getState();
-
-    uiStore.show({
+    showNotificationWithSettings({
       type: "success",
       title: "Model Download Complete",
       message: `Model "${modelName}" has been successfully downloaded and is ready to use.`,
+      category: "download",
       duration: 5000,
     });
 
@@ -186,12 +185,15 @@ export class NotificationEmitter {
   }
 
   private onModelDownloadError(modelName: string, error: string): void {
-    const uiStore = useUINotificationStore.getState();
+    if (!this.config.enableErrorNotifications) {
+      return;
+    }
 
-    uiStore.show({
+    showNotificationWithSettings({
       type: "error",
       title: "Model Download Failed",
       message: `Failed to download model "${modelName}": ${error}`,
+      category: "error",
       duration: 8000,
     });
 
@@ -218,32 +220,37 @@ export class NotificationEmitter {
   }
 
   private onFFmpegStatus(status: { status: string; message: string }): void {
-    const uiStore = useUINotificationStore.getState();
-
     switch (status.status) {
       case "completed":
-        uiStore.show({
+        showNotificationWithSettings({
           type: "success",
           title: "FFmpeg Installed",
           message: "FFmpeg has been successfully downloaded and installed.",
+          category: "info",
           duration: 5000,
         });
         break;
 
       case "failed":
-        uiStore.show({
+        if (!this.config.enableErrorNotifications) {
+          return;
+        }
+
+        showNotificationWithSettings({
           type: "error",
           title: "FFmpeg Installation Failed",
           message: status.message || "Failed to download or install FFmpeg.",
+          category: "error",
           duration: 8000,
         });
         break;
 
       case "extracting":
-        uiStore.show({
+        showNotificationWithSettings({
           type: "info",
           title: "Installing FFmpeg",
           message: "Extracting FFmpeg binaries...",
+          category: "info",
           duration: 3000,
         });
         break;
@@ -261,16 +268,15 @@ export class NotificationEmitter {
   }
 
   private onTranscriptionComplete(taskId: string, result: { segments: unknown[] }): void {
-    const uiStore = useUINotificationStore.getState();
-
     const task = this.getTaskById(taskId);
     const fileName = task?.fileName ?? "Unknown file";
     const segmentCount = result.segments?.length ?? 0;
 
-    uiStore.show({
+    showNotificationWithSettings({
       type: "success",
       title: "Transcription Complete",
       message: `Successfully transcribed "${fileName}" with ${segmentCount} segments.`,
+      category: "transcription",
       duration: 6000,
     });
 
@@ -278,7 +284,9 @@ export class NotificationEmitter {
   }
 
   private onTranscriptionError(taskId: string, error: string): void {
-    const uiStore = useUINotificationStore.getState();
+    if (!this.config.enableErrorNotifications) {
+      return;
+    }
 
     const task = this.getTaskById(taskId);
     if (task?.status === "completed" || task?.status === "cancelled") {
@@ -292,10 +300,11 @@ export class NotificationEmitter {
 
     const fileName = task?.fileName ?? "Unknown file";
 
-    uiStore.show({
+    showNotificationWithSettings({
       type: "error",
       title: "Transcription Failed",
       message: `Failed to transcribe "${fileName}": ${error}`,
+      category: "error",
       duration: 10000,
     });
 

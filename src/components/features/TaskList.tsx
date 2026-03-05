@@ -339,7 +339,7 @@ function TaskItem({ task, compact, onHoverStart, onHoverEnd, onRequestDelete }: 
 
                 {canArchiveTask(task) && (
                   <div className="flex items-center gap-1">
-                    <ArchiveButton task={task} iconOnly />
+                    <ArchiveButton task={task} iconOnly variant="action" title={t("taskList.archiveTask")} />
                     <Button
                       variant="ghost"
                       size="icon"

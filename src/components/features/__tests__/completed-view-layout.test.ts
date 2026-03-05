@@ -34,23 +34,27 @@ describe("normalizeVideoAspectRatio", () => {
 
 describe("getCompletedViewLayoutMode", () => {
   it("uses stacked mode for invalid widths", () => {
-    expect(getCompletedViewLayoutMode(0)).toBe("stacked");
-    expect(getCompletedViewLayoutMode(-200)).toBe("stacked");
-    expect(getCompletedViewLayoutMode(Number.NaN)).toBe("stacked");
+    expect(getCompletedViewLayoutMode(0, 600)).toBe("stacked");
+    expect(getCompletedViewLayoutMode(-200, 600)).toBe("stacked");
+    expect(getCompletedViewLayoutMode(Number.NaN, 600)).toBe("stacked");
   });
 
   it("uses stacked mode below split threshold", () => {
-    expect(getCompletedViewLayoutMode(SPLIT_LAYOUT_MIN_WIDTH - 1)).toBe("stacked");
+    expect(getCompletedViewLayoutMode(SPLIT_LAYOUT_MIN_WIDTH - 1, 600)).toBe("stacked");
   });
 
   it("uses split mode on and above threshold", () => {
-    expect(getCompletedViewLayoutMode(SPLIT_LAYOUT_MIN_WIDTH, { sidebarCollapsed: true })).toBe("split");
-    expect(getCompletedViewLayoutMode(SPLIT_LAYOUT_MIN_WIDTH + 240, { sidebarCollapsed: true })).toBe("split");
+    expect(getCompletedViewLayoutMode(SPLIT_LAYOUT_MIN_WIDTH, 600, { sidebarCollapsed: true })).toBe("split");
+    expect(getCompletedViewLayoutMode(SPLIT_LAYOUT_MIN_WIDTH + 240, 600, { sidebarCollapsed: true })).toBe("split");
   });
 
   it("requires wider container when sidebar is expanded", () => {
     const expandedThreshold = SPLIT_LAYOUT_MIN_WIDTH + SPLIT_LAYOUT_SIDEBAR_EXPANDED_OFFSET;
-    expect(getCompletedViewLayoutMode(expandedThreshold - 1, { sidebarCollapsed: false })).toBe("stacked");
-    expect(getCompletedViewLayoutMode(expandedThreshold, { sidebarCollapsed: false })).toBe("split");
+    expect(getCompletedViewLayoutMode(expandedThreshold - 1, 600, { sidebarCollapsed: false })).toBe("stacked");
+    expect(getCompletedViewLayoutMode(expandedThreshold, 600, { sidebarCollapsed: false })).toBe("split");
+  });
+
+  it("uses stacked mode when height is below minimum", () => {
+    expect(getCompletedViewLayoutMode(SPLIT_LAYOUT_MIN_WIDTH + 200, 400, { sidebarCollapsed: true })).toBe("stacked");
   });
 });
