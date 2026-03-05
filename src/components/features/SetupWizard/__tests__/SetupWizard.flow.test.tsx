@@ -10,6 +10,11 @@ vi.mock("@/services/tauri", async (importOriginal) => {
   };
 });
 
+vi.mock("@/services/storage", () => ({
+  getManagedCopyStorageDirectory: vi.fn(async () => ({ success: true, data: "C:/storage" })),
+  setManagedCopyStorageDirectory: vi.fn(async () => ({ success: true, data: "C:/storage" })),
+}));
+
 import { SetupWizard } from "../SetupWizard";
 import { useSetupStore } from "@/stores/setupStore";
 
@@ -73,14 +78,21 @@ describe("SetupWizard flow", () => {
 
     // Language step
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /Transcription Storage/i })).toBeInTheDocument();
+    });
+
+    // Storage step
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
     await waitFor(() => {
       expect(screen.getAllByRole("heading", { name: "FFmpeg" })[0]).toBeInTheDocument();
     });
 
     // FFmpeg step
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
-    
+
     await waitFor(() => {
       expect(screen.getAllByRole("heading", { name: "Devices" })[0]).toBeInTheDocument();
     });

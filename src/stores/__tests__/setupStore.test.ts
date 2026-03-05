@@ -157,13 +157,13 @@ describe("setupStore", () => {
   it("nextStep advances to next step in order", () => {
     useSetupStore.getState().goToStep("language");
     useSetupStore.getState().nextStep();
-    expect(useSetupStore.getState().currentStep).toBe("ffmpeg");
+    expect(useSetupStore.getState().currentStep).toBe("storage");
   });
 
-  it("prevStep goes back to previous step", () => {
+  it("prevStep moves one step back in the sequence", () => {
     useSetupStore.getState().goToStep("ffmpeg");
     useSetupStore.getState().prevStep();
-    expect(useSetupStore.getState().currentStep).toBe("language");
+    expect(useSetupStore.getState().currentStep).toBe("storage");
   });
 
   it("completeSetup marks store complete when runtime is ready", async () => {
