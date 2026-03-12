@@ -1,5 +1,6 @@
-import { useEffect, useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getFilesMetadata } from "@/services/tauri";
 import { useUIStore } from "@/stores";
 import { logger } from "@/lib/logger";
 import { isMediaFile } from "@/lib/utils";
@@ -16,16 +17,59 @@ interface UseDropZoneOptions {
   onFilesDropped: (files: SelectedFile[]) => void;
 }
 
+function mapDroppedPaths(paths: string[]): SelectedFile[] {
+  return paths.map((path) => ({
+    path,
+    name: path.split(/[/\\]/).pop() || path,
+    size: 0,
+  }));
+}
+
+async function hydrateDroppedFiles(paths: string[]): Promise<SelectedFile[]> {
+  const fallbackFiles = mapDroppedPaths(paths);
+  const metadataResult = await getFilesMetadata(paths);
+
+  if (!metadataResult.success || !metadataResult.data) {
+    logger.uploadWarn("[Drag] Failed to read dropped file metadata", {
+      error: metadataResult.error,
+      paths,
+    });
+    return fallbackFiles;
+  }
+
+  return metadataResult.data
+    .filter((file) => file.exists)
+    .map((file) => ({ path: file.path, name: file.name, size: file.size }));
+}
+
 export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions) {
   const isDraggingGlobal = useUIStore((s) => s.isDragging);
   const setDraggingGlobal = useUIStore((s) => s.setDragging);
   const { validateModelSelection } = useModelValidation();
   const isDropEnabled = currentView === "transcription" || currentView === "archive";
+  const currentViewRef = useRef(currentView);
+  const onFilesDroppedRef = useRef(onFilesDropped);
+  const validateModelSelectionRef = useRef(validateModelSelection);
+
+  useEffect(() => {
+    currentViewRef.current = currentView;
+  }, [currentView]);
+
+  useEffect(() => {
+    onFilesDroppedRef.current = onFilesDropped;
+  }, [onFilesDropped]);
+
+  useEffect(() => {
+    validateModelSelectionRef.current = validateModelSelection;
+  }, [validateModelSelection]);
 
   const processFiles = useCallback(
     (files: SelectedFile[], source: "document" | "tauri") => {
-      if (!isDropEnabled) {
-        logger.uploadDebug("[Drag] Drop ignored - drop is disabled for current view", { currentView, source });
+      const activeView = currentViewRef.current;
+      const dropEnabled = activeView === "transcription" || activeView === "archive";
+
+      if (!dropEnabled) {
+        logger.uploadDebug("[Drag] Drop ignored - drop is disabled for current view", { currentView: activeView, source });
         return;
       }
 
@@ -36,7 +80,7 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
         return;
       }
 
-      if (!validateModelSelection()) {
+      if (!validateModelSelectionRef.current()) {
         return;
       }
 
@@ -46,9 +90,9 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
         files: validFiles.map((f) => f.name),
       });
 
-      onFilesDropped(validFiles);
+      onFilesDroppedRef.current(validFiles);
     },
-    [isDropEnabled, currentView, validateModelSelection, onFilesDropped],
+    [],
   );
 
   // Tauri native - only source for handling actual file drops
@@ -56,12 +100,13 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
   useEffect(() => {
     if (!isDropEnabled) return;
 
-    let unlistenNativeDrop: (() => void) | undefined;
+    let isDisposed = false;
+    let unlistenNativeDrop: (() => void) | null = null;
 
     const setupNativeDrop = async () => {
       try {
         const window = getCurrentWindow();
-        unlistenNativeDrop = await window.onDragDropEvent((event) => {
+        const unlisten = await window.onDragDropEvent((event) => {
           if (event.payload.type === "enter" || event.payload.type === "over") {
             setDraggingGlobal(true);
             return;
@@ -74,19 +119,22 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
 
           if (event.payload.type === "drop") {
             setDraggingGlobal(false);
+            void hydrateDroppedFiles(event.payload.paths).then((droppedFiles) => {
+              if (isDisposed) {
+                return;
+              }
 
-            const droppedFiles: SelectedFile[] = event.payload.paths.map((path) => {
-              const fileName = path.split(/[/\\]/).pop() || path;
-              return {
-                path,
-                name: fileName,
-                size: 0,
-              };
+              processFiles(droppedFiles, "tauri");
             });
-
-            processFiles(droppedFiles, "tauri");
           }
         });
+
+        if (isDisposed) {
+          unlisten();
+          return;
+        }
+
+        unlistenNativeDrop = unlisten;
 
         logger.uploadDebug("[Drag] Native Tauri drop listener attached");
       } catch (error) {
@@ -94,12 +142,11 @@ export function useDropZone({ currentView, onFilesDropped }: UseDropZoneOptions)
       }
     };
 
-    setupNativeDrop();
+    void setupNativeDrop();
 
     return () => {
-      if (unlistenNativeDrop) {
-        unlistenNativeDrop();
-      }
+      isDisposed = true;
+      unlistenNativeDrop?.();
     };
   }, [isDropEnabled, processFiles, setDraggingGlobal]);
 

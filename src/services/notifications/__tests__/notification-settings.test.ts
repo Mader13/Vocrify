@@ -19,7 +19,7 @@ function resetSettingsStore() {
   useNotificationSettingsStore.setState({
     settings: {
       enabled: true,
-      position: "top-right",
+    position: "bottom-right",
       duration: 4000,
       soundEnabled: false,
       desktopNotificationsEnabled: false,

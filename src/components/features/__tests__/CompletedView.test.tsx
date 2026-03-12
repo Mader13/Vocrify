@@ -138,6 +138,21 @@ describe("CompletedView", () => {
     expect(player).toHaveAttribute("data-show-controls", "true");
   });
 
+  it("keeps media dock visible for archived tasks without playable media", () => {
+    const task = createTask({
+      archived: true,
+      archiveMode: "text_only",
+      audioPath: undefined,
+      managedCopyPath: "C:/managed/video.mp4",
+      managedCopyStatus: "done",
+    });
+
+    render(<CompletedView task={task} />);
+
+    expect(screen.getByText("Media Dock")).toBeInTheDocument();
+    expect(screen.getByTestId("video-player")).toBeInTheDocument();
+  });
+
   it("allows inline editing for transcription title", () => {
     const task = createTask();
     act(() => {

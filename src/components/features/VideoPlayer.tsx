@@ -5,7 +5,10 @@ import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 
 import type WaveSurfer from "wavesurfer.js";
 import type RegionsPlugin from "wavesurfer.js/dist/plugins/regions.js";
 import { Loader2, Play, Pause, Maximize, Volume2, VolumeX, FastForward } from "lucide-react";
-import { cn, isVideoFile } from "@/lib/utils";
+import { useI18n } from "@/hooks";
+import { logger } from "@/lib/logger";
+import { resolveTaskMediaSource } from "@/lib/task-media-source";
+import { cn } from "@/lib/utils";
 import { getThemeColors, cacheWaveformPeaks, getCachedWaveformPeaks, formatTime } from "@/lib/utils";
 import { WaveformControls } from "@/components/features/WaveformControls";
 import {
@@ -53,6 +56,29 @@ type SpeakerRegion = {
 };
 
 type PlayerControlsMode = "regular" | "compact" | "micro";
+type MediaUrlMode = "asset" | "blob";
+
+function getMediaMimeType(filePath: string, mediaKind: "video" | "audio" | "none"): string {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+
+  if (mediaKind === "video") {
+    if (extension === "webm") return "video/webm";
+    if (extension === "mov") return "video/quicktime";
+    if (extension === "avi") return "video/x-msvideo";
+    if (extension === "mkv") return "video/x-matroska";
+    return "video/mp4";
+  }
+
+  if (mediaKind === "audio") {
+    if (extension === "wav") return "audio/wav";
+    if (extension === "ogg") return "audio/ogg";
+    if (extension === "flac") return "audio/flac";
+    if (extension === "m4a" || extension === "aac") return "audio/mp4";
+    return "audio/mpeg";
+  }
+
+  return "application/octet-stream";
+}
 
 /**
  * Merge adjacent regions of the same speaker if the gap is tiny.
@@ -108,20 +134,25 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   showControls = true,
   className,
 }, forwardedRef) {
-  const readyManagedCopyPath = React.useMemo(() => {
-    if (task.managedCopyStatus === "done" && task.managedCopyPath) {
-      return task.managedCopyPath;
-    }
-    return undefined;
-  }, [task.managedCopyPath, task.managedCopyStatus]);
+  const { t } = useI18n();
+  const mediaSource = React.useMemo(() => resolveTaskMediaSource(task), [task]);
+  const hasMediaSource = mediaSource.hasPlayableMedia;
+  const mediaPath = mediaSource.path ?? "";
+  const assetUrl = React.useMemo(() => {
+    if (!mediaPath) return "";
+    return getAssetUrl(mediaPath);
+  }, [mediaPath]);
 
   const internalVideoRef = useRef<HTMLVideoElement>(null);
+  const internalAudioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const regionsRef = useRef<RegionsPlugin | null>(null);
   const isWaveformReadyRef = useRef(false);
   const [isWaveformReady, setIsWaveformReady] = React.useState(false);
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [mediaUrl, setMediaUrl] = React.useState(assetUrl);
+  const [mediaUrlMode, setMediaUrlMode] = React.useState<MediaUrlMode>("asset");
   const [isWaveformHovered, setIsWaveformHovered] = React.useState(false);
   const [hoverPreviewTime, setHoverPreviewTime] = React.useState<number | null>(null);
   const [waveformWidth, setWaveformWidth] = React.useState(0);
@@ -131,6 +162,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const lastReportedTimeRef = useRef(-1);
+  const blobUrlRef = useRef<string | null>(null);
 
   const toggleFullscreen = useCallback(() => {
     if (!videoContainerRef.current) return;
@@ -143,19 +175,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     }
   }, []);
 
-  // Check if video element should be shown (needed for controller)
-  // Show video if: not archived OR archived with keep_all mode (has video file)
-  const showVideoElement = React.useMemo(() => {
-    if (readyManagedCopyPath) {
-      return isVideoFile(readyManagedCopyPath);
-    }
-
-    if (!task.archived) {
-      return !!task.filePath && task.filePath.length > 0;
-    }
-    // For archived tasks, show video only if keep_all mode (filePath contains archived video)
-    return task.archiveMode === "keep_all" && !!task.filePath && task.filePath.length > 0;
-  }, [readyManagedCopyPath, task.filePath, task.archived, task.archiveMode]);
+  const showVideoElement = mediaSource.mediaKind === "video";
   // Playback controller - Single Source of Truth for playback
   // Replaces usePlaybackSync to prevent bidirectional seek loops
   const {
@@ -288,6 +308,63 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     },
   }), [controllerSeekTo]);
 
+  const revokeBlobUrl = useCallback(() => {
+    if (!blobUrlRef.current) {
+      return;
+    }
+
+    if (typeof URL.revokeObjectURL === "function") {
+      URL.revokeObjectURL(blobUrlRef.current);
+    }
+    blobUrlRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    revokeBlobUrl();
+    setMediaUrl(assetUrl);
+    setMediaUrlMode("asset");
+  }, [assetUrl, revokeBlobUrl]);
+
+  const loadBlobFallback = useCallback(async () => {
+    if (!mediaPath || mediaUrlMode === "blob") {
+      return false;
+    }
+
+    const { readFileAsArrayBuffer } = await import("@/services/tauri");
+    const result = await readFileAsArrayBuffer(mediaPath);
+    if (!result.success || !result.data) {
+      logger.warn("Failed to create blob fallback for media", {
+        taskId: task.id,
+        mediaPath,
+        error: result.error,
+      });
+      return false;
+    }
+
+    revokeBlobUrl();
+    const blob = new Blob([result.data], {
+      type: getMediaMimeType(mediaPath, mediaSource.mediaKind),
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    blobUrlRef.current = objectUrl;
+    setMediaUrl(objectUrl);
+    setMediaUrlMode("blob");
+    logger.warn("Switched media player to blob fallback", {
+      taskId: task.id,
+      mediaKind: mediaSource.mediaKind,
+      mediaPath,
+    });
+    return true;
+  }, [mediaPath, mediaSource.mediaKind, mediaUrlMode, revokeBlobUrl, task.id]);
+
+  useEffect(() => {
+    if (!task.archived || mediaSource.mediaKind !== "audio" || mediaUrlMode === "blob") {
+      return;
+    }
+
+    void loadBlobFallback();
+  }, [loadBlobFallback, mediaSource.mediaKind, mediaUrlMode, task.archived]);
+
   useEffect(() => {
     return () => {
       const videoElement = internalVideoRef.current;
@@ -302,6 +379,23 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
 
         try {
           videoElement.load();
+        } catch {
+          // noop
+        }
+      }
+
+      const audioElement = internalAudioRef.current;
+      if (audioElement) {
+        try {
+          audioElement.pause();
+        } catch {
+          // noop
+        }
+
+        audioElement.removeAttribute("src");
+
+        try {
+          audioElement.load();
         } catch {
           // noop
         }
@@ -326,34 +420,41 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
 
       regionsRef.current = null;
       isWaveformReadyRef.current = false;
+      revokeBlobUrl();
     };
-  }, []);
+  }, [revokeBlobUrl]);
 
-  // Convert file path to Tauri asset URL for security
-  // Use audioPath if task is archived and has audioPath (delete_video mode)
-  // Use filePath if task is archived with keep_all mode
-  // Otherwise use original file path
-  const mediaPath = React.useMemo(() => {
-    if (readyManagedCopyPath) {
-      return readyManagedCopyPath;
+  useEffect(() => {
+    if (!hasMediaSource) {
+      setIsGenerating(false);
+      setIsWaveformReady(false);
+      isWaveformReadyRef.current = false;
+    }
+  }, [hasMediaSource, mediaPath]);
+
+  useEffect(() => {
+    if (task.archived && !hasMediaSource) {
+      logger.transcriptionWarn("Archived task has no playable media source", {
+        taskId: task.id,
+        archiveMode: task.archiveMode,
+        mediaOrigin: mediaSource.origin,
+      });
+      return;
     }
 
-    // If task is archived with keep_all mode, use archived filePath
-    if (task.archived && task.archiveMode === "keep_all" && task.filePath) {
-      return task.filePath;
+    if (!hasMediaSource) {
+      return;
     }
-    // If task is archived with delete_video mode, use audioPath
-    if (task.archived && task.audioPath) {
-      return task.audioPath;
-    }
-    // Otherwise use the original file path
-    return task.filePath || "";
-  }, [readyManagedCopyPath, task.filePath, task.audioPath, task.archived, task.archiveMode]);
 
-  const assetUrl = React.useMemo(() => {
-    if (!mediaPath) return "";
-    return getAssetUrl(mediaPath);
-  }, [mediaPath]);
+    logger.transcriptionDebug("Resolved player media source", {
+      taskId: task.id,
+      archiveMode: task.archiveMode,
+      mediaKind: mediaSource.mediaKind,
+      mediaOrigin: mediaSource.origin,
+      mediaPath,
+      mediaUrlMode,
+    });
+  }, [hasMediaSource, mediaPath, mediaSource.mediaKind, mediaSource.origin, mediaUrlMode, task.archiveMode, task.archived, task.id]);
 
   useEffect(() => {
     if (!showVideoElement) {
@@ -363,7 +464,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     const videoElement = internalVideoRef.current;
     if (!videoElement) return;
     videoElement.muted = false;
-  }, [assetUrl, showVideoElement]);
+  }, [mediaUrl, showVideoElement]);
 
   /**
    * Generate regions based on color mode and speaker diarization data
@@ -481,7 +582,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     let isUnmounted = false;
 
     const video = internalVideoRef.current;
+    const audio = internalAudioRef.current;
     const container = containerRef.current;
+    const linkedMediaElement = showVideoElement ? video : audio;
 
     // Cleanup previous instance
     if (wavesurferRef.current) {
@@ -510,8 +613,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       barRadius: 2,
       minPxPerSec: 0.5,
       // Use MediaElement backend if <video> exists to stream without RAM loading.
-      backend: video ? 'MediaElement' : 'WebAudio',
-      media: video || undefined,
+      backend: linkedMediaElement ? "MediaElement" : "WebAudio",
+      media: linkedMediaElement || undefined,
       dragToSeek: { debounceTime: 0 },
     };
 
@@ -548,8 +651,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         }
 
         // Set URL if there is no linked video element
-        if (!video) {
-          wsOptions.url = assetUrl;
+        if (!linkedMediaElement) {
+          wsOptions.url = mediaUrl;
         }
 
         ws = WaveSurferLib.create(wsOptions);
@@ -577,7 +680,11 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         // Event: Waveform error
         ws.on("error", (error: Error) => {
           console.error("[VideoPlayer DEBUG] WaveSurfer error event:", error);
-          setIsGenerating(false);
+          void loadBlobFallback().then((loaded) => {
+            if (!loaded) {
+              setIsGenerating(false);
+            }
+          });
         });
 
         // REMOVED: syncSeekPosition function - no longer needed
@@ -623,7 +730,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       isWaveformReadyRef.current = false;
       ws?.destroy();
     };
-  }, [generateRegions, mediaPath, shouldInitializeWaveform, showVideoElement, controllerSeekTo]);
+  }, [controllerSeekTo, generateRegions, loadBlobFallback, mediaPath, mediaUrl, shouldInitializeWaveform, showVideoElement]);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -729,8 +836,39 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     ? `${formatTime(currentTime)} / ${formatTime(duration)}`
     : formatTime(currentTime);
 
+  if (!hasMediaSource) {
+    return (
+      <div className={cn("flex flex-col gap-3", className)}>
+        <div className="flex min-h-[180px] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/15 px-6 text-center">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">{t("completed.mediaUnavailable")}</p>
+            <p className="text-xs text-muted-foreground">{t("completed.mediaUnavailableDesc")}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex flex-col gap-3", className)}>
+      {!showVideoElement && (
+        <audio
+          ref={internalAudioRef}
+          src={mediaUrl}
+          preload="auto"
+          aria-hidden="true"
+          className="hidden"
+          onError={() => {
+            logger.warn("Audio element failed to load media source", {
+              taskId: task.id,
+              mediaPath,
+              mediaUrlMode,
+            });
+            void loadBlobFallback();
+          }}
+        />
+      )}
+
       {/* Video Player - always in DOM when task has video so playback is not interrupted.
           Hidden via CSS when in transcript-focus mode; the <video> element keeps playing. */}
       {showVideoElement && (
@@ -749,10 +887,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         >
           <video
             ref={internalVideoRef}
-            src={assetUrl}
+            src={mediaUrl}
             controls={false}
             className="h-full w-full object-contain cursor-pointer"
             onClick={controllerTogglePlayPause}
+            onError={() => {
+              logger.warn("Video element failed to load media source", {
+                taskId: task.id,
+                mediaPath,
+                mediaUrlMode,
+              });
+              void loadBlobFallback();
+            }}
           />
           
           {/* Custom Floating Control Overlay */}
