@@ -239,6 +239,8 @@ const messages = {
       locate: "Locate",
       noSegments: "No transcription segments available for this task.",
       showWaveform: "Show waveform",
+      mediaUnavailable: "Media preview unavailable",
+      mediaUnavailableDesc: "This archived item no longer has playable audio or video.",
     },
     processing: {
       preparing: "Preparing",
@@ -779,6 +781,8 @@ const messages = {
       locate: "Найти",
       noSegments: "Для этой задачи нет доступных сегментов транскрипции.",
       showWaveform: "Показать волновую форму",
+      mediaUnavailable: "Предпросмотр медиа недоступен",
+      mediaUnavailableDesc: "Для этой архивной записи больше нет доступного аудио или видео.",
     },
     processing: {
       preparing: "Подготовка",

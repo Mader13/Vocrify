@@ -703,12 +703,14 @@ export const useTasks = create<TasksState>()(
 
           logger.transcriptionInfo("Task archiving with mode", { taskId, mode, fileName: task.fileName });
 
-          let audioPath: string | undefined;
+          let archivedMediaPath: string | undefined;
+          let archiveDestPath: string | undefined;
           let archiveSize: number | undefined;
           let taskToPersist: TranscriptionTask | null = null;
           const sourcePath = task.managedCopyPath ?? task.filePath;
           const sourceWasManagedCopy = Boolean(task.managedCopyPath && sourcePath === task.managedCopyPath);
           const sourceExt = sourcePath?.split(".").pop()?.toLowerCase();
+          const requiresArchivedMedia = mode !== "text_only";
 
           const readArchiveSize = async (filePath: string): Promise<number> => {
             const sizeResult = await getFileSize(filePath);
@@ -725,83 +727,103 @@ export const useTasks = create<TasksState>()(
 
           try {
             const archiveDirResult = await getArchiveDir();
-            if (!archiveDirResult.success || !archiveDirResult.data) {
-              logger.warn("Failed to get archive directory", { taskId, error: archiveDirResult.error });
+            if (requiresArchivedMedia && !sourcePath) {
+              throw new Error("Archive source media is unavailable");
+            }
+
+            if (requiresArchivedMedia && (!archiveDirResult.success || !archiveDirResult.data)) {
+              throw new Error(archiveDirResult.error || "Failed to resolve archive directory");
             }
 
             switch (mode) {
               case "keep_all": {
-                if (sourcePath && archiveDirResult.success) {
-                  const ext = sourceExt || "";
+                if (archiveDirResult.data && sourcePath) {
+                  const ext = sourceExt || "bin";
                   const compression = compressionOverride ?? get().archiveSettings.compression;
-                  const destPath = `${archiveDirResult.data}/${task.id}.${ext}`;
+                  archiveDestPath = `${archiveDirResult.data}/${task.id}.${ext}`;
 
                   if (compression === "none") {
-                    const copyResult = await copyFile(sourcePath, destPath);
-                    if (copyResult.success && copyResult.data) {
-                      audioPath = copyResult.data;
-                      logger.transcriptionInfo("keep_all: copied media file to archive", {
-                        taskId,
-                        audioPath,
-                        ext,
-                        compression,
-                        source: sourceWasManagedCopy ? "managed_copy" : "original",
-                      });
-                      archiveSize = await readArchiveSize(copyResult.data);
-                    } else {
-                      logger.warn("keep_all: copy failed", { taskId, error: copyResult.error });
+                    const copyResult = await copyFile(sourcePath, archiveDestPath);
+                    if (!copyResult.success || !copyResult.data) {
+                      throw new Error(copyResult.error || "Failed to copy media to archive");
                     }
+
+                    archivedMediaPath = copyResult.data;
+                    logger.transcriptionInfo("keep_all: copied media file to archive", {
+                      taskId,
+                      archivedMediaPath,
+                      archiveDestPath,
+                      ext,
+                      compression,
+                      source: sourceWasManagedCopy ? "managed_copy" : "original",
+                    });
+                    archiveSize = await readArchiveSize(copyResult.data);
                   } else {
-                    const compressResult = await compressMedia(sourcePath, destPath, compression);
-                    if (compressResult.success && compressResult.data) {
-                      audioPath = compressResult.data;
-                      logger.transcriptionInfo("keep_all: compressed file to archive", { taskId, audioPath, ext, compression });
-                      archiveSize = await readArchiveSize(compressResult.data);
-                    } else {
-                      logger.warn("keep_all: compression failed", { taskId, error: compressResult.error });
+                    const compressResult = await compressMedia(sourcePath, archiveDestPath, compression);
+                    if (!compressResult.success || !compressResult.data) {
+                      throw new Error(compressResult.error || "Failed to compress media for archive");
                     }
+
+                    archivedMediaPath = compressResult.data;
+                    logger.transcriptionInfo("keep_all: compressed file to archive", {
+                      taskId,
+                      archivedMediaPath,
+                      archiveDestPath,
+                      ext,
+                      compression,
+                    });
+                    archiveSize = await readArchiveSize(compressResult.data);
                   }
                 }
                 break;
               }
 
               case "delete_video": {
-                if (sourcePath && archiveDirResult.success) {
+                if (archiveDirResult.data && sourcePath) {
                   const ext = sourceExt;
                   const isAudioFile = ext && ["mp3", "wav", "m4a", "flac", "ogg"].includes(ext);
+                  archiveDestPath = `${archiveDirResult.data}/${task.id}.mp3`;
 
                   if (isAudioFile && ext === "mp3") {
-                    const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
-                    const copyResult = await copyFile(sourcePath, mp3Path);
-                    if (copyResult.success && copyResult.data) {
-                      audioPath = copyResult.data;
-                      logger.transcriptionInfo("delete_video: copied managed MP3 to archive", {
-                        taskId,
-                        audioPath,
-                        source: sourceWasManagedCopy ? "managed_copy" : "original",
-                      });
-                      archiveSize = await readArchiveSize(copyResult.data);
-                    } else {
-                      logger.warn("delete_video: mp3 copy failed", { taskId, error: copyResult.error });
+                    const copyResult = await copyFile(sourcePath, archiveDestPath);
+                    if (!copyResult.success || !copyResult.data) {
+                      throw new Error(copyResult.error || "Failed to copy archived audio");
                     }
+
+                    archivedMediaPath = copyResult.data;
+                    logger.transcriptionInfo("delete_video: copied managed MP3 to archive", {
+                      taskId,
+                      archivedMediaPath,
+                      archiveDestPath,
+                      source: sourceWasManagedCopy ? "managed_copy" : "original",
+                    });
+                    archiveSize = await readArchiveSize(copyResult.data);
                   } else if (isAudioFile) {
-                    const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
-                    const convertResult = await convertToMp3(sourcePath, mp3Path);
-                    if (convertResult.success && convertResult.data) {
-                      audioPath = convertResult.data;
-                      logger.transcriptionInfo("delete_video: copied audio to archive", { taskId, audioPath });
-                      archiveSize = await readArchiveSize(convertResult.data);
+                    const convertResult = await convertToMp3(sourcePath, archiveDestPath);
+                    if (!convertResult.success || !convertResult.data) {
+                      throw new Error(convertResult.error || "Failed to convert archived audio");
                     }
+
+                    archivedMediaPath = convertResult.data;
+                    logger.transcriptionInfo("delete_video: converted audio file for archive", {
+                      taskId,
+                      archivedMediaPath,
+                      archiveDestPath,
+                    });
+                    archiveSize = await readArchiveSize(convertResult.data);
                   } else {
-                    const mp3Path = `${archiveDirResult.data}/${task.id}.mp3`;
-                    const convertResult = await convertToMp3(sourcePath, mp3Path);
-                    if (convertResult.success && convertResult.data) {
-                      audioPath = convertResult.data;
-                      logger.transcriptionInfo("delete_video: converted to MP3", { taskId, audioPath });
-                      archiveSize = await readArchiveSize(convertResult.data);
-                    } else {
-                      logger.warn("delete_video: conversion failed", { taskId, error: convertResult.error });
+                    const convertResult = await convertToMp3(sourcePath, archiveDestPath);
+                    if (!convertResult.success || !convertResult.data) {
+                      throw new Error(convertResult.error || "Failed to extract archived audio");
                     }
+
+                    archivedMediaPath = convertResult.data;
+                    logger.transcriptionInfo("delete_video: converted video to MP3", {
+                      taskId,
+                      archivedMediaPath,
+                      archiveDestPath,
+                    });
+                    archiveSize = await readArchiveSize(convertResult.data);
                   }
                 }
                 break;
@@ -814,7 +836,11 @@ export const useTasks = create<TasksState>()(
               }
             }
 
-            if (sourceWasManagedCopy && audioPath && task.managedCopyPath && task.managedCopyPath !== audioPath) {
+            if (requiresArchivedMedia && !archivedMediaPath) {
+              throw new Error("Archive completed without a playable media file");
+            }
+
+            if (sourceWasManagedCopy && task.managedCopyPath && (mode === "text_only" || task.managedCopyPath !== archivedMediaPath)) {
               const deleteManagedCopyResult = await deleteFile(task.managedCopyPath);
               if (!deleteManagedCopyResult.success) {
                 logger.warn("Archive task: failed to cleanup old managed copy after transfer", {
@@ -836,14 +862,14 @@ export const useTasks = create<TasksState>()(
                   archived: true,
                   archivedAt: new Date(),
                   archiveMode: mode,
-                  filePath: mode === "keep_all" && audioPath ? audioPath : undefined,
-                  audioPath: mode === "delete_video" ? audioPath : undefined,
-                  archiveSize: archiveSize ?? task.fileSize,
-                  managedCopyPath: sourceWasManagedCopy && audioPath ? audioPath : t.managedCopyPath,
+                  filePath: mode === "keep_all" ? archivedMediaPath : undefined,
+                  audioPath: mode === "delete_video" ? archivedMediaPath : undefined,
+                  archiveSize: archiveSize ?? (mode === "text_only" ? 0 : task.fileSize),
+                  managedCopyPath: mode === "text_only" ? undefined : sourceWasManagedCopy ? archivedMediaPath : t.managedCopyPath,
                   managedCopySize:
-                    sourceWasManagedCopy && archiveSize !== undefined ? archiveSize : t.managedCopySize,
-                  managedCopyStatus: sourceWasManagedCopy && audioPath ? "done" : t.managedCopyStatus,
-                  managedCopyError: sourceWasManagedCopy && audioPath ? undefined : t.managedCopyError,
+                    mode === "text_only" ? undefined : sourceWasManagedCopy && archiveSize !== undefined ? archiveSize : t.managedCopySize,
+                  managedCopyStatus: mode === "text_only" ? undefined : sourceWasManagedCopy ? "done" : t.managedCopyStatus,
+                  managedCopyError: mode === "text_only" ? undefined : sourceWasManagedCopy ? undefined : t.managedCopyError,
                 };
 
                 taskToPersist = updatedTask;
@@ -851,13 +877,26 @@ export const useTasks = create<TasksState>()(
               }),
             }));
 
-            logger.transcriptionInfo("Task archived successfully", { taskId, mode });
+            logger.transcriptionInfo("Task archived successfully", {
+              taskId,
+              mode,
+              archivedMediaPath,
+              archiveDestPath,
+              sourceWasManagedCopy,
+            });
 
             if (taskToPersist) {
               persistTaskSnapshot(taskToPersist);
             }
           } catch (error) {
-            logger.error("Archive task failed", { taskId, error: String(error) });
+            logger.error("Archive task failed", {
+              taskId,
+              mode,
+              sourcePath,
+              sourceWasManagedCopy,
+              archiveDestPath,
+              error: String(error),
+            });
             throw error;
           }
         },

@@ -33,7 +33,7 @@ export interface NotificationSettings {
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   enabled: true,
-  position: "top-right",
+  position: "bottom-right",
   duration: 4000,
   soundEnabled: false,
   desktopNotificationsEnabled: false,

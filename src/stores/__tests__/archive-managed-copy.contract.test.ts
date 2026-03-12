@@ -13,7 +13,9 @@ describe("archive managed copy contract", () => {
   it("transfers managed copy pointer to archived media path", () => {
     const source = readFileSync(join(process.cwd(), "src", "stores", "_store.ts"), "utf8");
 
-    expect(source).toContain("managedCopyPath: sourceWasManagedCopy && audioPath ? audioPath : t.managedCopyPath");
+    expect(source).toContain(
+      'managedCopyPath: mode === "text_only" ? undefined : sourceWasManagedCopy ? archivedMediaPath : t.managedCopyPath',
+    );
     expect(source).toContain("deleteFile(task.managedCopyPath)");
   });
 });

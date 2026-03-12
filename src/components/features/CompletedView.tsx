@@ -26,7 +26,8 @@ import { VideoPlayer, type VideoPlayerHandle } from "@/components/features/Video
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { applySpeakerNameMapToResult, collectSpeakerLabels } from "@/lib/speaker-names";
 import { sanitizeSegments } from "@/lib/segment-utils";
-import { cn, formatTime, isVideoFile } from "@/lib/utils";
+import { resolveTaskMediaSource } from "@/lib/task-media-source";
+import { cn, formatTime } from "@/lib/utils";
 import { useI18n } from "@/hooks";
 import { useTasks, useUIStore } from "@/stores";
 import type { TranscriptionTask, WaveformColorMode } from "@/types";
@@ -170,20 +171,8 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
   const hasSpeakerData =
     sanitizedSpeakerSegments.length > 0 || (mappedResult?.speakerTurns && mappedResult.speakerTurns.length > 0);
 
-  const readyManagedCopyPath =
-    task.managedCopyStatus === "done" && task.managedCopyPath
-      ? task.managedCopyPath
-      : undefined;
-
-  const mediaSourcePath = readyManagedCopyPath ?? (!task.archived
-    ? task.filePath
-    : task.archiveMode === "keep_all"
-      ? task.filePath
-      : task.archiveMode === "delete_video"
-        ? task.audioPath
-        : undefined);
-
-  const hasMediaSource = Boolean(mediaSourcePath);
+  const mediaSource = useMemo(() => resolveTaskMediaSource(task), [task]);
+  const hasMediaSource = mediaSource.hasPlayableMedia;
 
   const canUseSpeakerWaveform = hasSpeakerData && hasMediaSource;
 
@@ -382,12 +371,12 @@ export const CompletedView = React.memo(function CompletedView({ task }: Complet
 
   const actionButtonClass =
     "inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 px-2.5 text-xs font-medium text-foreground transition-colors motion-safe:duration-150 hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:h-9 sm:px-3";
-  const hasVideoSource = mediaSourcePath ? isVideoFile(mediaSourcePath) : false;
-  const canRenderVideoElement = Boolean(mediaSourcePath) && hasVideoSource;
-  const hasVisibleVideoSource = hasVideoSource && canRenderVideoElement;
+  const hasVideoSource = mediaSource.mediaKind === "video";
+  const canRenderVideoElement = hasMediaSource && hasVideoSource;
+  const hasVisibleVideoSource = canRenderVideoElement;
   const effectiveViewMode = hasVisibleVideoSource ? viewMode : "transcript-focus";
   const isVideoVisible = effectiveViewMode !== "transcript-focus";
-  const showMediaDock = hasMediaSource;
+  const showMediaDock = hasMediaSource || task.archived === true;
   const showMediaColumn = showMediaDock && effectiveViewMode === "balanced" && (layoutMode === "stacked" || layoutMode === "split");
   const shouldShowWaveformControls = !isVideoVisible || !canRenderVideoElement;
 
