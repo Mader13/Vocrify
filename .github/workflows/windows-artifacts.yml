@@ -68,6 +68,20 @@ jobs:
           restore-keys: |
             windows-cargo-vocrify-${{ inputs.tauri_target }}-
 
+      - name: Remove stale bundle outputs
+        shell: pwsh
+        run: |
+          $bundleDirs = @(
+            "src-tauri/target/${{ inputs.tauri_target }}/release/bundle",
+            "src-tauri/target/release/bundle"
+          )
+
+          foreach ($bundleDir in $bundleDirs) {
+            if (Test-Path $bundleDir) {
+              Remove-Item $bundleDir -Recurse -Force
+            }
+          }
+
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
@@ -88,8 +102,6 @@ jobs:
 
       - name: Build installer (NSIS)
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: --target ${{ inputs.tauri_target }}
 
@@ -102,7 +114,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ inputs.installer_artifact_name }}
-          path: src-tauri/target/${{ inputs.tauri_target }}/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/${{ inputs.tauri_target }}/release/bundle/nsis/*.exe
+            src-tauri/target/${{ inputs.tauri_target }}/release/bundle/msi/*.msi
           retention-days: 7
 
       - name: Upload portable artifact

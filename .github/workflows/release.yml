@@ -47,7 +47,16 @@ jobs:
         id: changelog
         run: |
           VERSION="${{ steps.version.outputs.VERSION }}"
-          NOTES=$(awk "/^## \[$VERSION\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md || echo "Release ${{ steps.release-tag.outputs.tag }}")
+          NOTES=$(
+            awk -v version="$VERSION" '
+              $0 ~ "^## \\[(v)?" version "\\]" { found=1; next }
+              /^## \[/ && found { exit }
+              found { print }
+            ' CHANGELOG.md
+          )
+          if [ -z "$NOTES" ]; then
+            NOTES="Release ${{ steps.release-tag.outputs.tag }}"
+          fi
           echo "NOTES<<EOF" >> "$GITHUB_OUTPUT"
           echo "$NOTES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
@@ -177,6 +186,7 @@ jobs:
           draft: true
           files: |
             artifacts/windows-installer/*.exe
+            artifacts/windows-installer/*.msi
             artifacts/windows-portable/*.zip
 
   publish-release:
